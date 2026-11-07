@@ -25,14 +25,13 @@ const taskIdx = args.indexOf('--task');
 const TASK_SPEC = taskIdx >= 0 ? args[taskIdx + 1] : null; // 例: "owner/repo issue#22"
 const assessIdx = args.indexOf('--assess');
 const ASSESS_SPEC = assessIdx >= 0 ? args[assessIdx + 1] : null; // 評価のみ実行
-const AUTO_ASSESS = config.autoAssess ?? false;
-const ASSESS_MAX_AGE_MS = (config.assessMaxAgeHours ?? 24) * 3600 * 1000;
-
 // ---------- config ----------
 
 const configPath = join(ROOT, 'config.json');
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
 
+const AUTO_ASSESS = config.autoAssess ?? false;
+const ASSESS_MAX_AGE_MS = (config.assessMaxAgeHours ?? 24) * 3600 * 1000;
 const POLL_MS = (config.pollIntervalSec ?? 120) * 1000;
 const MAX_CONCURRENT = config.maxConcurrent ?? 1;
 const STALE_MS = (config.staleRunningMinutes ?? 180) * 60 * 1000;

@@ -5,6 +5,7 @@ issues.json
 desired.json
 kill-requests.json
 steer-requests.json
+login.bat
 logs/
 node_modules/
 *.tmp

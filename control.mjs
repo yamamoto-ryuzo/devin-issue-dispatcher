@@ -261,28 +261,37 @@ const server = createServer(async (req, res) => {
         config = fresh;
         return json(200, { ok: true, applied });
       }
-      if (url.pathname === '/api/dispatch') {
-        // 個別課題を即時起動: body { "key": "owner/repo issue#N" }
+      if (url.pathname === '/api/dispatch' || url.pathname === '/api/assess') {
+        // 実行キュー登録: エンジンは Devin IDE 側エージェント（mcp-server.mjs 経由で受け取る）
+        const isAssess = url.pathname === '/api/assess';
         const { key } = JSON.parse((await readBody(req)) || '{}');
         const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
         if (!m) return json(400, { ok: false, error: 'bad key: ' + key });
-        if (!config.repos?.some((r) => r.github === m[1])) {
-          return json(400, { ok: false, error: 'repo not monitored: ' + m[1] });
+        const repo = config.repos?.find((r) => r.github === m[1]);
+        if (!repo) return json(400, { ok: false, error: 'repo not monitored: ' + m[1] });
+        const q = loadJson(join(ROOT, 'work-queue.json'), { items: [] });
+        if (q.items.some((i) => i.key === key && i.mode === (isAssess ? 'assess' : 'impl'))) {
+          return json(409, { ok: false, error: 'already queued: ' + key });
         }
-        if (manualRuns.has(key)) return json(409, { ok: false, error: 'already dispatched: ' + key });
-        const proc = spawn(process.execPath, ['dispatcher.mjs', '--task', key], {
-          cwd: ROOT, windowsHide: true, stdio: 'ignore',
+        const it = readIssueStore(ISSUES_PATH).issues?.[key] ?? {};
+        q.items.push({
+          key, mode: isAssess ? 'assess' : 'impl',
+          repo, type: m[2], number: +m[3],
+          title: it.title ?? '', url: it.url ?? '', body: it.body ?? '',
+          status: 'pending', queuedAt: new Date().toISOString(),
         });
-        manualRuns.set(key, proc.pid);
-        proc.on('close', () => manualRuns.delete(key));
-        proc.on('error', () => manualRuns.delete(key));
-        return json(200, { ok: true, pid: proc.pid });
+        writeFileSync(join(ROOT, 'work-queue.json'), JSON.stringify(q, null, 2));
+        return json(200, { ok: true, queued: key });
       }
       if (url.pathname === '/api/login') {
-        // 別コンソールウィンドウで devin.exe auth login を開く
-        // （ログインフローは対話キー入力が必要なためパネル内では実行できない）
-        spawn('powershell.exe', ['-NoProfile', '-Command',
-          `Start-Process -FilePath '${config.devinExe}' -ArgumentList 'auth','login'`],
+        // explorer.exe 経由で .bat を開く → ユーザーの対話セッションに
+        // コンソールウィンドウが出る（ログインフローは対話キー入力が必要）
+        const bat = join(ROOT, 'login.bat');
+        writeFileSync(bat,
+          `@echo off\r\ntitle devin auth login\r\n` +
+          `"${config.devinExe}" auth logout\r\n` +
+          `"${config.devinExe}" auth login\r\npause\r\n`);
+        spawn('explorer.exe', [bat],
           { detached: true, stdio: 'ignore', windowsHide: true }).unref();
         return json(200, { ok: true });
       }
@@ -308,24 +317,7 @@ const server = createServer(async (req, res) => {
         writeFileSync(p, JSON.stringify(cur));
         return json(200, { ok: true });
       }
-      if (url.pathname === '/api/assess') {
-        // 個別課題の評価のみ実行: body { "key": "owner/repo issue#N" }
-        const { key } = JSON.parse((await readBody(req)) || '{}');
-        const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
-        if (!m) return json(400, { ok: false, error: 'bad key: ' + key });
-        if (!config.repos?.some((r) => r.github === m[1])) {
-          return json(400, { ok: false, error: 'repo not monitored: ' + m[1] });
-        }
-        const akey = 'assess:' + key;
-        if (manualRuns.has(akey)) return json(409, { ok: false, error: 'already assessing: ' + key });
-        const proc = spawn(process.execPath, ['dispatcher.mjs', '--assess', key], {
-          cwd: ROOT, windowsHide: true, stdio: 'ignore',
-        });
-        manualRuns.set(akey, proc.pid);
-        proc.on('close', () => manualRuns.delete(key));
-        proc.on('error', () => manualRuns.delete(key));
-        return json(200, { ok: true, pid: proc.pid });
-      }
+      // （/api/dispatch・/api/assess は上のキュー登録ブロックに統合）
     } catch (e) {
       return json(500, { ok: false, error: e.message });
     }
