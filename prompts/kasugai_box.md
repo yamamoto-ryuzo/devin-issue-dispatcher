@@ -1,0 +1,1 @@
+- Rust(Axum) 製 Box 連携サイドカー。openapi.yaml が API 仕様の正本。変更時は同期する

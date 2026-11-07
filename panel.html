@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Devin Agent Dispatcher</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; max-width: 1000px; margin-inline: auto;
+         background: #f4f6f9; color: #1f2937;
+         font: 14px/1.6 "Segoe UI", "Yu Gothic UI", sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #6b7280; font-size: 12px; margin-bottom: 18px; }
+  .card { background: #fff; border: 1px solid #e3e7ee; border-radius: 10px;
+          padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px;
+           border-radius: 999px; font-weight: 600; font-size: 13px; }
+  .badge.on { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+  .badge.off { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  button { padding: 8px 18px; border-radius: 8px; border: 1px solid #d1d7e0;
+           background: #fff; color: #1f2937; font-size: 14px; cursor: pointer; }
+  button:hover { background: #f1f4f9; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+  .loginbtn { padding: 12px 26px; font-size: 15px; font-weight: 700; border-radius: 10px;
+              border: 1px solid #dc2626; background: #ef4444; color: #fff;
+              cursor: pointer; box-shadow: 0 2px 6px rgba(220,38,38,.25); }
+  .loginbtn.loggedin { background: #16a34a; border-color: #15803d;
+                       box-shadow: 0 2px 6px rgba(22,163,74,.25); }
+  .loginbtn:hover { filter: brightness(1.05); }
+  button.primary:hover { background: #1d4ed8; }
+  button.danger { background: #dc2626; border-color: #dc2626; color: #fff; }
+  button.danger:hover { background: #b91c1c; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 2px solid #e3e7ee;
+          margin-bottom: 0; padding: 0 8px; }
+  .tabs button { border: none; border-radius: 8px 8px 0 0; background: transparent;
+           color: #6b7280; font-size: 14px; padding: 8px 16px; position: relative; top: 2px; }
+  .tabs button:hover { color: #1f2937; background: #f1f4f9; }
+  .tabs button.active { color: #2563eb; font-weight: 600; background: #fff;
+           border: 1px solid #e3e7ee; border-bottom: 2px solid #fff; }
+  .tabpanel { display: none; }
+  .tabpanel.active { display: block; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eef1f5;
+           white-space: nowrap; }
+  th { color: #6b7280; font-weight: 500; }
+  .st-done { color: #16a34a; } .st-failed { color: #dc2626; } .st-running { color: #ca8a04; }
+  .st-needs-review { color: #7c3aed; } .st-rejected { color: #991b1b; }
+  .trig-auto { color: #7c3aed; } .trig-label { color: #2563eb; }
+  .jd { font-weight: 600; font-size: 11px; }
+  .jd-auto { color: #16a34a; } .jd-review { color: #b45309; } .jd-reject { color: #dc2626; }
+  pre { background: #f8fafc; border: 1px solid #e3e7ee; border-radius: 8px;
+        padding: 12px; font: 12px/1.5 Consolas, monospace; overflow: auto;
+        max-height: 400px; white-space: pre-wrap; word-break: break-all; margin: 0; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 20px; font-size: 13px; margin: 0; }
+  .kv dt { color: #6b7280; } .kv dd { margin: 0; font-family: Consolas, monospace; }
+  #toast { position: fixed; right: 20px; bottom: 20px; background: #1f2937; color: #fff;
+           border-radius: 8px; padding: 10px 16px; font-size: 13px;
+           opacity: 0; transition: opacity .2s; }
+  a { color: #2563eb; }
+  .h3 { margin: 0 0 10px; font-size: 14px; display: flex; justify-content: space-between;
+        align-items: center; }
+  .mini { padding: 2px 10px; font-size: 12px; }
+  .toggle { padding: 10px 22px; border-radius: 999px; font-size: 14px; font-weight: 700;
+            border: 2px solid; cursor: pointer; min-width: 220px; }
+  .toggle.on { background: #16a34a; border-color: #15803d; color: #fff;
+               box-shadow: 0 0 0 3px #bbf7d0; }
+  .toggle.on:hover { background: #15803d; }
+  .toggle.off { background: #f1f4f9; border-color: #d1d7e0; color: #6b7280; }
+  .toggle.off:hover { background: #e5eaf1; }
+  .subtabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 10px; }
+  .subtabs button { padding: 4px 12px; font-size: 12px; border-radius: 999px;
+                    border: 1px solid #d1d7e0; background: #fff; color: #4b5563; }
+  .subtabs button.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+  .subtabs .n { font-size: 11px; margin-left: 4px; opacity: .8; }
+  .repo-h { font-size: 13px; font-weight: 600; margin: 14px 0 2px;
+            display: flex; align-items: baseline; gap: 8px; }
+  .repo-h:first-of-type { margin-top: 4px; }
+  .cnt { font-size: 11px; font-weight: 600; padding: 0 8px; border-radius: 999px;
+         background: #eef2ff; color: #4338ca; }
+  .cnt.zero { background: #f1f4f9; color: #9ca3af; }
+  .repo-empty { color: #9ca3af; font-size: 12px; padding: 2px 8px 4px; }
+</style>
+</head>
+<body>
+<div style="display:flex;align-items:center;gap:14px">
+  <h1 style="margin-right:auto">Devin Agent Dispatcher</h1>
+  <span id="auth-status" style="font-size:12px;color:#6b7280"></span>
+  <button id="btn-login" class="loginbtn" onclick="doLogin()">Devinログイン</button>
+</div>
+<div class="sub">GitHub Issue/PR → devin -p 自動対応エージェントの管理パネル</div>
+
+<div class="card">
+  <div class="row">
+    <span id="badge" class="badge off"><span class="dot"></span>確認中…</span>
+    <button id="btnStart" class="primary" onclick="act('start')">起動</button>
+    <button id="btnStop" class="danger" onclick="act('stop')">停止</button>
+    <button id="btnOnce" onclick="act('once')">1サイクル実行</button>
+    <button onclick="act('reload')">設定再読込</button>
+    <span id="meta" style="color:#6b7280;font-size:12px"></span>
+    <span id="active" style="font-size:12px"></span>
+    <span style="margin-left:auto"></span>
+  </div>
+  <div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid #eef1f5">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <button id="btn-disc" class="toggle off" onclick="toggleFlag('autoDiscover')">…</button>
+      <span id="disc-desc" style="font-size:11px;color:#6b7280"></span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <button id="btn-assess" class="toggle off" onclick="toggleFlag('autoAssess')">…</button>
+      <span id="assess-desc" style="font-size:11px;color:#6b7280"></span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <button id="btn-auto" class="toggle off" onclick="toggleFlag('autoTrigger')">…</button>
+      <span id="auto-desc" style="font-size:11px;color:#6b7280"></span>
+    </div>
+  </div>
+</div>
+
+<div class="tabs" id="tabs">
+  <button data-tab="cands" class="active" onclick="showTab('cands')">対応候補</button>
+  <button data-tab="tasks" onclick="showTab('tasks')">処理履歴</button>
+  <button data-tab="cfg" onclick="showTab('cfg')">設定</button>
+  <button data-tab="log" onclick="showTab('log')">ログ</button>
+</div>
+
+<div class="card" style="border-top:none;border-radius:0 0 10px 10px">
+  <div id="tab-cands" class="tabpanel active">
+    <div class="h3"><span>対応候補 <span id="cands-mode" style="font-weight:400;font-size:12px"></span></span>
+      <span style="display:flex;align-items:center;gap:8px">
+        <span id="cands-meta" style="color:#9ca3af;font-size:11px"></span>
+        <select id="cand-int" onchange="setCandInt()" title="自動更新周期">
+          <option value="0">手動のみ</option>
+          <option value="30">30秒ごと</option>
+          <option value="60">1分ごと</option>
+          <option value="120">2分ごと</option>
+          <option value="300">5分ごと</option>
+          <option value="600">10分ごと</option>
+        </select>
+        <button class="mini" onclick="loadCandidates(true)">今すぐ取得</button>
+      </span></div>
+    <div class="subtabs" id="cand-tabs"></div>
+    <div id="cands" style="color:#6b7280">読み込み中…</div>
+  </div>
+
+  <div id="tab-tasks" class="tabpanel">
+    <div class="h3">処理履歴（state.json）</div>
+    <table>
+      <thead><tr><th>課題</th><th>状態</th><th>評価</th><th>開始</th><th>終了</th><th>exit</th><th></th></tr></thead>
+      <tbody id="tasks"></tbody>
+    </table>
+  </div>
+
+  <div id="tab-cfg" class="tabpanel">
+    <div class="h3">設定（config.json の有効値）</div>
+    <dl class="kv" id="cfg"></dl>
+    <div class="h3" style="margin-top:16px">更新タイミングの変更</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px;align-items:end">
+      <label>ポーリング周期 (秒)<br><input id="set-poll" type="number" min="10" style="width:80px"></label>
+      <label>候補キャッシュ有効 (秒)<br><input id="set-cache" type="number" min="0" style="width:80px"></label>
+      <label>新規候補の上限/回<br><input id="set-maxnew" type="number" min="1" style="width:70px"></label>
+      <label>同時起動数<br><input id="set-maxc" type="number" min="1" style="width:60px"></label>
+      <label>判定の鮮度 (時間)<br><input id="set-assess-age" type="number" min="1" style="width:60px"></label>
+      <label>autoTriggerSince<br><input id="set-since" type="text" placeholder="all / ISO時刻 / 空=初回起動" style="width:150px"></label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="mini primary" onclick="saveCfg()">保存</button>
+      <span style="color:#9ca3af;font-size:11px">※ config.json を直接書き換えます。permissionMode・repos は編集不可</span>
+    </div>
+  </div>
+
+  <div id="tab-log" class="tabpanel">
+    <div class="h3"><span id="log-title">dispatcher.log（末尾）</span>
+      <button class="mini" onclick="logKey=null;showTab('log')">dispatcher.log に戻す</button></div>
+    <pre id="log">…</pre>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// file:// で開いた場合は API を絶対指定に切替（サーバーは localhost + Origin:null を許可）
+const API = location.protocol === 'file:' ? 'http://127.0.0.1:8585' : '';
+const H = { 'X-Panel': '1', 'Content-Type': 'text/plain' };
+let status = null;
+
+function showTab(name) {
+  document.querySelectorAll('#tabs button').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tabpanel').forEach(p =>
+    p.classList.toggle('active', p.id === 'tab-' + name));
+  if (name === 'log') {
+    const pre = document.getElementById('log');
+    pre.scrollTop = pre.scrollHeight;
+  }
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.opacity = 1;
+  setTimeout(() => t.style.opacity = 0, 2500);
+}
+
+async function act(name) {
+  try {
+    const r = await fetch(API + '/api/' + name, { method: 'POST', headers: H });
+    const j = await r.json();
+    if (!j.ok) toast(name + ': ' + (j.error || 'failed'));
+    else toast(name + ': OK' + (j.pid ? ' (pid ' + j.pid + ')' : ''));
+  } catch (e) { toast(name + ': ' + e.message); }
+  refresh();
+}
+
+let cfgInit = false;
+const flags = { autoDiscover: false, autoAssess: false, autoTrigger: false };
+let logKey = null;
+function viewLog(key) { logKey = key; showTab('log'); }
+async function checkAuth() {
+  try {
+    const j = await (await fetch(API + '/api/auth')).json();
+    document.getElementById('auth-status').textContent =
+      j.loggedIn ? 'ログイン済み' : 'devin 未ログイン';
+    document.getElementById('auth-status').style.color = j.loggedIn ? '#15803d' : '#dc2626';
+    const lb = document.getElementById('btn-login');
+    lb.classList.toggle('loggedin', !!j.loggedIn);
+    lb.textContent = j.loggedIn ? 'ログイン済み' : 'Devinログイン';
+  } catch { /* noop */ }
+}
+async function doLogin() {
+  await fetch(API + '/api/login', { method: 'POST', headers: H });
+  toast('ログインウィンドウを開きました（ブラウザで認証後、自動で閉じます）');
+}
+checkAuth();
+let lastActive = [];
+async function killActive() {
+  for (const s of lastActive) {
+    const key = s.replace(/ \((判定|実装)\)/, '');
+    try {
+      await fetch(API + '/api/kill', { method: 'POST', headers: H, body: JSON.stringify({ key }) });
+    } catch (e) { /* noop */ }
+  }
+  toast('停止要求を送信しました');
+}
+const FLAG_UI = {
+  autoDiscover: {
+    btn: 'btn-disc', desc: 'disc-desc',
+    on: 'ISSUE取得 自動 ON', off: 'ISSUE取得 自動 OFF',
+    onDesc: '定期的に候補を自動検出し一覧を更新します',
+    offDesc: '候補の自動検出を停止中（「今すぐ取得」は使用可）',
+  },
+  autoAssess: {
+    btn: 'btn-assess', desc: 'assess-desc',
+    on: '判定 自動 ON', off: '判定 手動',
+    onDesc: '検出した候補を定期的に自動評価します（実装はしません）',
+    offDesc: '評価は手動のみ（各行の「評価」ボタン）',
+  },
+  autoTrigger: {
+    btn: 'btn-auto', desc: 'auto-desc',
+    on: '課題対応 自動 ON', off: '課題対応 自動 OFF',
+    onDesc: '検出した候補を順次 評価→実装 で自動起動します',
+    offDesc: '候補の自動起動は停止中（個別「対応」ボタンは使用可）',
+  },
+};
+function renderFlag(key) {
+  const u = FLAG_UI[key];
+  const on = flags[key];
+  const b = document.getElementById(u.btn);
+  b.className = 'toggle ' + (on ? 'on' : 'off');
+  b.textContent = on ? u.on : u.off;
+  document.getElementById(u.desc).textContent = on ? u.onDesc : u.offDesc;
+}
+
+async function toggleFlag(key) {
+  flags[key] = !flags[key];
+  renderFlag(key);
+  try {
+    const r = await fetch(API + '/api/config', {
+      method: 'POST', headers: H, body: JSON.stringify({ [key]: flags[key] }),
+    });
+    const j = await r.json();
+    toast(j.ok ? key + ' を ' + flags[key] + ' に変更しました' : '失敗: ' + (j.error || ''));
+  } catch (e) { flags[key] = !flags[key]; renderFlag(key); toast(key + ': ' + e.message); }
+  refresh();
+  loadCandidates(false);
+}
+
+function fillCfgForm() {
+  if (!status || cfgInit) return;
+  cfgInit = true;
+  const c = status.config;
+  document.getElementById('set-poll').value = c.pollIntervalSec;
+  document.getElementById('set-cache').value = c.candidateCacheSec ?? c.pollIntervalSec;
+  document.getElementById('set-maxnew').value = c.maxNewPerPoll;
+  document.getElementById('set-maxc').value = c.maxConcurrent;
+  document.getElementById('set-since').value = c.autoTriggerSince ?? '';
+  document.getElementById('set-assess-age').value = c.assessMaxAgeHours ?? 24;
+}
+
+async function saveCfg() {
+  const since = document.getElementById('set-since').value.trim();
+  const patch = {
+    pollIntervalSec: +document.getElementById('set-poll').value || undefined,
+    candidateCacheSec: +document.getElementById('set-cache').value,
+    maxNewPerPoll: +document.getElementById('set-maxnew').value || undefined,
+    maxConcurrent: +document.getElementById('set-maxc').value || undefined,
+    autoTriggerSince: since === '' ? null : since,
+    assessMaxAgeHours: +document.getElementById('set-assess-age').value || undefined,
+  };
+  try {
+    const r = await fetch(API + '/api/config', {
+      method: 'POST', headers: H, body: JSON.stringify(patch),
+    });
+    const j = await r.json();
+    toast(j.ok ? 'config.json を更新: ' + Object.keys(j.applied).join(', ') : '失敗: ' + (j.error || ''));
+  } catch (e) { toast('saveCfg: ' + e.message); }
+  cfgInit = false;
+  refresh();
+}
+
+async function assess(key) {
+  try {
+    const r = await fetch(API + '/api/assess', {
+      method: 'POST', headers: H, body: JSON.stringify({ key }),
+    });
+    const j = await r.json();
+    toast(j.ok ? '評価セッション起動: ' + key : '失敗: ' + (j.error || ''));
+  } catch (e) { toast('assess: ' + e.message); }
+}
+
+async function dispatch(key) {
+  try {
+    const r = await fetch(API + '/api/dispatch', {
+      method: 'POST', headers: H, body: JSON.stringify({ key }),
+    });
+    const j = await r.json();
+    toast(j.ok ? '起動しました: ' + key + ' (pid ' + j.pid + ')' : '失敗: ' + (j.error || ''));
+  } catch (e) { toast('dispatch: ' + e.message); }
+  setTimeout(loadCandidates, 1000);
+}
+
+async function refresh() {
+  try {
+    status = await (await fetch(API + '/api/status')).json();
+  } catch { return; }
+  const b = document.getElementById('badge');
+  const running = status.running;
+  b.className = 'badge ' + (running ? 'on' : 'off');
+  b.innerHTML = '<span class="dot"></span>' +
+    (running ? '稼働中 (' + (status.mode === 'once' ? '1サイクル' : '常駐') + ')' : '停止中');
+  document.getElementById('btnStart').disabled = running;
+  document.getElementById('btnStop').disabled = !running;
+  document.getElementById('btnOnce').disabled = running;
+  document.getElementById('meta').textContent = running
+    ? 'pid ' + status.pid + ' / 起動: ' + status.startedAt
+    : 'desired.enabled=' + status.desired.enabled;
+
+  const c = status.config;
+  // 実行中セッション: 手動 dispatch/評価(manualRuns) + state の running/inflight タスク
+  // (判定) = 評価セッション / (実装) = 実装セッション
+  const actSet = new Set();
+  for (const k of status.manualRuns || []) {
+    actSet.add(k.startsWith('assess:') ? k.slice(7) + ' (判定)' : k + ' (実装)');
+  }
+  for (const t of status.tasks || []) {
+    if (t.status === 'running') {
+      actSet.add(t.key + (t.phase === 'assess' ? ' (判定)' : ' (実装)'));
+    } else if (t.inflight === 'assess') {
+      actSet.add(t.key + ' (判定)');
+    }
+  }
+  lastActive = [...actSet];
+  document.getElementById('active').innerHTML = actSet.size
+    ? '<span style="color:#ca8a04">▶ 実行中: ' + [...actSet].map(s =>
+        '<a href="#" style="color:#ca8a04" onclick="event.preventDefault();viewLog(\'' +
+        esc(s.replace(/ \((判定|実装)\)/, '')) + '\')">' + esc(s) + '</a>').join(' , ') +
+      ' <button class="mini danger" onclick="killActive()">停止</button></span>'
+    : '';
+  fillCfgForm();
+  flags.autoDiscover = !!status.config.autoDiscover;
+  flags.autoAssess = !!status.config.autoAssess;
+  flags.autoTrigger = !!status.config.autoTrigger;
+  renderFlag('autoDiscover');
+  renderFlag('autoAssess');
+  renderFlag('autoTrigger');
+  document.getElementById('cfg').innerHTML =
+    '<dt>ポーリング間隔</dt><dd>' + c.pollIntervalSec + 's（候補キャッシュ ' + c.candidateCacheSec + 's）</dd>' +
+    '<dt>autoTrigger</dt><dd>' + c.autoTrigger +
+      (c.autoTrigger ? '（起点: ' + (c.autoTriggerSince || status.deployedAt || '-') + '）' : '') + '</dd>' +
+    '<dt>permissionMode</dt><dd>' + c.permissionMode + '</dd>' +
+    '<dt>同時起動</dt><dd>' + c.maxConcurrent + '</dd>' +
+    '<dt>監視リポジトリ</dt><dd>' + c.repos.map(r =>
+      '<a href="https://github.com/' + esc(r) + '" target="_blank" rel="noopener">' +
+      esc(r) + '</a>').join('<br>') + '</dd>';
+
+  const manualSet = new Set(status.manualRuns || []);
+  document.getElementById('tasks').innerHTML = status.tasks.map(t =>
+    '<tr><td>' + esc(t.key) + '</td><td class="st-' + esc(t.status || '') + '">' +
+    esc(t.status || '-') + '</td>' +
+    '<td title="' + esc(t.assess?.reason || '') + '">' +
+      (t.assess ? esc(t.assess.category || t.assess.feasible || '?') +
+        '/' + esc(t.assess.risk || '?') : '-') + '</td>' +
+    '<td>' + fmt(t.startedAt) + '</td><td>' +
+    fmt(t.finishedAt) + '</td><td>' + (t.exitCode ?? '') + '</td>' +
+    '<td>' + ((t.status === 'failed' || t.status === 'needs-review' || t.status === 'rejected')
+      && !manualSet.has(t.key)
+      ? '<button class="mini" onclick="dispatch(\'' + esc(t.key) + '\')">再実行</button>' : '') +
+    '</td></tr>').join('') ||
+    '<tr><td colspan="7" style="color:#6b7280">履歴なし</td></tr>';
+
+  const lg = await (await fetch(API + (logKey
+    ? '/api/tasklog?key=' + encodeURIComponent(logKey) + '&n=150'
+    : '/api/log?n=150'))).json();
+  document.getElementById('log-title').textContent = logKey
+    ? 'セッションログ: ' + logKey + (lg.file ? ' (' + lg.file + ')' : '（ログ未生成）')
+    : 'dispatcher.log（末尾）';
+  const pre = document.getElementById('log');
+  const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+  pre.textContent = lg.log || '(ログなし)';
+  if (atBottom || !pre.textContent) pre.scrollTop = pre.scrollHeight;
+}
+
+async function loadCandidates(force) {
+  const box = document.getElementById('cands');
+  try {
+    if (!status) {
+      try { status = await (await fetch(API + '/api/status')).json(); } catch {}
+    }
+    const j = await (await fetch(API + '/api/candidates' + (force ? '?force=1' : ''))).json();
+    document.getElementById('cands-meta').textContent =
+      '取得: ' + fmt(j.fetchedAt) + (j.cached ? '（キャッシュ）' : '（ライブ取得）');
+    document.getElementById('cands-mode').innerHTML =
+      (j.discoverEnabled === false ? '<span style="color:#b45309">— 自動検出停止中</span> ' : '') +
+      (j.autoEnabled
+        ? '<span style="color:#15803d">対応自動 ON：ポーリングで順次起動</span>'
+        : '<span style="color:#b45309">対応自動 OFF：起動は個別ボタン</span>');
+    const list = j.candidates || [];
+    // 監視リポジトリごとにグルーピング（config の並び順を維持）
+    const order = (status?.config?.repos) ||
+      [...new Set(list.map(c => c.key.split(' ')[0]))];
+    candGroups = new Map(order.map(r => [r, []]));
+    for (const c of list) {
+      const repo = c.key.split(' ')[0];
+      if (!candGroups.has(repo)) candGroups.set(repo, []);
+      candGroups.get(repo).push(c);
+    }
+    openCounts = j.openCounts || {};
+    renderCandTabs();
+    renderCandBody();
+  } catch (e) {
+    box.innerHTML = '<div style="color:#dc2626">取得失敗: ' + esc(e.message) + '</div>';
+  }
+}
+
+let candGroups = new Map();
+let candTab = '__all__';
+let openCounts = {};
+function renderCandTabs() {
+  const tabs = document.getElementById('cand-tabs');
+  const total = [...candGroups.values()].reduce((s, a) => s + a.length, 0);
+  const openTotal = Object.values(openCounts).reduce((s, n) => s + n, 0);
+  const mk = (id, label, cand, open) =>
+    '<button class="' + (candTab === id ? 'active' : '') +
+    '" onclick="candTab=\'' + id + '\';renderCandTabs();renderCandBody()">' +
+    esc(label) + '<span class="n">' + cand + (open != null ? '/' + open : '') + '</span></button>';
+  tabs.innerHTML = mk('__all__', 'すべて', total, openTotal) +
+    [...candGroups.entries()].map(([r, items]) =>
+      mk(r, r.split('/')[1], items.length, openCounts[r] ?? 0)).join('');
+}
+
+function renderCandBody() {
+  const box = document.getElementById('cands');
+  const manual = new Set(status?.manualRuns || []);
+  const entries = candTab === '__all__'
+    ? [...candGroups.entries()]
+    : [[candTab, candGroups.get(candTab) || []]];
+  box.innerHTML = entries.map(([repo, items]) => {
+    const head = '<div class="repo-h">' +
+      '<a href="https://github.com/' + esc(repo) + '" target="_blank" rel="noopener">' +
+      esc(repo) + '</a>' +
+      '<span class="cnt' + (items.length ? '' : ' zero') + '">' + items.length + '</span></div>';
+    if (!items.length) return head + '<div class="repo-empty">候補なし</div>';
+    const rows = items.map(c => {
+      const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key);
+      const a = c.assess;
+      const judge = a
+        ? '<span class="jd jd-' + esc(a.category || '?') + '" title="' + esc(a.reason || '') + '">' +
+          esc(a.category || '?') + '/' + esc(a.risk || '?') + '</span>'
+        : '-';
+      return '<tr><td>' + esc(c.type) + ' #' + c.number + '</td>' +
+      '<td style="white-space:nowrap"><button class="mini" ' + (busy ? 'disabled' : '') +
+        ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? '再評価' : '評価') + '</button>' +
+      '<button class="mini primary" ' + (busy ? 'disabled' : '') +
+        ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button></td>' +
+      '<td style="white-space:normal;min-width:280px"><a href="' + esc(c.url) +
+        '" target="_blank" rel="noopener">' + esc(c.title) + '</a></td>' +
+      '<td class="' + (c.trigger === 'auto-new' ? 'trig-auto' : 'trig-label') + '">' +
+        (c.trigger === 'auto-new' ? '自動(新規)' : 'devin ラベル') + '</td>' +
+      '<td>' + judge + '</td>' +
+      '<td>' + fmt(c.createdAt) + '</td>' +
+      '<td>' + (c.runningLabel ? 'running ラベル付き(起動中/取残し)' :
+                c.state ? 'state: ' + c.state : '') + '</td></tr>';
+    }).join('');
+    return head + '<table><thead><tr><th>種別</th><th>操作</th><th>タイトル</th>' +
+      '<th>トリガー</th><th>判定</th><th>作成日時</th><th>備考</th></tr></thead><tbody>' +
+      rows + '</tbody></table>';
+  }).join('') || '<div class="repo-empty">監視リポジトリなし</div>';
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmt(s) { return s ? String(s).replace('T',' ').slice(0,19) : '-'; }
+
+// 候補一覧の自動更新周期（localStorage に永続化、既定60秒）
+let candTimer = null;
+function setCandInt() {
+  const sel = document.getElementById('cand-int');
+  const sec = parseInt(sel.value, 10);
+  localStorage.setItem('candRefreshSec', String(sec));
+  if (candTimer) { clearInterval(candTimer); candTimer = null; }
+  if (sec > 0) candTimer = setInterval(() => loadCandidates(false), sec * 1000);
+}
+(function initCandInt() {
+  const saved = localStorage.getItem('candRefreshSec') ?? '60';
+  document.getElementById('cand-int').value = saved;
+  setCandInt();
+})();
+
+refresh();
+setInterval(refresh, 3000);
+loadCandidates(false);
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+{
+  "devinExe": "C:\\Users\\ryu.RYU-NOTE\\AppData\\Local\\Programs\\Devin\\resources\\app\\extensions\\windsurf\\devin\\bin\\devin.exe",
+  "pollIntervalSec": 120,
+  "maxConcurrent": 1,
+  "triggerLabel": "devin",
+  "runningLabel": "devin:running",
+  "doneLabel": "devin:done",
+  "failedLabel": "devin:failed",
+  "staleRunningMinutes": 180,
+  "autoDiscover": false,
+  "autoTrigger": false,
+  "autoTriggerSince": "all",
+  "maxNewPerPoll": 50,
+  "permissionMode": "dangerous",
+  "assessFirst": true,
+  "autoAssess": false,
+  "assessMaxAgeHours": 24,
+  "maxAutoRisk": "medium",
+  "needsReviewLabel": "devin:needs-review",
+  "rejectedLabel": "devin:rejected",
+  "controlPort": 8585,
+  "devinExtraArgs": [],
+  "repos": [
+    {
+      "path": "C:\\devin\\kasugai_canvas",
+      "github": "yamamoto-ryuzo/kasugai_canvas"
+    },
+    {
+      "path": "C:\\devin\\kasugai-canvas-web",
+      "github": "yamamoto-ryuzo/kasugai-canvas-web"
+    },
+    {
+      "path": "C:\\devin\\kasugai_canvas_webGIS",
+      "github": "yamamoto-ryuzo/kasugai_canvas_webGIS"
+    },
+    {
+      "path": "C:\\devin\\kasuga_converter",
+      "github": "yamamoto-ryuzo/kasugai_converter"
+    },
+    {
+      "path": "C:\\devin\\kasugai_box",
+      "github": "yamamoto-ryuzo/kasugai_box"
+    },
+    {
+      "path": "C:\\devin\\kasugai",
+      "github": "yamamoto-ryuzo/kasugai"
+    },
+    {
+      "path": "C:\\devin\\portal",
+      "github": "yamamoto-ryuzo/portal"
+    },
+    {
+      "path": "C:\\devin\\qgis_live_harness",
+      "github": "yamamoto-ryuzo/qgis_live_harness"
+    },
+    {
+      "path": "C:\\devin\\ReEarth_GeoSuite",
+      "github": "yamamoto-ryuzo/ReEarth_GeoSuite"
+    }
+  ],
+  "candidateCacheSec": 120
+}
