@@ -372,6 +372,8 @@ async function loadChat() {
 }
 
 // 評価/対応ボタン → チャットへプロンプト自動送信 + チャットタブへ移動
+let awaitAssess = null; // {key, since} 評価完了を待っている課題
+
 async function assess(key) {
   try {
     const r = await fetch(API + '/api/chat/task', {
@@ -379,7 +381,10 @@ async function assess(key) {
     });
     const j = await r.json();
     toast(j.ok ? '評価を送信: ' + key : '失敗: ' + (j.error || ''));
-    if (j.ok) { showTab('chat'); loadChat(); }
+    if (j.ok) {
+      awaitAssess = { key, since: new Date().toISOString() };
+      showTab('chat'); loadChat();
+    }
   } catch (e) { toast('assess: ' + e.message); }
 }
 
@@ -432,6 +437,16 @@ async function refresh() {
         esc(s.replace(/ \((判定|実装)\)/, '')) + '\')">' + esc(s) + '</a>').join(' , ') +
       ' <button class="mini danger" onclick="killActive()">停止</button></span>'
     : '';
+  // 評価完了検知 → 対応候補タブへ自動復帰
+  if (awaitAssess) {
+    const t = (status.tasks || []).find((x) => x.key === awaitAssess.key);
+    if (t?.assess?.category && t.assessedAt > awaitAssess.since) {
+      toast('評価完了: ' + t.assess.category + '/' + t.assess.risk);
+      awaitAssess = null;
+      showTab('cands');
+      loadCandidates(false);
+    }
+  }
   fillCfgForm();
   flags.autoDiscover = !!status.config.autoDiscover;
   flags.autoAssess = !!status.config.autoAssess;
