@@ -70,12 +70,25 @@ const SELF_ORIGIN = `http://${HOST}:${PORT}`;
 // CORS: 同一オリジン・file://(Origin: null)・ループバックの任意ポート
 // （KASUGAI Canvas アプリ 8511/8510 等のローカルツール）・CDN ホスト版
 // (GitHub Pages) を許可。https://evil.example 等の外部サイトからの読み書きは
-// preflight/レスポンス読取でブロックされる。POST は別途 X-Panel ヘッダ必須
-const EXTRA_ORIGINS = new Set(['https://yamamoto-ryuzo.github.io']);
+// preflight/レスポンス読取でブロックされる。POST は別途 X-Panel ヘッダ必須。
+// 非 loopback の許可オリジンは同一ホスト上の任意ページからもアクセス可能なため
+// 読み取り専用とし、管理 POST は loopback/self/'null' に限定する。
+// config.extraOrigins（配列）で許可オリジンを上書き可能（既定は GitHub Pages）
+const EXTRA_ORIGINS = () => new Set(config.extraOrigins ?? ['https://yamamoto-ryuzo.github.io']);
+// 非 loopback の許可オリジンからの要求か（管理 POST 拒否の判定用）
+const remoteReadOnly = (req) => {
+  const o = req.headers.origin;
+  if (!o || o === 'null' || o === SELF_ORIGIN || !EXTRA_ORIGINS().has(o)) return false;
+  try {
+    const h = new URL(o).hostname.toLowerCase();
+    if (h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '[::1]') return false;
+  } catch { /* invalid origin */ }
+  return true;
+};
 function corsOrigin(req) {
   const o = req.headers.origin;
   if (!o) return null;
-  if (o === 'null' || o === SELF_ORIGIN || EXTRA_ORIGINS.has(o)) return o;
+  if (o === 'null' || o === SELF_ORIGIN || EXTRA_ORIGINS().has(o)) return o;
   try {
     const u = new URL(o);
     const h = u.hostname.toLowerCase();
@@ -239,7 +252,17 @@ async function dispatchChatTask(key, mode, skill, engine) {
     chats.set(id, { chat: shim, label: shim.label });
     engineSend(eng, p.text)
       .then((t) => { shim.messages.push({ role: 'agent', text: t || '' }); shim.busy = false; })
-      .catch((e) => { shim.messages.push({ role: 'agent', text: '[engine error] ' + e.message }); shim.busy = false; });
+      .catch((e) => {
+        shim.messages.push({ role: 'agent', text: '[engine error] ' + e.message });
+        shim.busy = false;
+        // エンジン障害時は判定ブロックが返らず watcher が完了を検出できないため、
+        // 失敗状態をタスクへ記録して未完了のまま残さない
+        const st = loadJson(STATE_PATH, { tasks: {} });
+        st.tasks[key] = { ...(st.tasks[key] ?? {}),
+          status: 'failed', error: 'engine error: ' + e.message,
+          failedAt: new Date().toISOString() };
+        writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+      });
     if (mode === 'assess') watchAssess(key, shim);
     if (mode === 'split') watchSplit(key, shim);
     if (mode === 'impl') watchImpl(key, shim);
@@ -384,7 +407,7 @@ function watchAssess(key, ch) {
             const autoOk = key.includes(' pr#')
               ? (config.autoPr ?? false) : (config.autoTrigger ?? false);
             if (autoOk && catAllowed(v.category) && riskAllowed(v.risk) &&
-                !['running', 'done', 'needs-review', 'rejected'].includes(st.tasks[key]?.status) &&
+                !['running', 'done', 'failed', 'needs-review', 'rejected'].includes(st.tasks[key]?.status) &&
                 !chatWait.some((w) => w.key === key)) {
               chatWait.push({ key, mode: 'impl' });
             }
@@ -883,6 +906,11 @@ const server = createServer(async (req, res) => {
     if (req.headers[PANEL_HEADER[0]] !== PANEL_HEADER[1]) {
       return json(403, { ok: false, error: 'missing X-Panel header' });
     }
+    // 非 loopback オリジン（CDN ホスト版等）は読み取り専用。同一ホスト上の
+    // 任意ページからの管理操作を防ぐため管理 POST は loopback/self/'null' 限定
+    if (remoteReadOnly(req)) {
+      return json(403, { ok: false, error: 'non-loopback origin is read-only' });
+    }
     try {
       if (url.pathname === '/api/start') {
         saveDesired({ enabled: true });
@@ -939,7 +967,7 @@ const server = createServer(async (req, res) => {
           'autoDiscover', 'autoTrigger', 'autoAssess', 'autoPr', 'autoCategory',
           'maxAutoRisk',
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax',
-          'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt',
+          'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt', 'extraOrigins',
           'apiModels', 'bridgeModels', 'acpOptions'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
