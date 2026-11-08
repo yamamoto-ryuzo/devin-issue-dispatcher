@@ -62,7 +62,7 @@ flowchart TD
   PRC --> PA["作成 PR を必ず assess で評価"]
   PA --> S3["ステップ3: PR対応 (_pr)<br/>gh pr checkout → 指摘/CI 対応 → push"]
   S3 --> D2{"_done を「違う視点」で再検証"}
-  D2 -->|OK| MG["gh pr merge → クローズ"]
+  D2 -->|OK| MG["gh pr merge --delete-branch → クローズ"]
   D2 -->|NG| RO["元 issue を reopen ＋再対応依頼<br/>PR は gh pr close"]
 </pre>
 <script type="module">
@@ -91,7 +91,7 @@ flowchart TD
 <tr><td><code>_all.md</code></td><td>全モード共通: ステップ0〜3の全体フロー・常に守ること</td></tr>
 <tr><td><code>_assess.md</code></td><td>評価のみ。4段階判定・risk・partial・出力ブロック形式</td></tr>
 <tr><td><code>_impl.md</code></td><td>実装。ブランチ/コミット規約・禁止事項・検証ループ・PR マーカー・公開データ機密チェック</td></tr>
-<tr><td><code>_pr.md</code></td><td>PR対応。checkout→修正→push→違う視点で再検証→merge/close</td></tr>
+<tr><td><code>_pr.md</code></td><td>PR対応。checkout→修正→push→違う視点で再検証→merge(--delete-branch)/close</td></tr>
 <tr><td><code>_split.md</code></td><td>切り分け。実装済み部分の完了化＋残課題の issue 分割</td></tr>
 <tr><td><code>_done.md</code></td><td>完了確認。実動作検証・スクリーンショット・DOCS 整備・クローズ時コメント</td></tr>
 </table>

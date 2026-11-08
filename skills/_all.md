@@ -64,7 +64,8 @@ devin/ ブランチ作成 → 実装 (_impl)
 gh pr checkout で対象ブランチへ → レビュー指摘・CI 失敗へ対応 → push
    │
    └─ 完了時スキル (_done) を「違う視点」でもう一度実施
-          ├─ OK → 結果をコメント → gh pr merge で反映してクローズ
+          ├─ OK → 結果をコメント → gh pr merge --delete-branch で
+          │      反映してクローズ（PR ブランチは必ず削除）
           └─ NG → 元課題をリオープン＋devin ラベル再付与で再対応を依頼し、
                   当該 PR を gh pr close でクローズ
 ```
