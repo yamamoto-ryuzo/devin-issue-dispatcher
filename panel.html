@@ -594,9 +594,15 @@ function renderCandBody() {
       '<td>' + (c.runningLabel ? 'running ラベル付き(起動中/取残し)' :
                 c.state ? 'state: ' + c.state : '') + '</td></tr>';
     }).join('');
-    return head + '<table><thead><tr><th>種別</th><th>操作</th><th>タイトル</th>' +
-      '<th>トリガー</th><th>判定</th><th>作成日時</th><th>備考</th></tr></thead><tbody>' +
-      rows + '</tbody></table>';
+    return head + '<table><thead><tr>' +
+      '<th title="課題の種別（issue / PR）と番号">種別</th>' +
+      '<th title="評価: チャットで対応可否だけを評価（変更しない）&#10;対応: 実装の実行指示を送信">操作</th>' +
+      '<th title="GitHub の課題タイトル（クリックで GitHub を開く）">タイトル</th>' +
+      '<th title="候補になった経路&#10;自動(新規): 起点以降に作成された未処理課題&#10;devin ラベル: 明示的にラベル指定">トリガー</th>' +
+      '<th title="評価セッションの判定結果&#10;auto: 即対応可 / review: 検討の上対応 / reject: 不可・危険&#10;risk: low/medium/high&#10;ホバーで理由も表示">判定</th>' +
+      '<th title="課題が作成された日時">作成日時</th>' +
+      '<th title="実行中ラベル・過去の処理状態などの補足">備考</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>';
   }).join('') || '<div class="repo-empty">監視リポジトリなし</div>';
 }
 
