@@ -123,6 +123,39 @@ curl.exe -X POST -H "X-Panel: 1" -d "{\"key\":\"yamamoto-ryuzo/portal issue#21\"
          http://127.0.0.1:8585/api/dispatch                       # 個別課題を即時起動
 ```
 
+### AI エージェントからの操作（API 仕様）
+
+外部 AI・ツールから dispatcher を操作する受け口は3系統ある:
+
+1. **HTTP API（`127.0.0.1:8585`）** — 直接叩ける最も簡単な経路。POST は `X-Panel: 1` ヘッダ必須
+2. **MCP（stdio・`mcp-server.mjs`＝`issue-queue`）** — Devin IDE エージェント向け pull 型（`queue_list`/`queue_claim`/`queue_done`）
+3. **KASUGAI Canvas AI チャットの REST コネクタ** — Canvas 側の汎用コネクタ基盤（`web/shared/rest-connectors.js`）に内蔵コネクタとして `dispatcher*` ツールが宣言されている。bridge-hub(8511) の `/agent`・`/mcp` パイプラインに乗ってブラウザから本 API が呼ばれる（ハブ側の改造は不要）。他サービスも同基盤のコネクタ定義追加でツール化できる
+
+HTTP API 一覧（POST は `X-Panel: 1` 必須）:
+
+| メソッド | パス | 用途 |
+|---|---|---|
+| GET | `/api/status` | 稼働状態・設定・最近タスク・実行中セッション |
+| GET | `/api/candidates` | 対応候補一覧（`?force=1` でキャッシュ無視） |
+| GET | `/api/log?n=50` | dispatcher ログ末尾 |
+| GET | `/api/chat?id=N`・`/api/chat/sessions` | チャットセッション履歴・一覧 |
+| POST | `/api/start` `/api/stop` `/api/once` `/api/reload` | ループ起停・1サイクル・設定再読込 |
+| POST | `/api/dispatch` `{key}`・`/api/assess` `{key}` | 課題を作業キューへ登録（MCP pull 型） |
+| POST | `/api/chat/task` `{key,mode,skill?,engine?}` | 課題をエンジンセッションで即時実行（assess/impl/split） |
+| POST | `/api/chat/send` `{text,id?}` | 内蔵チャットへ自由文送信（任意指示の実行） |
+| POST | `/api/chat/cancel|clear|reset|close` `{id}` | セッション操作 |
+| POST | `/api/steer` `{key,text}`・`/api/kill` `{key}` | 実行中セッションへ追加入力・停止 |
+| POST | `/api/issue` `{repo,title,body}`・`/api/close` `{key}` | Issue 起票・クローズ |
+| POST | `/api/verdict` `{key,category}` | 評価カテゴリ手動上書き |
+| POST | `/api/config` `{...}` | config.json の許可キー更新 |
+| POST | `/api/assess-all`・`/api/impl-all` | 候補一括評価・一括対応 |
+
+CORS: `Origin` が `null`(file://)・自オリジン・**ループバック任意ポート**
+（localhost/127.0.0.1/[::1]）・`https://yamamoto-ryuzo.github.io`（CDN ホスト版）
+の場合のみ許可。preflight は `Access-Control-Allow-Private-Network: true` を返す
+ため public→private（CDN→localhost）アクセスも通る。それ以外のオリジンは
+403/ACAO 無しでブラウザからブロックされる。
+
 ### CLI 直接起動（開発・検証用）
 
 ```bash
@@ -173,6 +206,38 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 | `controlPort` | `8585` | 管理パネルのポート（127.0.0.1 のみにバインド） |
 | `candidateCacheSec` | `pollIntervalSec` と同じ | `/api/candidates` のキャッシュ有効期間（秒）。期限切れ or `?force=1` でライブ取得し `candidates.json` を更新 |
 | `repos` | 9リポジトリ | 監視対象。`path`＝ローカル作業ディレクトリ、`github`＝`owner/name` |
+| `engine` | `devin` | 全体既定の実行エンジン。`devin`（ACPチャット）/ `copilot`・`antigravity`（bridge-hub 経由）/ `api`（OpenAI 互換 API。単発応答のため評価用途向け） |
+| `engineModes` | なし | モード別既定（任意）。例: `{"assess":"api","impl":"devin"}`。課題指定がない場合にだけ効く |
+
+### 課題単位のエンジン指定
+
+`engine` は全体既定だが、課題ごとに別エンジンで実行できる。解決の優先順位:
+
+```
+呼出時の明示指定（API の engine パラメータ）
+  > GitHub 側の指定（engine:<name> ラベル → 本文中の "engine: <name>" 行）
+  > 課題保存指定（state.tasks[key].engineReq。パネル行の「エンジン」列 or POST /api/task-engine で設定）
+  > モード別既定（config.engineModes[mode]）
+  > config.engine
+```
+
+- パネルの候補行「エンジン」列で課題単位に切替（自動=上記解決に従う）
+- GitHub 側から指定する場合は `engine:copilot` のようなラベル、または本文に `engine: copilot` の行を書く
+- API: `POST /api/chat/task`・`/api/dispatch`・`/api/assess` のボディに `engine` を渡すとその実行だけエンジンを上書きできる
+- 実際に使われたエンジンは `state.tasks[key].engineUsed` に記録され、処理履歴タブの「エンジン」列に表示される
+- モデル選択: api エンジンはエンドポイント別の最終選択を `config.apiModels` に記憶しエンドポイント変更時に復元＋一覧自動取得。bridge プロバイダは AI タブのモデル欄（hub `/models` 実取得・fallback=未ログイン疑い）で `config.bridgeModels` へ保存し `/agent` へ `model` 付与。devin ACP のモデル/モード選択は `config.acpOptions` へ永続化し次回セッションへ自動再適用
+
+### シークレットの取り扱い（統一ルール）
+
+- APIキー等のシークレットは **`secrets.json`（Git 管理外）にのみ保存**する。
+  `POST /api/config` で `apiKey` を送ると自動で secrets.json 側へ書き込まれ、
+  `config.json`（Git 追跡対象）には書き込まれない。config.json に残存する旧形式の
+  `apiKey` は起動時・設定保存時に secrets.json へ自動移行される
+- パネルの password 入力欄は**「設定済みかどうか（hasValue）」のみ表示し、値自体は
+  読み戻さない**（`/api/status` は `apiKeySet` の真偽値のみ返す）
+- キーを config.json・共有ファイル・ログ・プロンプト注入へ書き込まない
+- `config.example.json` に追跡対象へキーが入らない構成の例を置いてある
+- 将来追加するシークレット（MCP トークン等）も同じく secrets.json に保存する
 
 ## ファイル
 
@@ -180,7 +245,9 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 - `panel.html` — 管理パネル UI
 - `discover.mjs` — 課題発見ロジック（dispatcher/control 共用の共通モジュール）
 - `dispatcher.mjs` — 本体（依存なし、Node 標準のみ）
-- `config.json` — 設定
+- `config.json` — 設定（Git 追跡対象。シークレットは入れない）
+- `config.example.json` — config.json の構成例（追跡対象へキーが入らない形）
+- `secrets.json` — APIキー等のシークレット（自動生成・gitignore 済）
 - `state.json` — 処理済み課題の状態（自動生成）
 - `candidates.json` — 対応候補のキャッシュ（自動生成。`fetchedAt` + 軽量化した課題一覧）
 - `issues.json` — open 課題のローカルストア（自動生成。title/body/labels/日時を保持。

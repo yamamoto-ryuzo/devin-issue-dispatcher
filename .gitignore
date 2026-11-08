@@ -11,4 +11,7 @@ node_modules/
 *.tmp
 work-queue.json
 goals.json
+secrets.json
+config.local.json
 shots/
+bridge-hub.exe

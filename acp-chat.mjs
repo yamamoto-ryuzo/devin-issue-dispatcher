@@ -7,9 +7,11 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 export class AcpChat {
-  constructor({ devinExe, cwd }) {
+  constructor({ devinExe, cwd, getPersistedOptions, saveOption }) {
     this.devinExe = devinExe;
     this.cwd = cwd;
+    this.getPersistedOptions = getPersistedOptions ?? (() => ({}));
+    this.saveOption = saveOption ?? (() => {});
     this.proc = null;
     this.sessionId = null;
     this.buf = '';
@@ -110,6 +112,16 @@ export class AcpChat {
     this.options = s.configOptions ?? [];
     this.modes = s.modes ?? null;
     this.push('sys', `セッション開始 (${s.sessionId})`);
+    // 永続化したモデル/モード選択を新セッションへ再適用
+    for (const [oid, v] of Object.entries(this.getPersistedOptions())) {
+      try {
+        await this.rpc('session/set_config_option',
+          { sessionId: this.sessionId, configId: oid, value: v });
+        this.push('sys', `[option復元] ${oid} → ${v}`);
+      } catch (e) {
+        this.push('sys', `[option復元失敗] ${oid}: ${e.message}`);
+      }
+    }
   }
 
   async send(text) {
@@ -128,6 +140,7 @@ export class AcpChat {
     await this.ensureSession();
     const res = await this.rpc('session/set_config_option',
       { sessionId: this.sessionId, configId: id, value });
+    this.saveOption(id, value);
     this.push('sys', `${id} → ${value}`);
     return res;
   }
