@@ -161,7 +161,16 @@
 <body>
 <div class="row" style="align-items:flex-start;gap:24px;flex-wrap:wrap;margin-bottom:14px">
   <div>
-    <h1>Devin Agent Dispatcher</h1>
+    <div style="display:flex;align-items:center;gap:16px">
+      <h1 style="margin:0">Devin Agent Dispatcher</h1>
+      <label style="font-size:12px;color:#4b5563;display:flex;align-items:center;gap:6px"
+        title="全課題に適用する実行エンジン（設定タブの AI プロバイダと連動・即時保存）&#10;GitHub の engine: ラベル/本文行による個別指定はこれより優先されます">エンジン
+        <select id="hdr-engine" style="font-size:12px" onchange="setGlobalEngine(this.value)">
+          <option value="devin">【CLI】Devin</option>
+          <option value="copilot">【ブリッジ】GitHub Copilot</option>
+          <option value="antigravity">【ブリッジ】Antigravity</option>
+          <option value="api">【API】汎用（OpenAI互換）</option></select></label>
+    </div>
     <div class="sub" style="margin-bottom:0">GitHub Issue/PR → devin -p 自動対応エージェントの管理パネル</div>
   </div>
   <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:8px">
@@ -211,6 +220,11 @@
     <div class="row" style="margin-bottom:10px">
       <label style="font-size:12px">対象リポジトリ
         <select id="sv-repo" style="font-size:12px;min-width:240px" onchange="document.getElementById('sv-goal-sel').value='';loadGoal();loadGoals();svReset()"></select></label>
+      <select id="sv-level" style="font-size:12px" title="抽出レベル: 目的・要望の文言に対する解釈の広さ&#10;Lv1 入力文言をそのまま整理（追加提案なし）&#10;Lv2 拡大解釈せず忠実に抽出&#10;Lv3 関連機能・周辺改善も含めて抽出">
+        <option value="1">Lv1 文言の整理のみ</option>
+        <option value="2" selected>Lv2 忠実に抽出</option>
+        <option value="3">Lv3 関連機能も含む</option>
+      </select>
       <button id="sv-extract" class="primary" style="font-size:14px;padding:10px 22px" onclick="surveyExtract()">課題抽出</button>
       <button id="sv-cancel" class="danger" style="display:none;font-size:14px;padding:10px 16px" onclick="surveyCancel()">中断</button>
       <span style="font-size:12px;color:#6b7280">抽出はチャットセッションで実行（結果はチャットタブに表示）</span>
@@ -1117,14 +1131,18 @@ const awaitAssess = new Map(); // key -> since: 評価完了を待っている�
 const localBusy = new Map(); // 押下直後から即反映するローカルの実行中キー ("key assess"形式) -> 追加時刻
 const localWait = new Set(); // 待機キューへ入れた直後から即反映するローカルの待機キー ("key impl"形式)
 
-async function setTaskEngine(key, v) {
-  const r = await fetch(API + '/api/task-engine', {
-    method: 'POST', headers: H, body: JSON.stringify({ key, engine: v || null }),
-  });
-  const j = await r.json();
-  if (!j.ok) return toast('エンジン設定失敗: ' + (j.error || ''));
-  toast('エンジン指定 ' + (v || '自動（→' + (j.resolved || '?') + '）') + ': ' + key.split(' ').pop());
-  loadCandidates(false);
+async function setGlobalEngine(v) {
+  document.getElementById('set-engine').value = v;
+  engFields();
+  try {
+    const r = await fetch(API + '/api/config', {
+      method: 'POST', headers: H, body: JSON.stringify({ engine: v }),
+    });
+    const j = await r.json();
+    toast(j.ok ? 'エンジン全体設定を ' + v + ' に変更しました' : '失敗: ' + (j.error || ''));
+  } catch (e) { toast('setGlobalEngine: ' + e.message); }
+  cfgInit = false;
+  refresh();
 }
 
 async function assess(key) {
@@ -1185,6 +1203,8 @@ async function refresh() {
     : 'ポーリング未起動';
 
   const c = status.config;
+  const he = document.getElementById('hdr-engine');
+  if (he && document.activeElement !== he) he.value = c.engine ?? 'devin';
   // 実行中セッション: 手動 dispatch/評価(manualRuns) + state の running/inflight タスク
   // (判定) = 評価セッション / (実装) = 実装セッション
   const actSet = new Set();
@@ -1483,11 +1503,22 @@ async function surveyExtract() {
     const sj = await (await fetch(API + '/api/skills')).json();
     skill = (sj.files || []).find((f) => f.name === '_survey.md')?.content || '';
   } catch { /* noop */ }
+  // 抽出レベル（_survey.md の「抽出レベル」節と対応）
+  const SV_LEVELS = {
+    1: '【抽出レベル1: 文言の整理のみ】入力された目的・要望の文言をそのまま整理・構造化して Issue 候補にしてください。' +
+       '文言に含まれない作業・改善・関連機能は追加しないでください。リポジトリの確認は重複確認と文脈把握のみに留めてください。',
+    2: '【抽出レベル2: 忠実に抽出】入力された目的・要望を拡大解釈せず忠実に、目的達成に直接必要な作業のみを課題として抽出してください。' +
+       '推測による関連機能・改善の追加提案はしないでください。',
+    3: '【抽出レベル3: 関連機能も含む】入力された目的・要望を起点に、目的達成に有効な関連機能・周辺の改善も含めて課題を抽出してください。' +
+       'コードと既存 Issue/PR を確認した上で、目的に関連する機能追加・改善も積極的に候補に含めてください。',
+  };
+  const lv = document.getElementById('sv-level')?.value || '2';
   const text = (skill ? skill + '\n\n---\n\n' : '') +
     `GitHub リポジトリ ${repo} を対象に課題を整理してください。\n` +
+    SV_LEVELS[lv] + '\n' +
     (goal ? `【目的】${goal}\n` : '') +
     (shotPaths.length ? `【添付画像】${shotPaths.join(' , ')} — 各画像を参照して内容を把握し課題へ反映すること\n` : '') +
-    `目的達成に必要な作業を検討し、起票すべき Issue（機能追加・エラー修正・改善）を` +
+    `上記の抽出レベルの範囲で、起票すべき Issue（機能追加・エラー修正・改善）を` +
     `「タイトル案」と「本文案」付きで箇条書きにしてください。` +
     `gh CLI で既存 Issue/PR とコードも確認し、既存と重複する課題は避けてください（起票自体はまだ行わない）。\n` +
     `最後に必ず <!--issues [{"title":"タイトル案","body":"本文案"},...] issues--> の JSON ブロックを出力してください。`;
@@ -1725,7 +1756,7 @@ function renderCandBody() {
   const fCat = document.getElementById('f-category')?.value || '';
   const fRisk = document.getElementById('f-risk')?.value || '';
   const fStat = document.getElementById('f-status')?.value || '';
-  const renderEntries = (wantType, selId) => entries.map(([repo, items]) => {
+  const renderEntries = (wantType) => entries.map(([repo, items]) => {
     const filtered = items.filter((c) => {
       const a = c.assess;
       if (c.type !== wantType) return false;
@@ -1799,15 +1830,6 @@ function renderCandBody() {
           ? '<span style="font-size:11px;color:#9ca3af" title="api エンジンは評価専用のため対応を起動できません">評価専用(api)</span>'
           : '<button class="mini primary" ' + (busy ? 'disabled' : '') +
             ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button>';
-      const engCell =
-        '<select style="font-size:11px" title="この課題で使う実行エンジン。自動=GitHub指定→課題指定→全体設定の順に解決" ' +
-        'onchange="setTaskEngine(\'' + esc(c.key) + '\',this.value)">' +
-        '<option value="">自動' + (c.engine ? '（' + esc(c.engine) + '）' : '') + '</option>' +
-        ['devin', 'copilot', 'antigravity', 'api'].map((e) =>
-          '<option value="' + e + '"' + (c.engineReq === e ? ' selected' : '') + '>' + e +
-          '</option>').join('') + '</select>' +
-        (c.engineIssue ? '<div style="font-size:10px;color:#6b7280" title="GitHub の engine: ラベル/本文行で指定済み（優先）">GH指定: ' +
-          esc(c.engineIssue) + '</div>' : '');
       return '<tr' + rowBg + '><td><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">' +
         (c.type === 'pr'
@@ -1819,7 +1841,6 @@ function renderCandBody() {
       '<td class="' + (c.trigger === 'auto-new' ? 'trig-auto' : 'trig-label') + '">' +
         (c.trigger === 'auto-new' ? '自動(新規)' : 'devin ラベル') + '</td>' +
       '<td>' + implCell + '</td>' +
-      '<td style="white-space:nowrap">' + engCell + '</td>' +
       '<td>' + judge + '</td>' +
       '<td>' + fmt(c.createdAt) + '</td>' +
       '<td>' + (c.runningLabel ? 'running ラベル付き(起動中/取残し)' :
@@ -1829,29 +1850,20 @@ function renderCandBody() {
           : c.createdPr ? ' → ' + esc(String(c.createdPr).split(' ').pop()) : '') +
         '</td></tr>';
     }).join('');
-    const skillSel = (id, opts, cur) =>
-      '<select style="font-size:12px;width:78px" title="使用する skills/*.md" ' +
-      'onchange="' + ({ a: 'pickAssess', i: 'pickImpl', p: 'pickPr' }[id] || 'pickImpl') + '=this.value">' +
-      opts.map((f) => '<option value="' + esc(f) + '"' + (f === cur ? ' selected' : '') + '>' +
-        esc(f.replace('.md', '')) + '</option>').join('') + '</select>';
     return head + '<table><thead><tr>' +
       '<th title="課題の種別（issue / PR）と番号">種別</th>' +
-      '<th title="評価: チャットで対応可否だけを評価（変更しない）">操作' +
-        '<br>' + skillSel('a', skillOpts.assess, pickAssess) + '</th>' +
+      '<th title="評価: チャットで対応可否だけを評価（変更しない）">操作</th>' +
       '<th title="GitHub の課題タイトル（クリックで GitHub を開く）">タイトル</th>' +
       '<th title="候補になった経路&#10;自動(新規): 起点以降に作成された未処理課題&#10;devin ラベル: 明示的にラベル指定">トリガー</th>' +
-      '<th title="対応: 実装の実行指示を送信&#10;PR中#N: 対応が PR へ移行し PR 側で継続中（クリックで PR を開く）">対応' +
-        '<br>' + skillSel(selId, selId === 'p' ? skillOpts.pr : skillOpts.impl,
-          selId === 'p' ? pickPr : pickImpl) + '</th>' +
-      '<th title="課題単位の実行エンジン&#10;自動=GitHub の engine: 指定 → 全体設定の順に解決&#10;GH指定=issue/PR のラベルまたは本文行で指定済み">エンジン</th>' +
+      '<th title="対応: 実装の実行指示を送信&#10;PR中#N: 対応が PR へ移行し PR 側で継続中（クリックで PR を開く）">対応</th>' +
       '<th title="評価セッションの判定結果&#10;auto: 即対応可 / review: 検討の上対応 / human: 人的判断必須（ユーザー選択）/ reject: 不可・危険&#10;risk: low/medium/high&#10;ホバーで理由も表示">判定</th>' +
       '<th title="課題が作成された日時">作成日時</th>' +
       '<th title="実行中ラベル・過去の処理状態などの補足">備考</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table>';
     }).join('') || '<div class="repo-empty">監視リポジトリなし</div>';
-  document.getElementById('cands').innerHTML = renderEntries('issue', 'i');
+  document.getElementById('cands').innerHTML = renderEntries('issue');
   const prsEl = document.getElementById('prs');
-  if (prsEl) prsEl.innerHTML = renderEntries('pr', 'p');
+  if (prsEl) prsEl.innerHTML = renderEntries('pr');
 }
 
 function esc(s) { return String(s).replace(/[&<>"]/g, c =>
