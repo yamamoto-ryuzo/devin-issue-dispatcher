@@ -152,11 +152,21 @@ function chatCapacity(mode, key) {
 // エンジン抽象層: devin=ACPチャット / copilot・antigravity=bridge-hub / api=汎用LLM(OpenAI互換)
 // apiUrl は Bearer キーを送信するため、外部ホストは https 限定。
 // http は loopback/LAN（プライベートアドレス）のみ許可する
-const PRIVATE_HOST = /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?)/i;
+// 前方一致は localhost.attacker.example のような外部ホストを通してしまうため
+// 完全一致または IPv4 のアドレス範囲で判定する
+function isPrivateHost(hostname) {
+  const h = String(hostname ?? '').replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
+  if (h === 'localhost' || h === '::1') return true;
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const a = Number(m[1]); const b = Number(m[2]);
+  return a === 127 || a === 10 || (a === 192 && b === 168)
+    || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31);
+}
 function assertApiUrlSafe(raw) {
   const u = new URL(raw);
   if (u.protocol === 'https:') return;
-  if (u.protocol === 'http:' && PRIVATE_HOST.test(u.hostname)) return;
+  if (u.protocol === 'http:' && isPrivateHost(u.hostname)) return;
   throw new Error('apiUrl は外部ホストへ https のみ許可（http は loopback/LAN 限定）: ' + raw);
 }
 
@@ -166,12 +176,16 @@ async function engineSend(eng, prompt) {
     if (!url || !config.apiModel) throw new Error('apiUrl/apiModel 未設定');
     assertApiUrlSafe(url);
     const r = await fetch(url + '/chat/completions', {
-      method: 'POST',
+      method: 'POST', redirect: 'manual',
       headers: { 'Content-Type': 'application/json',
         ...(effectiveApiKey() ? { Authorization: 'Bearer ' + effectiveApiKey() } : {}) },
       body: JSON.stringify({ model: config.apiModel,
         messages: [{ role: 'user', content: prompt }] }),
     });
+    // Bearer キーがリダイレクト先の平文 http へ漏れないよう自動追跡しない
+    if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) {
+      throw new Error('api リダイレクトは拒否されます（https 直結のみ許可）: ' + (r.status || r.type));
+    }
     const j = await r.json();
     if (!r.ok) throw new Error(j.error?.message || 'api ' + r.status);
     return j.choices?.[0]?.message?.content || '';
@@ -390,7 +404,9 @@ function watchAssess(key, ch) {
             st.tasks[key] = { ...(st.tasks[key] ?? {}),
               assess: v, assessedAt: new Date().toISOString(), engine: 'chat' };
             // dispatcher 委譲の自動評価が立てた inflight マーカーを解除（多重キュー抑止の解除）
+            // 解除時刻を残し、dispatcher がメモリ上のマーカーへ新しさで追従できるようにする
             delete st.tasks[key].inflight;
+            st.tasks[key].inflightClearedAt = new Date().toISOString();
             writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
             // 自動連鎖: issue課題は autoTrigger、pr課題は autoPr が ON のとき
             // 判定・リスクが自動処理範囲内なら対応（impl）へ投入
@@ -433,6 +449,7 @@ function watchAssess(key, ch) {
     const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
     if (st.tasks[key]?.inflight) {
       delete st.tasks[key].inflight;
+      st.tasks[key].inflightClearedAt = new Date().toISOString();
       writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
     }
   }, 30 * 60 * 1000).unref?.();
@@ -490,6 +507,20 @@ function watchImpl(key, ch) {
       for (const text of agentMsgs) {
         const u = text.match(/github\.com\/[^\s/]+\/[^\s/]+\/pull\/(\d+)/);
         if (u) { prKey = repo + ' pr#' + u[1]; break; }
+      }
+    }
+    // dispatcher から委譲された自動 impl: chat 完了時に status を確定する
+    // （PR 検出=done / 未検出=needs-review）。dispatcher は chatResult と
+    // inflightClearedAt を読んで滞留中の委譲マーカーを解除する
+    {
+      const st0 = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+      if (st0.tasks[key]?.chatDelegated === 'impl') {
+        const at = new Date().toISOString();
+        st0.tasks[key] = { ...st0.tasks[key],
+          chatResult: { status: prKey ? 'done' : 'needs-review', at },
+          inflightClearedAt: at };
+        delete st0.tasks[key].inflight;
+        writeFileSync(STATE_PATH, JSON.stringify(st0, null, 2));
       }
     }
     if (!prKey) return;
@@ -626,7 +657,9 @@ async function candidates(force) {
 }
 
 // ---- MCP (Streamable HTTP): 管理系ツールを外部 MCP クライアントへ公開 ----
-// /mcp は X-Panel を課さない（MCP クライアントはカスタムヘッダを送れない）。
+// /mcp は X-Panel を課さない（MCP クライアントはカスタムヘッダを送れない想定）。
+// ただし secrets.panelToken 設定時は /mcp でもトークンを要求する
+// （Origin 無しの内部プロキシ経由で管理操作を迂回されるのを防ぐ）。
 // Content-Type: application/json の POST はブラウザでは preflight 必須のため、
 // 未許可オリジンは CORS で既に遮断される。127.0.0.1 バインドで外部直叩き不可。
 // tools/call は自前の /api/* へ内部プロキシし、権限・検証ロジックを単一実装に保つ。
@@ -782,11 +815,15 @@ async function aiChat(messages, maxSteps) {
   const calls = [];
   for (let step = 0; step < limit; step++) {
     const r = await fetch(url + '/chat/completions', {
-      method: 'POST',
+      method: 'POST', redirect: 'manual',
       headers: { 'Content-Type': 'application/json',
         ...(effectiveApiKey() ? { Authorization: 'Bearer ' + effectiveApiKey() } : {}) },
       body: JSON.stringify({ model: config.apiModel, messages: msgs, tools }),
     });
+    // Bearer キーがリダイレクト先の平文 http へ漏れないよう自動追跡しない
+    if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) {
+      throw new Error('api リダイレクトは拒否されます（https 直結のみ許可）: ' + (r.status || r.type));
+    }
     const j = await r.json();
     if (!r.ok) throw new Error(j.error?.message || 'api ' + r.status);
     const m = j.choices?.[0]?.message ?? {};
@@ -898,6 +935,14 @@ const server = createServer(async (req, res) => {
       const ct = String(req.headers['content-type'] || '');
       if ((req.headers.origin && !acao) || !ct.includes('application/json')) {
         return json(403, { ok: false, error: 'forbidden' });
+      }
+      // panelToken 設定時: Origin 無しのプロキシ経由も含め /mcp の全 POST に
+      // トークンを要求。MCP クライアントは X-Panel-Token か
+      // Authorization: Bearer <panelToken> を設定すること
+      if (secrets.panelToken &&
+          req.headers['x-panel-token'] !== secrets.panelToken &&
+          req.headers.authorization !== `Bearer ${secrets.panelToken}`) {
+        return json(403, { ok: false, error: 'invalid panel token' });
       }
       return await handleMcp(req, res, acao);
     }
@@ -1116,8 +1161,14 @@ const server = createServer(async (req, res) => {
         }
         const u = (config.apiUrl || '').replace(/\/+$/, '');
         if (!u) return json(400, { ok: false, error: 'apiUrl 未設定' });
+        try { assertApiUrlSafe(u); }
+        catch (e) { return json(400, { ok: false, error: e.message }); }
         const r = await fetch(u + '/models',
-          { headers: effectiveApiKey() ? { Authorization: 'Bearer ' + effectiveApiKey() } : {} });
+          { redirect: 'manual',
+            headers: effectiveApiKey() ? { Authorization: 'Bearer ' + effectiveApiKey() } : {} });
+        if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) {
+          return json(502, { ok: false, error: 'models 取得のリダイレクトは未対応（https 直結のみ許可）' });
+        }
         const j = await r.json().catch(() => null);
         if (!r.ok || !j?.data) return json(502, { ok: false, error: 'models ' + r.status });
         return json(200, { ok: true, models: j.data.map((m) => m.id).filter(Boolean) });
