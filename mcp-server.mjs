@@ -44,23 +44,35 @@ const call = (name, args) => {
     if (!it) return { error: 'not found: ' + args.key };
     it.status = 'in-progress'; it.claimedAt = new Date().toISOString();
     save(QUEUE, q);
-    return {
-      task: it,
-      instructions:
-        `GitHub ${it.type} #${it.number} (${it.repo.github}) に対応してください。\n` +
-        `- リポジトリ: ${it.repo.path}\n- タイトル: ${it.title}\n- URL: ${it.url}\n` +
-        `ブランチ devin/${it.type}-${it.number} を切り、実装→検証→push→gh pr create（Closes #${it.number}）。\n` +
-        `完了したら queue_done({key:"${it.key}",status:"done"}) を呼ぶ。\n\n` +
-        `## リポジトリ指針\n${policy(it.repo.github)}`,
-    };
+    const common =
+      `GitHub ${it.type} #${it.number} (${it.repo.github}):\n` +
+      `- リポジトリ: ${it.repo.path}\n- タイトル: ${it.title}\n- URL: ${it.url}\n` +
+      `- 本文:\n${it.body || '(本文なし)'}\n\n` +
+      `## リポジトリ指針\n${policy(it.repo.github)}\n\n`;
+    if (it.mode === 'assess') {
+      return { task: it, instructions: common +
+        `この課題の対応可否を【評価のみ】してください（コード変更・コミット禁止）。\n` +
+        `判定は feasible=yes|needs-human|no, risk=low|medium|high,\n` +
+        `category=auto(即対応可)|review(検討の上対応)|reject(破壊的・不能) で、\n` +
+        `完了時に queue_done({key:"${it.key}",status:"needs-review"または"done",\n` +
+        `note:"{category|risk|reason}形式のJSON"}) を呼ぶ。` };
+    }
+    return { task: it, instructions: common +
+      `ブランチ devin/${it.type}-${it.number} を切り、実装→検証→push→` +
+      `gh pr create（本文に Closes #${it.number}）。main直push・force push禁止。\n` +
+      `完了したら queue_done({key:"${it.key}",status:"done"|"failed",note:"結果要約"}) を呼ぶ。` };
   }
   if (name === 'queue_done') {
     const it = q.items.find((i) => i.key === args.key);
     q.items = q.items.filter((i) => i.key !== args.key);
     save(QUEUE, q);
     const st = load(STATE, { deployedAt: null, tasks: {} });
+    let assess;
+    try { assess = JSON.parse(args.note ?? ''); }
+    catch { assess = undefined; }
     st.tasks[args.key] = { ...(st.tasks[args.key] ?? {}), status: args.status,
-      note: args.note ?? '', finishedAt: new Date().toISOString(), engine: 'ide' };
+      note: args.note ?? '', finishedAt: new Date().toISOString(), engine: 'ide',
+      ...(assess?.category ? { assess, assessedAt: new Date().toISOString() } : {}) };
     save(STATE, st);
     return { ok: true, removed: !!it };
   }

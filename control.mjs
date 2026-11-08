@@ -28,6 +28,7 @@ import { readFileSync, writeFileSync, existsSync, openSync, readSync, closeSync,
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { keyOf, discover, toCandidate, readIssueStore } from './discover.mjs';
+import { AcpChat } from './acp-chat.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(ROOT, 'config.json');
@@ -66,6 +67,31 @@ function saveDesired(d) { writeFileSync(DESIRED_PATH, JSON.stringify(d, null, 2)
 
 let child = null; // { proc, pid, startedAt, mode: 'loop'|'once' }
 const manualRuns = new Map(); // task key -> pid（--task で起動した個別セッション）
+// パネル内蔵チャット: devin.exe acp の常駐セッション（初回送信時に起動）
+const chat = new AcpChat({ devinExe: config.devinExe, cwd: ROOT });
+
+function taskPrompt(key, mode) {
+  const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
+  if (!m) return null;
+  const repo = config.repos?.find((r) => r.github === m[1]);
+  if (!repo) return { error: 'repo not monitored: ' + m[1] };
+  const it = readIssueStore(ISSUES_PATH).issues?.[key] ?? {};
+  let policy = '';
+  for (const f of [m[1].split('/')[1], '_default']) {
+    try { policy = readFileSync(join(ROOT, 'prompts', f + '.md'), 'utf8').trim(); break; }
+    catch { /* next */ }
+  }
+  const head = `GitHub ${m[2]} #${m[3]} (${m[1]}):\n` +
+    `- リポジトリ: ${repo.path}\n- タイトル: ${it.title ?? ''}\n- URL: ${it.url ?? ''}\n` +
+    `- 本文:\n${it.body || '(本文なし)'}\n\n## リポジトリ指針\n${policy}\n\n`;
+  return { key, text: mode === 'assess'
+    ? head + `この課題の対応可否を【評価のみ】してください（コード変更・コミット禁止）。\n` +
+      `最後に <!--devin-assess\\n{"feasible":"yes|needs-human|no","risk":"low|medium|high",` +
+      `"category":"auto|review|reject","reason":"理由","plan":"方針"}\\ndevin-assess-->` +
+      ` ブロックを出力。`
+    : head + `ブランチ devin/${m[2]}-${m[3]} を切り、実装→検証→push→` +
+      `gh pr create（本文に Closes #${m[3]}）。main直push・force push禁止。` };
+}
 
 const readBody = (req, limit = 64 * 1024) => new Promise((resolve, reject) => {
   let s = '';
@@ -261,25 +287,52 @@ const server = createServer(async (req, res) => {
         config = fresh;
         return json(200, { ok: true, applied });
       }
+      if (url.pathname === '/api/chat/send') {
+        const { text } = JSON.parse((await readBody(req)) || '{}');
+        if (!text) return json(400, { ok: false, error: 'empty text' });
+        try { await chat.send(String(text)); return json(200, { ok: true }); }
+        catch (e) { return json(500, { ok: false, error: e.message }); }
+      }
+      if (url.pathname === '/api/chat/option') {
+        const { id, value } = JSON.parse((await readBody(req)) || '{}');
+        try { await chat.setOption(id, value); return json(200, { ok: true }); }
+        catch (e) { return json(500, { ok: false, error: e.message }); }
+      }
+      if (url.pathname === '/api/chat/reset') {
+        await chat.reset();
+        return json(200, { ok: true });
+      }
+      if (url.pathname === '/api/chat/task') {
+        // パネルの「評価」「対応」ボタン → 生成プロンプトをチャットへ自動送信
+        const { key, mode } = JSON.parse((await readBody(req)) || '{}');
+        const p = taskPrompt(key, mode);
+        if (!p) return json(400, { ok: false, error: 'bad key: ' + key });
+        if (p.error) return json(400, { ok: false, error: p.error });
+        try { await chat.send(p.text); return json(200, { ok: true }); }
+        catch (e) { return json(500, { ok: false, error: e.message }); }
+      }
       if (url.pathname === '/api/dispatch' || url.pathname === '/api/assess') {
-        // 個別実行: dispatcher.mjs --task / --assess を spawn（ACP 経由で実セッション）
+        // 実行キュー登録: 実実行は Devin IDE のチャットエージェントが
+        // MCP (issue-queue) 経由で queue_claim → 実行 → queue_done する
         const isAssess = url.pathname === '/api/assess';
         const { key } = JSON.parse((await readBody(req)) || '{}');
         const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
         if (!m) return json(400, { ok: false, error: 'bad key: ' + key });
-        if (!config.repos?.some((r) => r.github === m[1])) {
-          return json(400, { ok: false, error: 'repo not monitored: ' + m[1] });
+        const repo = config.repos?.find((r) => r.github === m[1]);
+        if (!repo) return json(400, { ok: false, error: 'repo not monitored: ' + m[1] });
+        const q = loadJson(join(ROOT, 'work-queue.json'), { items: [] });
+        if (q.items.some((i) => i.key === key && i.mode === (isAssess ? 'assess' : 'impl'))) {
+          return json(409, { ok: false, error: 'already queued: ' + key });
         }
-        const mkey = isAssess ? 'assess:' + key : key;
-        if (manualRuns.has(mkey)) return json(409, { ok: false, error: 'already running: ' + key });
-        const proc = spawn(process.execPath,
-          ['dispatcher.mjs', isAssess ? '--assess' : '--task', key], {
-          cwd: ROOT, windowsHide: true, stdio: 'ignore',
+        const it = readIssueStore(ISSUES_PATH).issues?.[key] ?? {};
+        q.items.push({
+          key, mode: isAssess ? 'assess' : 'impl',
+          repo, type: m[2], number: +m[3],
+          title: it.title ?? '', url: it.url ?? '', body: it.body ?? '',
+          status: 'pending', queuedAt: new Date().toISOString(),
         });
-        manualRuns.set(mkey, proc.pid);
-        proc.on('close', () => manualRuns.delete(mkey));
-        proc.on('error', () => manualRuns.delete(mkey));
-        return json(200, { ok: true, pid: proc.pid });
+        writeFileSync(join(ROOT, 'work-queue.json'), JSON.stringify(q, null, 2));
+        return json(200, { ok: true, queued: key });
       }
       if (url.pathname === '/api/login') {
         // explorer.exe 経由で .bat を開く → ユーザーの対話セッションに
@@ -340,6 +393,9 @@ const server = createServer(async (req, res) => {
       try {
         return json(200, await candidates(url.searchParams.get('force') === '1'));
       } catch (e) { return json(500, { ok: false, error: e.message }); }
+    }
+    if (url.pathname === '/api/chat') {
+      return json(200, chat.snapshot());
     }
     if (url.pathname === '/api/log') {
       const n = Math.min(parseInt(url.searchParams.get('n') ?? '200', 10) || 200, 2000);

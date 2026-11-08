@@ -52,6 +52,17 @@
   .st-done { color: #16a34a; } .st-failed { color: #dc2626; } .st-running { color: #ca8a04; }
   .st-needs-review { color: #7c3aed; } .st-rejected { color: #991b1b; }
   .trig-auto { color: #7c3aed; } .trig-label { color: #2563eb; }
+  #chat-box { height: 420px; overflow-y: auto; border: 1px solid #dfe3ea; border-radius: 8px;
+              background: #f8fafc; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 85%; padding: 8px 12px; border-radius: 10px; font-size: 13px;
+         white-space: pre-wrap; word-break: break-word; }
+  .msg.user { align-self: flex-end; background: #2563eb; color: #fff; }
+  .msg.agent { align-self: flex-start; background: #fff; border: 1px solid #dfe3ea; }
+  .msg.tool { align-self: flex-start; background: #f1f5f9; color: #64748b; font-size: 11px;
+              font-family: monospace; }
+  .msg.sys { align-self: center; background: none; color: #94a3b8; font-size: 11px; }
+  #chat-input { display: flex; gap: 8px; margin-top: 8px; }
+  #chat-input input { flex: 1; }
   .jd { font-weight: 600; font-size: 11px; }
   .jd-auto { color: #16a34a; } .jd-review { color: #b45309; } .jd-reject { color: #dc2626; }
   pre { background: #f8fafc; border: 1px solid #e3e7ee; border-radius: 8px;
@@ -122,6 +133,7 @@
   <button data-tab="cands" class="active" onclick="showTab('cands')">対応候補</button>
   <button data-tab="tasks" onclick="showTab('tasks')">処理履歴</button>
   <button data-tab="cfg" onclick="showTab('cfg')">設定</button>
+  <button data-tab="chat" onclick="showTab('chat')">チャット</button>
   <button data-tab="log" onclick="showTab('log')">ログ</button>
 </div>
 
@@ -170,6 +182,18 @@
     </div>
   </div>
 
+  <div id="tab-chat" class="tabpanel">
+    <div class="h3">AI チャット（Devin ACP セッション）
+      <span id="chat-status" style="font-weight:400;color:#6b7280"></span>
+      <button class="mini" onclick="chatReset()">リセット</button></div>
+    <div id="chat-opts" style="display:flex;gap:8px;margin:4px 0 8px;flex-wrap:wrap"></div>
+    <div id="chat-box"><div class="msg sys">「評価」「対応」ボタンを押すとプロンプトが自動送信されます</div></div>
+    <div id="chat-input">
+      <input id="chat-text" placeholder="指示を入力（Enter で送信 / 実行中の追加指示も可）"
+             onkeydown="if(event.key==='Enter')chatSend()">
+      <button class="primary" onclick="chatSend()">送信</button>
+    </div>
+  </div>
   <div id="tab-log" class="tabpanel">
     <div class="h3"><span id="log-title">dispatcher.log（末尾）</span>
       <button class="mini" onclick="logKey=null;showTab('log')">dispatcher.log に戻す</button></div>
@@ -303,23 +327,69 @@ async function saveCfg() {
   refresh();
 }
 
+async function chatSend() {
+  const el = document.getElementById('chat-text');
+  const text = el.value.trim();
+  if (!text) return;
+  el.value = '';
+  await fetch(API + '/api/chat/send', { method: 'POST', headers: H, body: JSON.stringify({ text }) });
+  loadChat();
+}
+async function chatOption(id, value) {
+  const r = await fetch(API + '/api/chat/option', {
+    method: 'POST', headers: H, body: JSON.stringify({ id, value }),
+  });
+  const j = await r.json();
+  if (!j.ok) toast('設定変更失敗: ' + (j.error || ''));
+}
+async function chatReset() {
+  await fetch(API + '/api/chat/reset', { method: 'POST', headers: H });
+  loadChat();
+}
+async function loadChat() {
+  try {
+    const j = await (await fetch(API + '/api/chat')).json();
+    document.getElementById('chat-status').textContent = j.busy ? '（実行中…）' :
+      j.ready ? '' : '（未起動）';
+    // モデル/モード選択（ACP configOptions）
+    const opts = document.getElementById('chat-opts');
+    if (j.options && j.options.length) {
+      opts.innerHTML = j.options.map(o =>
+        '<label style="font-size:11px;color:#6b7280">' + esc(o.name) +
+        '<select style="font-size:12px" onchange="chatOption(\'' + esc(o.id) + '\',this.value)">' +
+        o.options.map(v => '<option value="' + esc(v.value) + '"' +
+          (v.value === o.currentValue ? ' selected' : '') + '>' + esc(v.name) + '</option>').join('') +
+        '</select></label>').join('');
+    }
+    const box = document.getElementById('chat-box');
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.innerHTML = (j.messages || []).map(m =>
+      '<div class="msg ' + esc(m.role) + '">' + esc(m.text) + '</div>').join('') ||
+      '<div class="msg sys">「評価」「対応」ボタンでプロンプトを自動送信できます</div>';
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  } catch { /* noop */ }
+}
+
+// 評価/対応ボタン → チャットへプロンプト自動送信 + チャットタブへ移動
 async function assess(key) {
   try {
-    const r = await fetch(API + '/api/assess', {
-      method: 'POST', headers: H, body: JSON.stringify({ key }),
+    const r = await fetch(API + '/api/chat/task', {
+      method: 'POST', headers: H, body: JSON.stringify({ key, mode: 'assess' }),
     });
     const j = await r.json();
-    toast(j.ok ? '評価セッション起動: ' + key : '失敗: ' + (j.error || ''));
+    toast(j.ok ? '評価を送信: ' + key : '失敗: ' + (j.error || ''));
+    if (j.ok) { showTab('chat'); loadChat(); }
   } catch (e) { toast('assess: ' + e.message); }
 }
 
 async function dispatch(key) {
   try {
-    const r = await fetch(API + '/api/dispatch', {
-      method: 'POST', headers: H, body: JSON.stringify({ key }),
+    const r = await fetch(API + '/api/chat/task', {
+      method: 'POST', headers: H, body: JSON.stringify({ key, mode: 'impl' }),
     });
     const j = await r.json();
-    toast(j.ok ? '起動しました: ' + key + ' (pid ' + j.pid + ')' : '失敗: ' + (j.error || ''));
+    toast(j.ok ? '対応を送信: ' + key : '失敗: ' + (j.error || ''));
+    if (j.ok) { showTab('chat'); loadChat(); }
   } catch (e) { toast('dispatch: ' + e.message); }
   setTimeout(loadCandidates, 1000);
 }
@@ -512,7 +582,8 @@ function setCandInt() {
 })();
 
 refresh();
-setInterval(refresh, 3000);
+loadChat();
+setInterval(() => { refresh(); if (document.getElementById('tab-chat').classList.contains('active')) loadChat(); }, 3000);
 loadCandidates(false);
 </script>
 </body>

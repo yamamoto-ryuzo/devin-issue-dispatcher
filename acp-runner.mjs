@@ -68,13 +68,20 @@ proc.stdout.on('data', (d) => {
       const p = pending.get(msg.id); pending.delete(msg.id);
       msg.error ? p.rej(new Error(JSON.stringify(msg.error))) : p.res(msg.result);
     } else if (msg.method === 'session/update') {
-      // エージェント出力・ツール活動をログへ（判定ブロックもここに出る）
+      // チャット風の可読ストリームに整形（エージェント本文・ツール実行・計画）
       const u = msg.params?.update;
-      if (u?.sessionUpdate === 'agent_message_chunk' && u.content?.text) {
+      if (!u) { /* noop */ }
+      else if (u.sessionUpdate === 'agent_message_chunk' && u.content?.text) {
         appendFileSync(LOG, u.content.text);
-      } else {
-        out(JSON.stringify(msg.params));
+      } else if (u.sessionUpdate === 'tool_call') {
+        const args = JSON.stringify(u.rawInput ?? u.input ?? '').slice(0, 160);
+        out(`\n[tool →] ${u.title ?? u.toolName ?? 'tool'} ${args}`);
+      } else if (u.sessionUpdate === 'tool_call_update' && u.status === 'failed') {
+        out(`[tool ✗] ${u.title ?? ''}`);
+      } else if (u.sessionUpdate === 'plan') {
+        out(`[plan] ${JSON.stringify(u.entries ?? '').slice(0, 300)}`);
       }
+      // agent_thought_chunk / config_option_update 等は省略
     } else if (msg.method === 'session/request_permission' && msg.id != null) {
       const option = config.permissionMode === 'dangerous' ? 'allow_always' : 'allow_once';
       proc.stdin.write(JSON.stringify({
