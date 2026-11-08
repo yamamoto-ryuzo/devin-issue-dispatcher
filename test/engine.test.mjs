@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { engineSendCore, injectExtraPrompt, assertApiUrlSafe,
-         ASSESS_RE, SPLIT_RE } from '../engine.mjs';
+         skillEnabled, ASSESS_RE, SPLIT_RE } from '../engine.mjs';
 
 const mockFetch = (fn) => { const orig = globalThis.fetch; globalThis.fetch = fn; return () => { globalThis.fetch = orig; }; };
 const res = (body, ok = true, status = 200) => ({ ok, status, json: async () => body });
@@ -56,6 +56,17 @@ test('assertApiUrlSafe: https 許可・loopback http 許可・外部 http 拒否
   assert.doesNotThrow(() => assertApiUrlSafe('https://a.example.com'));
   assert.doesNotThrow(() => assertApiUrlSafe('http://127.0.0.1:11434'));
   assert.throws(() => assertApiUrlSafe('http://8.8.8.8'), /https のみ許可/);
+});
+
+test('skillEnabled: 未登録=有効・type=skill enabled:false で無効・他typeは無関係', () => {
+  assert.equal(skillEnabled({}, '_all.md'), true);
+  const cfg = { plugins: [
+    { type: 'skill', name: '_done.md', enabled: false },
+    { type: 'mcp', name: 'extra-server', enabled: true },
+    { type: 'skill', name: '_impl.md', enabled: true }] };
+  assert.equal(skillEnabled(cfg, '_done.md'), false);
+  assert.equal(skillEnabled(cfg, '_all.md'), true);
+  assert.equal(skillEnabled(cfg, 'extra-server'), true); // type!=skill は対象外
 });
 
 test('判定ブロック抽出: assess/split', () => {

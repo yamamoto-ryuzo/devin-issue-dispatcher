@@ -71,3 +71,11 @@ export function injectExtraPrompt(text, extraPrompt) {
 // 判定・切り分けブロック抽出（watchAssess/watchSplit と同一正規表現）
 export const ASSESS_RE = /<!--devin-assess\s*([\s\S]*?)devin-assess-->/;
 export const SPLIT_RE = /<!--split\s*([\s\S]*?)split-->/;
+
+// プラグインレジストリ: cfg.plugins = [{type, name, enabled}]
+// type:'skill' は skills/*.md のプロンプト注入を制御（未登録=有効扱い）。
+// 'skill' 以外の type（'mcp'/'hook' 等）は将来の拡張種別用の登録枠
+export function skillEnabled(cfg, name) {
+  return (cfg?.plugins ?? [])
+    .find((e) => e && e.type === 'skill' && e.name === name)?.enabled !== false;
+}

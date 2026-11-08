@@ -21,7 +21,7 @@
  * 127.0.0.1 のみにバインドする。
  */
 import { createServer } from 'node:http';
-import { engineSendCore, injectExtraPrompt, ASSESS_RE, SPLIT_RE } from './engine.mjs';
+import { engineSendCore, injectExtraPrompt, ASSESS_RE, SPLIT_RE, skillEnabled } from './engine.mjs';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
@@ -374,7 +374,9 @@ function taskPrompt(key, mode, skillFile) {
   // skillFile 指定時はモード既定ではなくそのファイルを使う（パス走査防止の検証付き）
   const modeSkill = (skillFile && /^[\w-]+\.md$/.test(skillFile)) ? skillFile
     : (mode !== 'assess' && mode !== 'split' && m[2] === 'pr') ? '_pr.md' : `_${mode}.md`;
-  const skillFiles = ['_all.md', modeSkill, '_done.md'];
+  // config.plugins の type:'skill' エントリで無効化されたスキルは注入しない
+  const skillFiles = ['_all.md', modeSkill, '_done.md']
+    .filter((f) => skillEnabled(config, f));
   const skills = skillFiles
     .map((f) => { try { return readFileSync(join(ROOT, 'skills', f), 'utf8').trim(); } catch { return ''; } })
     .filter(Boolean).join('\n\n');
@@ -647,6 +649,7 @@ function status() {
       apiUrl: config.apiUrl ?? '', apiModel: config.apiModel ?? '',
       apiModels: config.apiModels ?? {},
       bridgeModels: config.bridgeModels ?? {},
+      plugins: config.plugins ?? [],
       apiKeySet: !!effectiveApiKey(), // 値自体は返さない（hasValue のみ）
       extraPrompt: config.extraPrompt ?? '',
       repos: (config.repos || []).map((r) => r.github),
@@ -1148,9 +1151,17 @@ const server = createServer(async (req, res) => {
           'maxAutoRisk',
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax',
           'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt', 'extraOrigins',
-          'toolMaxSteps', 'apiModels', 'bridgeModels', 'acpOptions'];
+          'toolMaxSteps', 'apiModels', 'bridgeModels', 'acpOptions', 'plugins'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
+        // plugins は拡張レジストリ [{type,name,enabled}] のみ受理
+        if (patch.plugins !== undefined && !(Array.isArray(patch.plugins) &&
+            patch.plugins.every((e) => e && typeof e === 'object' &&
+              typeof e.type === 'string' && /^[\w-]{1,40}$/.test(e.type) &&
+              typeof e.name === 'string' && e.name.length >= 1 && e.name.length <= 200 &&
+              typeof e.enabled === 'boolean'))) {
+          return json(400, { ok: false, error: 'plugins は [{type,name,enabled}] の配列のみ' });
+        }
         // apiUrl は Bearer 送信先: 外部ホストの http 平文送信を保存時に拒否
         if (patch.apiUrl !== undefined && patch.apiUrl) {
           try { assertApiUrlSafe(String(patch.apiUrl)); }
@@ -1557,9 +1568,11 @@ const server = createServer(async (req, res) => {
       try { for (const f of readdirSync(dir)) if (f.endsWith('.md')) names.add(f); } catch { /* noop */ }
       const files = [...names].sort().map((f) => ({
         name: f,
+        enabled: skillEnabled(config, f),
         content: (() => { try { return readFileSync(join(dir, f), 'utf8'); } catch { return ''; } })(),
       }));
-      return json(200, { files });
+      // plugins: 種別付き拡張レジストリ（'skill' 以外の将来拡張種別も含め公開）
+      return json(200, { files, plugins: config.plugins ?? [] });
     }
     if (url.pathname === '/api/log') {
       const n = Math.min(parseInt(url.searchParams.get('n') ?? '200', 10) || 200, 2000);

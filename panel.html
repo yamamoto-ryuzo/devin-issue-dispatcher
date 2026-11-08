@@ -568,12 +568,44 @@ function showEngTab(name) {
     const el = document.getElementById('engt-' + t);
     if (el) el.style.display = t === name ? 'block' : 'none';
   });
-  if (name === 'plugin') {
-    const el = document.getElementById('eng-plugin-list');
-    if (el && typeof skills !== 'undefined' && skills.length)
-      el.innerHTML = skills.map((s) => '<div>' + esc(s.name) + '</div>').join('');
-  }
+  if (name === 'plugin') renderPlugins();
   if (name === 'bridge') refreshBridgeCli();
+}
+// ---- プラグイン管理（config.plugins = [{type,name,enabled}] の種別付きレジストリ。
+// skill 以外の type は将来の拡張種別（MCP・フック等）用の登録枠で表示のみ）----
+async function renderPlugins() {
+  const el = document.getElementById('eng-plugin-list');
+  if (!el) return;
+  try {
+    const j = await (await fetch(API + '/api/skills')).json();
+    const others = (j.plugins || []).filter((e) => e && e.type !== 'skill');
+    el.innerHTML = (j.files || []).map((s) =>
+      '<label style="display:flex;gap:6px;align-items:center;padding:2px 0">' +
+      '<input type="checkbox"' + (s.enabled !== false ? ' checked' : '') +
+      ' onchange="setPluginEnabled(\'' + esc(s.name) + '\',this.checked)">' +
+      '<span>' + esc(s.name) + '</span>' +
+      (s.enabled === false ?
+        '<span style="color:#c62828">（無効: プロンプトへ注入されません）</span>' : '') +
+      '</label>').join('') +
+      others.map((e) => '<div style="padding:2px 0;color:#666">[' + esc(e.type) + '] ' +
+        esc(e.name) + (e.enabled === false ? '（無効）' : '') + '</div>').join('');
+  } catch (e) { el.textContent = '取得失敗: ' + e.message; }
+}
+async function setPluginEnabled(name, on) {
+  try {
+    // 現在のレジストリを取得して skill エントリを upsert（他 type の登録は維持）
+    const j = await (await fetch(API + '/api/skills')).json();
+    const plugins = (j.plugins || [])
+      .filter((e) => !(e && e.type === 'skill' && e.name === name));
+    plugins.push({ type: 'skill', name, enabled: !!on });
+    const r = await fetch(API + '/api/config', {
+      method: 'POST', headers: H, body: JSON.stringify({ plugins }),
+    });
+    const res = await r.json();
+    toast(res.ok ? name + ' を' + (on ? '有効' : '無効') + '化（次回ディスパッチから反映）' :
+      '失敗: ' + (res.error || ''));
+  } catch (e) { toast('setPluginEnabled: ' + e.message); }
+  renderPlugins();
 }
 // ---- ブリッジCLI導入状況（bridge-hub /setup。CANVAS AI設定の install パネル相当）----
 const BRIDGE_CLI_PROVIDERS = ['copilot', 'devin', 'antigravity'];

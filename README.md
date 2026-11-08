@@ -262,6 +262,7 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 - `discover.mjs` — 課題発見ロジック（dispatcher/control 共用の共通モジュール）
 - `dispatcher.mjs` — 本体（依存なし、Node 標準のみ）
 - `config.json` — 設定（Git 追跡対象。シークレットは入れない）
+  - `plugins`: 拡張レジストリ `[{type,name,enabled}]`。`type:"skill"` は skills/*.md のプロンプト注入を制御（`enabled:false` で注入除外・ファイル自体は残りスキルタブで編集可）。パネルのプラグインペインで切替、`/api/config` で永続化。`"skill"` 以外の type（MCP・フック等）は将来の拡張種別用の登録枠
 - `config.example.json` — config.json の構成例（追跡対象へキーが入らない形）
 - `secrets.json` — APIキー等のシークレット（自動生成・gitignore 済）
 - `state.json` — 処理済み課題の状態（自動生成）

@@ -17,6 +17,7 @@ import { readFileSync, writeFileSync, appendFileSync, existsSync, renameSync, mk
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gh, ghJson, keyOf, discover, toCandidate, readIssueStore } from './discover.mjs';
+import { skillEnabled } from './engine.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
@@ -168,8 +169,14 @@ function loadPolicy(ghRepo) {
 }
 
 // skills/*.md をプロンプトへ注入（control.mjs taskPrompt と同じ構成: 全体+モード別+完了時）
+// config.plugins の type:'skill' エントリで無効化されたスキルは除外。
+// レジストリは呼出毎に config.json を読み直し、パネルでの切替を再起動なしで反映する
 function loadSkills(kind) {
-  const files = ['_all.md', (kind === 'pr' || kind === 'verify') ? '_pr.md' : '_impl.md', '_done.md'];
+  const cfg = (() => {
+    try { return JSON.parse(readFileSync(configPath, 'utf8')); } catch { return config; }
+  })();
+  const files = ['_all.md', (kind === 'pr' || kind === 'verify') ? '_pr.md' : '_impl.md', '_done.md']
+    .filter((f) => skillEnabled(cfg, f));
   const text = files.map((f) => {
     try { return readFileSync(join(ROOT, 'skills', f), 'utf8').trim(); }
     catch { return ''; }
