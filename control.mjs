@@ -486,6 +486,24 @@ const server = createServer(async (req, res) => {
         if (s) { try { await s.chat.reset(); } catch { /* noop */ } chats.delete(id); }
         return json(200, { ok: true });
       }
+      if (url.pathname === '/api/close') {
+        // issue をクローズ（gh issue close + state 記録）
+        const { key } = JSON.parse((await readBody(req)) || '{}');
+        const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
+        if (!m || m[2] !== 'issue') return json(400, { ok: false, error: 'bad key: ' + key });
+        try {
+          await new Promise((res, rej) => {
+            execFile('gh', ['issue', 'close', m[3], '-R', m[1],
+              '--comment', 'Devin dispatcher からクローズ'],
+              (e, so, se) => e ? rej(new Error(se || e.message)) : res(so));
+          });
+          const st = loadJson(STATE_PATH, { tasks: {} });
+          st.tasks[key] = { ...(st.tasks[key] ?? {}), status: 'closed',
+            closedAt: new Date().toISOString() };
+          writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+          return json(200, { ok: true });
+        } catch (e) { return json(500, { ok: false, error: e.message }); }
+      }
       if (url.pathname === '/api/chat/task') {
         // パネルの「評価」「対応」ボタン → 空き/新規セッションへ自動送信
         const { key, mode, skill } = JSON.parse((await readBody(req)) || '{}');

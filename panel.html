@@ -749,8 +749,26 @@ function detail(key) {
           '<span style="font-size:11px;color:#6b7280">実装済み部分を完了にし、残りを新規 issue に分割して自動再評価します</span>'
         : '<button class="mini" disabled style="opacity:.4" title="評価で partial=true の場合のみ使用可能">切り分け</button>' +
           '<span style="font-size:11px;color:#a8b0bd">一部実装済みの課題のみ使用できます</span>') +
+      '<button class="mini" style="margin-left:10px;background:#dc2626;border-color:#dc2626;color:#fff" ' +
+        'onclick="closeIssue(\'' + esc(c.key) + '\')">クローズ</button>' +
       '</div>';
   document.getElementById('modal').style.display = 'flex';
+}
+
+// 課題クローズ
+async function closeIssue(key) {
+  if (!confirm(key + ' を GitHub 上でクローズしますか？')) return;
+  try {
+    const r = await fetch(API + '/api/close', {
+      method: 'POST', headers: H, body: JSON.stringify({ key }),
+    });
+    const j = await r.json();
+    toast(j.ok ? 'クローズしました: ' + key : '失敗: ' + (j.error || ''));
+    if (j.ok) {
+      document.getElementById('modal').style.display = 'none';
+      loadCandidates(true);
+    }
+  } catch (e) { toast('close: ' + e.message); }
 }
 
 // 切り分け: 実装済み部分を完了・残りを新規Issue化 → 新Issueを自動再評価
