@@ -7,7 +7,7 @@
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
-  body { margin: 0; padding: 24px; max-width: 1000px; margin-inline: auto;
+  body { margin: 0; padding: 24px; max-width: min(1600px, 97vw); margin-inline: auto;
          background: #f4f6f9; color: #1f2937;
          font: 14px/1.6 "Segoe UI", "Yu Gothic UI", sans-serif; }
   h1 { font-size: 20px; margin: 0 0 4px; }
@@ -823,7 +823,7 @@ function renderCandBody() {
         ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? '再評価' : '評価') + '</button>' +
       '<button class="mini primary" ' + (busy ? 'disabled' : '') +
         ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button></td>' +
-      '<td style="white-space:normal;min-width:280px"><a href="' + esc(c.url) +
+      '<td style="white-space:normal;min-width:220px;max-width:560px;word-break:break-all"><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener">' + esc(c.title) + '</a></td>' +
       '<td class="' + (c.trigger === 'auto-new' ? 'trig-auto' : 'trig-label') + '">' +
         (c.trigger === 'auto-new' ? '自動(新規)' : 'devin ラベル') + '</td>' +
