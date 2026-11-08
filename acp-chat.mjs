@@ -130,6 +130,21 @@ export class AcpChat {
     return res;
   }
 
+  clear() {
+    this.messages = [];
+    this.push('sys', '履歴をクリアしました（セッションは継続中）');
+  }
+
+  async cancel() {
+    if (!this.sessionId) return;
+    try { await this.rpc('session/cancel', { sessionId: this.sessionId }); }
+    catch { /* noop */ }
+    this.busy = false;
+    const last = this.messages.at(-1);
+    if (last?.role === 'agent') last.done = true;
+    this.push('sys', '[中断しました]');
+  }
+
   async reset() {
     try { this.proc?.kill(); } catch { /* noop */ }
     this.proc = null; this.sessionId = null; this.ready = false;

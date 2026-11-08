@@ -328,6 +328,14 @@ const server = createServer(async (req, res) => {
         try { await chat.setOption(id, value); return json(200, { ok: true }); }
         catch (e) { return json(500, { ok: false, error: e.message }); }
       }
+      if (url.pathname === '/api/chat/clear') {
+        chat.clear();
+        return json(200, { ok: true });
+      }
+      if (url.pathname === '/api/chat/cancel') {
+        await chat.cancel();
+        return json(200, { ok: true });
+      }
       if (url.pathname === '/api/chat/reset') {
         await chat.reset();
         return json(200, { ok: true });

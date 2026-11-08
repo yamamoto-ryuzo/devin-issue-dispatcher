@@ -185,6 +185,8 @@
   <div id="tab-chat" class="tabpanel">
     <div class="h3">AI チャット（Devin ACP セッション）
       <span id="chat-status" style="font-weight:400;color:#6b7280"></span>
+      <button class="mini" onclick="chatCancel()">中断</button>
+      <button class="mini" onclick="chatClear()">クリア</button>
       <button class="mini" onclick="chatReset()">リセット</button></div>
     <div id="chat-opts" style="display:flex;gap:8px;margin:4px 0 8px;flex-wrap:wrap"></div>
     <div id="chat-box"><div class="msg sys">「評価」「対応」ボタンを押すとプロンプトが自動送信されます</div></div>
@@ -341,6 +343,14 @@ async function chatOption(id, value) {
   });
   const j = await r.json();
   if (!j.ok) toast('設定変更失敗: ' + (j.error || ''));
+}
+async function chatClear() {
+  await fetch(API + '/api/chat/clear', { method: 'POST', headers: H });
+  loadChat();
+}
+async function chatCancel() {
+  await fetch(API + '/api/chat/cancel', { method: 'POST', headers: H });
+  loadChat();
 }
 async function chatReset() {
   await fetch(API + '/api/chat/reset', { method: 'POST', headers: H });
