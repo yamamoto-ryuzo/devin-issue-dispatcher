@@ -456,6 +456,7 @@ async function loadChat() {
 
 // 評価/対応ボタン → チャットへプロンプト自動送信 + チャットタブへ移動
 let awaitAssess = null; // {key, since} 評価完了を待っている課題
+const localBusy = new Set(); // 押下直後から即反映するローカルの実行中キー ("key assess"形式)
 
 async function assess(key) {
   try {
@@ -465,10 +466,14 @@ async function assess(key) {
     const j = await r.json();
     toast(j.queued ? '同時起動上限のため待機キューに登録しました（空き次第自動実行）: ' + key
           : j.ok ? '評価を送信: ' + key : '失敗: ' + (j.error || ''));
-    if (j.ok && !j.queued) {
-      awaitAssess = { key, since: new Date().toISOString() };
-      chatSel = j.id;
-      showTab('chat'); loadSessions(); loadChat();
+    if (j.ok) {
+      localBusy.add(key + ' assess');
+      renderCandBody();
+      if (!j.queued) {
+        awaitAssess = { key, since: new Date().toISOString() };
+        chatSel = j.id;
+        showTab('chat'); loadSessions(); loadChat();
+      }
     }
   } catch (e) { toast('assess: ' + e.message); }
 }
@@ -481,7 +486,11 @@ async function dispatch(key) {
     const j = await r.json();
     toast(j.queued ? '同時起動上限のため待機キューに登録しました（空き次第自動実行）: ' + key
           : j.ok ? '対応を送信: ' + key : '失敗: ' + (j.error || ''));
-    if (j.ok && !j.queued) { chatSel = j.id; showTab('chat'); loadSessions(); loadChat(); }
+    if (j.ok) {
+      localBusy.add(key + ' impl');
+      renderCandBody();
+      if (!j.queued) { chatSel = j.id; showTab('chat'); loadSessions(); loadChat(); }
+    }
   } catch (e) { toast('dispatch: ' + e.message); }
   setTimeout(loadCandidates, 1000);
 }
@@ -528,12 +537,12 @@ async function refresh() {
     const t = (status.tasks || []).find((x) => x.key === awaitAssess.key);
     if (t?.assess?.category && t.assessedAt > awaitAssess.since) {
       toast('評価完了: ' + t.assess.category + '/' + t.assess.risk);
+      localBusy.delete(awaitAssess.key + ' assess');
       awaitAssess = null;
       showTab('cands');
       loadCandidates(true);
     }
   }
-  if (lastCands.length) renderCandBody();
   fillCfgForm();
   flags.autoDiscover = !!status.config.autoDiscover;
   flags.autoAssess = !!status.config.autoAssess;
@@ -718,12 +727,14 @@ function renderCandBody() {
     if (!items.length) return head + '<div class="repo-empty">候補なし</div>';
     const rows = items.map(c => {
       const chatPh = (status.chatBusy || []).find((l) => l.startsWith(c.key + ' '));
+      const localPh = [...localBusy].find((l) => l.startsWith(c.key + ' '));
       const chatQueued = (status.chatWaiting || []).includes(c.key + ' assess') ||
         (status.chatWaiting || []).includes(c.key + ' impl');
-      const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key) || !!chatPh;
-      const phaseBadge = chatPh
+      const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key) || !!chatPh || !!localPh;
+      const phaseBadge = (chatPh || localPh)
         ? '<span class="badge" style="background:#b45309;color:#fff;margin-right:4px">' +
-          (chatPh.endsWith(' assess') ? '評価中' : chatPh.endsWith(' impl') ? '対応中' : '実行中') + '</span>'
+          ((chatPh || localPh).endsWith(' assess') ? '評価中' :
+           (chatPh || localPh).endsWith(' impl') ? '対応中' : '実行中') + '</span>'
         : chatQueued ? '<span class="badge" style="background:#6b7280;color:#fff;margin-right:4px">待機中</span>' : '';
       const a = c.assess;
       const CAT_TIP = {
