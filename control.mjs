@@ -35,9 +35,18 @@ const CONFIG_PATH = join(ROOT, 'config.json');
 const DESIRED_PATH = join(ROOT, 'desired.json');
 const STATE_PATH = join(ROOT, 'state.json');
 const CANDS_PATH = join(ROOT, 'candidates.json');
+const GOALS_PATH = join(ROOT, 'goals.json');
 const ISSUES_PATH = join(ROOT, 'issues.json');
 const LOG_PATH = join(ROOT, 'logs', 'dispatcher.log');
 const PANEL_PATH = join(ROOT, 'panel.html');
+// 判定カテゴリの自動処理しきい値: autoCategory までの判定を自動処理する
+const CAT_ORDER = ['auto', 'review', 'human', 'reject'];
+const catAllowed = (cat) =>
+  CAT_ORDER.indexOf(cat) <= CAT_ORDER.indexOf(config.autoCategory ?? 'review');
+// リスクの自動処理しきい値: maxAutoRisk までのリスクを自動処理する（判定とは AND）
+const RISK_ORDER = ['low', 'medium', 'high'];
+const riskAllowed = (risk) =>
+  RISK_ORDER.indexOf(risk) <= RISK_ORDER.indexOf(config.maxAutoRisk ?? 'medium');
 
 let config = loadJson(CONFIG_PATH, {});
 const HOST = '127.0.0.1';
@@ -80,7 +89,7 @@ function pickChatId(label) {
   for (const [id, s] of chats) if (!s.chat.busy) { if (label) s.label = label; return id; }
   const id = ++chatSeq;
   chats.set(id, {
-    chat: new AcpChat({ devinExe: config.devinExe, cwd: ROOT }),
+    chat: new AcpChat({ devinExe: config.devinExe, cwd: dirname(ROOT) }),
     label: label ?? `session ${id}`,
   });
   return id;
@@ -120,15 +129,19 @@ async function dispatchChatTask(key, mode, skill) {
   await chats.get(id).chat.send(p.text);
   if (mode === 'assess') watchAssess(key, chats.get(id).chat);
   if (mode === 'split') watchSplit(key, chats.get(id).chat);
+  if (mode === 'impl') watchImpl(key, chats.get(id).chat);
   return id;
 }
 setInterval(() => {
-  for (let i = chatWait.length - 1; i >= 0; i--) {
-    if (chatCapacity(chatWait[i].mode, chatWait[i].key)) {
+  // busy が立つ前に同じチャットを再選択しないよう await し、失敗時はキューへ戻す
+  (async () => {
+    for (let i = chatWait.length - 1; i >= 0; i--) {
+      if (!chatCapacity(chatWait[i].mode, chatWait[i].key)) continue;
       const { key, mode, skill } = chatWait.splice(i, 1)[0];
-      dispatchChatTask(key, mode, skill).catch(() => { /* noop */ });
+      try { await dispatchChatTask(key, mode, skill); }
+      catch { chatWait.push({ key, mode, skill }); }
     }
-  }
+  })();
 }, 3000).unref?.();
 
 function taskPrompt(key, mode, skillFile) {
@@ -157,7 +170,7 @@ function taskPrompt(key, mode, skillFile) {
   return { key, text: mode === 'assess'
     ? head + `この課題の対応可否を【評価のみ】してください（コード変更・コミット禁止）。\n` +
       `最後に <!--devin-assess\\n{"feasible":"yes|needs-human|no","risk":"low|medium|high",` +
-      `"category":"auto|review|reject","partial":true|false,"reason":"理由","plan":"方針"}` +
+      `"category":"auto|review|human|reject","partial":true|false,"reason":"理由","plan":"方針"}` +
       `\\ndevin-assess--> ブロックを出力。\n` +
       `partial は「要求の一部が既に実装済み・分割可能な残作業がある」場合のみ true。`
     : mode === 'split'
@@ -175,7 +188,9 @@ function taskPrompt(key, mode, skillFile) {
           `gh pr create（本文に Closes #${m[3]}）。main直push・force push禁止。\n`) +
       `検証が NG の場合は修正→再検証のループを最大 ${config.implLoopMax ?? 5} 回まで行う。\n` +
       `上限に達しても完了しない場合は「対応困難」として理由と現状を ` +
-      `${m[2] === 'pr' ? 'PR' : 'issue'} コメントで報告し、ユーザーへ対応を依頼する。` };
+      `${m[2] === 'pr' ? 'PR' : 'issue'} コメントで報告し、ユーザーへ対応を依頼する。\n` +
+      `PR を作成した場合は最後に <!--impl-pr\\n{"prKey":"${m[1]} pr#<作成したPR番号>"}\\nimpl-pr--> ` +
+      `ブロックを出力（作成した PR は評価スキルで評価されてから PR 対応へ進む）。` };
 }
 
 const readBody = (req, limit = 64 * 1024) => new Promise((resolve, reject) => {
@@ -244,6 +259,15 @@ function watchAssess(key, ch) {
             st.tasks[key] = { ...(st.tasks[key] ?? {}),
               assess: v, assessedAt: new Date().toISOString(), engine: 'chat' };
             writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+            // 自動連鎖: issue課題は autoTrigger、pr課題は autoPr が ON のとき
+            // 判定・リスクが自動処理範囲内なら対応（impl）へ投入
+            const autoOk = key.includes(' pr#')
+              ? (config.autoPr ?? false) : (config.autoTrigger ?? false);
+            if (autoOk && catAllowed(v.category) && riskAllowed(v.risk) &&
+                !['running', 'done', 'needs-review', 'rejected'].includes(st.tasks[key]?.status) &&
+                !chatWait.some((w) => w.key === key)) {
+              chatWait.push({ key, mode: 'impl' });
+            }
           } catch { /* malformed JSON */ }
         }
       }
@@ -302,6 +326,46 @@ function watchSplit(key, ch) {
   setTimeout(() => clearInterval(iv), 30 * 60 * 1000).unref?.();
 }
 
+// 対応完了を監視: <!--impl-pr {"prKey":...}--> または PR URL を検出したら作成 PR を評価キューへ投入
+const implWatchers = new Set();
+function watchImpl(key, ch) {
+  if (implWatchers.has(key)) return;
+  implWatchers.add(key);
+  const repo = key.slice(0, key.indexOf(' '));
+  const iv = setInterval(() => {
+    if (ch.busy) return;
+    clearInterval(iv);
+    implWatchers.delete(key);
+    // 直近30件の agent メッセージから検出: まずマーカー（正規経路）、無ければ PR URL で補完
+    let prKey = null;
+    const agentMsgs = [];
+    for (let i = ch.messages.length - 1; i >= 0 && agentMsgs.length < 30; i--) {
+      if (ch.messages[i].role === 'agent') agentMsgs.push(ch.messages[i].text);
+    }
+    for (const text of agentMsgs) {
+      const m = text.match(/<!--impl-pr\s*([\s\S]*?)impl-pr-->/);
+      if (m) { try { prKey = JSON.parse(m[1].trim()).prKey || null; } catch { /* noop */ } break; }
+    }
+    if (!prKey) {
+      for (const text of agentMsgs) {
+        const u = text.match(/github\.com\/[^\s/]+\/[^\s/]+\/pull\/(\d+)/);
+        if (u) { prKey = repo + ' pr#' + u[1]; break; }
+      }
+    }
+    if (!prKey) return;
+    const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+    st.tasks[key] = { ...(st.tasks[key] ?? {}),
+      createdPr: prKey, prAt: new Date().toISOString() };
+    writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+    if (!chatWait.some((w) => w.key === prKey) &&
+        ![...chats.values()].some((s) => s.chat.busy && s.label === prKey + ' assess') &&
+        !st.tasks[prKey]?.assess?.category) {
+      chatWait.push({ key: prKey, mode: 'assess' });
+    }
+  }, 3000);
+  setTimeout(() => { clearInterval(iv); implWatchers.delete(key); }, 30 * 60 * 1000).unref?.();
+}
+
 function status() {
   const state = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
   const tasks = Object.entries(state.tasks ?? {})
@@ -322,6 +386,9 @@ function status() {
       autoDiscover: config.autoDiscover ?? true,
       autoTrigger: config.autoTrigger ?? false,
       autoAssess: config.autoAssess ?? false,
+      autoPr: config.autoPr ?? false,
+      autoCategory: config.autoCategory ?? 'review',
+      maxAutoRisk: config.maxAutoRisk ?? 'medium',
       assessMaxAgeHours: config.assessMaxAgeHours ?? 24,
       autoTriggerSince: config.autoTriggerSince ?? null,
       permissionMode: config.permissionMode ?? 'dangerous',
@@ -398,7 +465,8 @@ async function candidates(force) {
     candidates: raw.map((c) => {
       const key = keyOf(c.repo, c.type, c.number);
       const t = state.tasks?.[key];
-      return { key, ...c, state: t?.status ?? null, assess: t?.assess ?? null };
+      return { key, ...c, state: t?.status ?? null, assess: t?.assess ?? null,
+        createdPr: t?.createdPr ?? null };
     }),
   };
 }
@@ -452,6 +520,24 @@ const server = createServer(async (req, res) => {
         }
         return json(200, { ok: true, queued: n });
       }
+      if (url.pathname === '/api/impl-all') {
+        // 自動処理設定（autoCategory × maxAutoRisk の AND）に適合する全課題を対応キューへ
+        const cands = loadJson(join(ROOT, 'candidates.json'), { candidates: [] }).candidates ?? [];
+        const st = loadJson(STATE_PATH, { tasks: {} }).tasks ?? {};
+        let n = 0;
+        for (const c of cands) {
+          const key = c.key ?? `${c.repo} ${c.type}#${c.number}`;
+          const a = st[key]?.assess;
+          if (!a?.category || a.error) continue;
+          if (!catAllowed(a.category) || !riskAllowed(a.risk)) continue;
+          const s = st[key]?.status;
+          if (s === 'running' || s === 'done' || s === 'needs-review' || s === 'rejected') continue;
+          if (chatWait.some((w) => w.key === key)) continue;
+          chatWait.push({ key, mode: 'impl' });
+          n++;
+        }
+        return json(200, { ok: true, queued: n });
+      }
       if (url.pathname === '/api/once') {
         return json(200, startDispatcher('once'));
       }
@@ -463,7 +549,8 @@ const server = createServer(async (req, res) => {
         // config.json の一部キーを更新（ファイル + メモリ両方）
         const allowed = ['pollIntervalSec', 'candidateCacheSec', 'maxNewPerPoll',
           'maxConcurrent', 'maxConcurrentAssess', 'maxConcurrentImpl', 'maxConcurrentPr',
-          'autoDiscover', 'autoTrigger', 'autoAssess',
+          'autoDiscover', 'autoTrigger', 'autoAssess', 'autoPr', 'autoCategory',
+          'maxAutoRisk',
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
@@ -476,6 +563,18 @@ const server = createServer(async (req, res) => {
         }
         writeFileSync(CONFIG_PATH, JSON.stringify(fresh, null, 2) + '\n');
         config = fresh;
+        // autoPr を ON にした時点で、auto 判定済み・未完了の pr# 課題を対応キューへ投入
+        if (applied.autoPr === true) {
+          const st = loadJson(STATE_PATH, { tasks: {} });
+          for (const [k, t] of Object.entries(st.tasks || {})) {
+            if (k.includes(' pr#') && catAllowed(t?.assess?.category) &&
+                riskAllowed(t?.assess?.risk) &&
+                t?.status !== 'done' && t?.status !== 'running' &&
+                !chatWait.some((w) => w.key === k)) {
+              chatWait.push({ key: k, mode: 'impl' });
+            }
+          }
+        }
         return json(200, { ok: true, applied });
       }
       if (url.pathname === '/api/skill') {
@@ -535,6 +634,65 @@ const server = createServer(async (req, res) => {
             closedAt: new Date().toISOString() };
           writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
           return json(200, { ok: true });
+        } catch (e) { return json(500, { ok: false, error: e.message }); }
+      }
+      if (url.pathname === '/api/verdict') {
+        // パネルから判定を手動上書き（相反するが価値ある課題のユーザー判断の委ね先）
+        const { key, category } = JSON.parse((await readBody(req)) || '{}');
+        if (!['auto', 'review', 'human', 'reject'].includes(category)) {
+          return json(400, { ok: false, error: 'bad category: ' + category });
+        }
+        const st = loadJson(STATE_PATH, { tasks: {} });
+        if (!st.tasks[key]?.assess) return json(404, { ok: false, error: 'no assess: ' + key });
+        st.tasks[key].assess = { ...st.tasks[key].assess, category, manualCategory: true };
+        writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+        return json(200, { ok: true });
+      }
+      if (url.pathname === '/api/goals') {
+        // 課題整理タブの目的（やりたいこと）をリポジトリ単位で保存
+        const { id, repo, text, images } = JSON.parse((await readBody(req, 25 * 1024 * 1024)) || '{}');
+        if (!repo || !text?.trim()) return json(400, { ok: false, error: 'repo/text required' });
+        const g = loadJson(GOALS_PATH, []);
+        const gid = id || 'g' + Date.now();
+        const rec = { id: gid, repo, text, images: Array.isArray(images) ? images : [] };
+        const i = g.findIndex((x) => x.id === gid);
+        if (i >= 0) g[i] = rec; else g.push(rec);
+        writeFileSync(GOALS_PATH, JSON.stringify(g, null, 2));
+        return json(200, { ok: true, id: gid });
+      }
+      if (url.pathname === '/api/goal/delete') {
+        const { id } = JSON.parse((await readBody(req)) || '{}');
+        const g = loadJson(GOALS_PATH, []).filter((x) => x.id !== id);
+        writeFileSync(GOALS_PATH, JSON.stringify(g, null, 2));
+        return json(200, { ok: true });
+      }
+      if (url.pathname === '/api/shot') {
+        // 課題整理タブの貼り付け画像を shots/ へ保存（抽出プロンプトへパスを添付する用）
+        const { data } = JSON.parse((await readBody(req, 25 * 1024 * 1024)) || '{}');
+        const m = /^data:image\/(png|jpe?g|gif|webp);base64,(.+)$/i.exec(data || '');
+        if (!m) return json(400, { ok: false, error: 'bad image data' });
+        const dir = join(ROOT, 'shots');
+        mkdirSync(dir, { recursive: true });
+        const fp = join(dir, 'shot_' + Date.now() + '_' +
+          Math.random().toString(36).slice(2, 7) +
+          '.' + (m[1].toLowerCase().startsWith('jp') ? 'jpg' : m[1].toLowerCase()));
+        writeFileSync(fp, Buffer.from(m[2], 'base64'));
+        return json(200, { ok: true, path: fp });
+      }
+      if (url.pathname === '/api/issue') {
+        // 課題整理タブからの Issue 起票（監視リポジトリ限定）
+        const { repo, title, body } = JSON.parse((await readBody(req)) || '{}');
+        if (!config.repos?.some((r) => r.github === repo)) {
+          return json(400, { ok: false, error: 'repo not monitored: ' + repo });
+        }
+        if (!title) return json(400, { ok: false, error: 'empty title' });
+        try {
+          const out = await new Promise((res2, rej) => {
+            execFile('gh', ['issue', 'create', '-R', repo,
+              '--title', title, '--body', String(body ?? '')],
+              (e, so, se) => e ? rej(new Error(se || e.message)) : res2(so));
+          });
+          return json(200, { ok: true, url: String(out).trim() });
         } catch (e) { return json(500, { ok: false, error: e.message }); }
       }
       if (url.pathname === '/api/chat/task') {
@@ -622,6 +780,16 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(readFileSync(PANEL_PATH));
     }
+    if (url.pathname === '/docs' || url.pathname === '/docs/' ||
+        url.pathname.startsWith('/docs/')) {
+      const name = url.pathname === '/docs' || url.pathname === '/docs/'
+        ? 'index.html' : url.pathname.slice('/docs/'.length);
+      if (!/^[\w-]+\.html$/.test(name)) return json(403, { ok: false });
+      try {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(readFileSync(join(ROOT, 'docs', name)));
+      } catch { return json(404, { ok: false, error: 'docs not found' }); }
+    }
     if (url.pathname === '/api/status') return json(200, status());
     if (url.pathname === '/api/auth') {
       // devin.exe のログイン状態（auth status を実行して確認）
@@ -636,6 +804,11 @@ const server = createServer(async (req, res) => {
         return json(200, await candidates(url.searchParams.get('force') === '1'));
       } catch (e) { return json(500, { ok: false, error: e.message }); }
     }
+    if (url.pathname === '/api/goals') {
+      const g = loadJson(GOALS_PATH, []);
+      const repo = url.searchParams.get('repo');
+      return json(200, { ok: true, goals: repo ? g.filter((x) => x.repo === repo) : g });
+    }
     if (url.pathname === '/api/chat') {
       const id = +(url.searchParams.get('id') || 0);
       const s = chats.get(id);
@@ -647,7 +820,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/api/skills') {
       // skills/ の *.md を一覧（既知名＋存在するファイル）
       const dir = join(ROOT, 'skills');
-      const names = new Set(['_all.md', '_assess.md', '_impl.md', '_pr.md', '_split.md', '_done.md']);
+      const names = new Set(['_all.md', '_assess.md', '_impl.md', '_pr.md', '_split.md', '_done.md', '_survey.md']);
       try { for (const f of readdirSync(dir)) if (f.endsWith('.md')) names.add(f); } catch { /* noop */ }
       const files = [...names].sort().map((f) => ({
         name: f,
@@ -683,10 +856,10 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  const desired = loadDesired();
-  if (desired.enabled) {
+  // dispatcher は常駐前提で自動起動（各自動化はトグルフラグで制御）
+  {
     const r = startDispatcher('loop');
-    console.log(`[control] auto-started dispatcher (desired.enabled): ${JSON.stringify(r)}`);
+    console.log(`[control] auto-started dispatcher: ${JSON.stringify(r)}`);
   }
   console.log(`[control] panel: http://${HOST}:${PORT}/`);
 });

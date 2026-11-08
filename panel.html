@@ -101,7 +101,10 @@
                max-height: 240px; overflow-y: auto; }
   #modal .closebtn { float: right; }
   .jd-auto { color: #16a34a; } .jd-review { color: #b45309; }
+  .jd-human { background: #facc15; color: #1f2937; padding: 2px 8px; border-radius: 999px; }
   .jd-reject { background: #dc2626; color: #fff; padding: 2px 8px; border-radius: 999px; }
+  .badge-pr { background: #ea580c; color: #fff; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; }
   #cands tr.row-no { background: #dc2626; color: #fff; }
   #cands tr.row-no a { color: #fff; }
   #cands tr.row-no .trig-auto, #cands tr.row-no .trig-label { color: #fff; }
@@ -146,51 +149,81 @@
     <h1>Devin Agent Dispatcher</h1>
     <div class="sub" style="margin-bottom:0">GitHub Issue/PR → devin -p 自動対応エージェントの管理パネル</div>
   </div>
-  <div style="margin-left:auto;display:flex;gap:10px;align-items:flex-start">
+  <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+    <div style="display:flex;gap:10px;align-items:flex-start">
     <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
       <button id="btn-disc" class="toggle off" onclick="toggleFlag('autoDiscover')">…</button>
-      <span id="disc-desc" style="font-size:10px;color:#6b7280;text-align:center"></span>
+      <span id="disc-desc" style="display:none"></span>
     </div>
     <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
       <button id="btn-assess" class="toggle off" onclick="toggleFlag('autoAssess')">…</button>
-      <span id="assess-desc" style="font-size:10px;color:#6b7280;text-align:center"></span>
+      <span id="assess-desc" style="display:none"></span>
+      <button id="btnOnce" onclick="act('assess-all')"
+        title="判定が出ていない全候補を評価キューへ投入します。&#10;評価 同時起動数の上限までは並列セッションで即実行、&#10;超過分は待機キューで順次実行されます。">全評価実行</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
       <button id="btn-auto" class="toggle off" onclick="toggleFlag('autoTrigger')">…</button>
-      <span id="auto-desc" style="font-size:10px;color:#6b7280;text-align:center"></span>
+      <span id="auto-desc" style="display:none"></span>
+      <button onclick="act('impl-all')"
+        title="判定・リスクが自動処理設定（autoCategory × maxAutoRisk の AND）に適合する全課題に対応を開始します。&#10;対応/PR対応 同時起動数の上限までは並列実行、超過分は待機キューで順次実行されます。">全課題対応自動実行</button>
     </div>
-  </div>
-</div>
-
-<div class="card">
-  <div class="row">
-    <span id="badge" class="badge off"><span class="dot"></span>確認中…</span>
-    <button id="btnStart" class="primary" onclick="act('start')">起動</button>
-    <button id="btnStop" class="danger" onclick="act('stop')">停止</button>
-    <button id="btnOnce" onclick="act('assess-all')"
-      title="判定が出ていない全候補を評価キューへ投入します。&#10;評価 同時起動数の上限までは並列セッションで即実行、&#10;超過分は待機キューで順次実行されます。">評価実行</button>
-    <button onclick="act('reload')">設定再読込</button>
-    <span id="meta" style="color:#6b7280;font-size:12px"></span>
-    <span id="active" style="font-size:12px"></span>
-    <span style="margin-left:auto"></span>
+    <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
+      <button id="btn-auto-pr" class="toggle off" onclick="toggleFlag('autoPr')">…</button>
+      <span id="autopr-desc" style="display:none"></span>
+    </div>
+    </div>
   </div>
 </div>
 
 <div class="tabs" id="tabs">
-  <button data-tab="cands" class="active" onclick="showTab('cands')">対応候補</button>
-  <button data-tab="tasks" onclick="showTab('tasks')">処理履歴</button>
+  <span id="meta" style="display:none"></span>
+  <button data-tab="survey" onclick="showTab('survey')">課題整理</button>
+  <button data-tab="cands" class="active" onclick="showTab('cands')">課題処理</button>
   <button data-tab="prs" onclick="showTab('prs')">PR処理</button>
+  <button data-tab="tasks" onclick="showTab('tasks')">処理履歴</button>
   <button data-tab="cfg" onclick="showTab('cfg')">設定</button>
   <button data-tab="chat" onclick="showTab('chat')">チャット</button>
   <button data-tab="skills" onclick="showTab('skills')">スキル</button>
   <button data-tab="log" onclick="showTab('log')">ログ</button>
+  <button data-tab="docs" onclick="showTab('docs')">ドキュメント</button>
+  <span id="active" style="font-size:12px;margin-left:auto;align-self:center"></span>
 </div>
 
 <div class="card" style="border-top:none;border-radius:0 0 10px 10px">
+  <div id="tab-survey" class="tabpanel">
+    <div class="h3">課題整理（目的 → Issue 化）</div>
+    <div class="row" style="margin-bottom:10px">
+      <label style="font-size:12px">対象リポジトリ
+        <select id="sv-repo" style="font-size:12px;min-width:240px" onchange="document.getElementById('sv-goal-sel').value='';loadGoal();loadGoals()"></select></label>
+      <button class="primary" style="font-size:14px;padding:10px 22px" onclick="surveyExtract()">課題抽出</button>
+      <span style="font-size:12px;color:#6b7280">抽出はチャットセッションで実行（結果はチャットタブに表示）</span>
+    </div>
+    <div class="row" style="margin-bottom:6px">
+      <label style="display:block;font-size:12px;flex:1">保存済みの目的
+        <select id="sv-goal-sel" style="font-size:12px;width:100%" onchange="loadGoal()"></select></label>
+    </div>
+    <div class="row" style="margin-bottom:6px">
+      <button class="mini" onclick="saveGoal()">保存</button>
+      <button class="mini" onclick="delGoal()">削除</button>
+      <span style="font-size:12px;color:#6b7280">リポジトリごとに保存し、選択して再編集できます</span>
+    </div>
+    <label style="display:block;font-size:12px;font-weight:600;color:#4b5563;margin-bottom:10px">どのようなことをしたいか（目的・要望）
+      <textarea id="sv-goal" placeholder="例: ◯◯機能を追加したい、△△のエラーを直したい、□□を改善したい（空欄なら現状から課題候補を抽出）" onpaste="onGoalPaste(event)" style="display:block;width:100%;max-width:960px;height:180px;margin-top:4px;font-size:14px;font-family:inherit;padding:10px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false"></textarea>
+      <div id="sv-goal-imgs" style="margin-top:4px"></div>
+      <span style="font-size:12px;color:#6b7280">スクリーンショットを貼り付けできます（Ctrl+V）。課題抽出時に画像パスをプロンプトへ添付します</span></label>
+    <div id="iss-proposals" style="margin-bottom:10px"></div>
+    <div style="display:flex;flex-direction:column;gap:6px;max-width:720px">
+      <input id="iss-title" placeholder="Issue タイトル" style="font-size:13px;padding:6px 8px;border:1px solid #d1d7e0;border-radius:6px">
+      <textarea id="iss-body" placeholder="本文（機能追加・エラー修正の内容）" style="height:140px;font-size:12px;font-family:inherit;padding:8px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false"></textarea>
+      <div class="row"><button class="mini primary" onclick="issueCreate()">Issue作成</button>
+        <span id="iss-result" style="font-size:12px"></span></div>
+    </div>
+  </div>
+
   <div id="tab-cands" class="tabpanel active">
-    <div class="h3"><span>対応候補 <span id="cands-mode" style="font-weight:400;font-size:12px"></span></span>
+    <div class="h3"><span>課題処理 <span id="cands-mode" style="font-weight:400;font-size:12px"></span></span>
       <span style="display:flex;align-items:center;gap:8px">
-        <span id="cands-meta" style="color:#9ca3af;font-size:11px"></span>
+        <span id="cands-meta" style="color:#9ca3af;font-size:12px"></span>
         <select id="cand-int" onchange="setCandInt()" title="自動更新周期">
           <option value="0">手動のみ</option>
           <option value="30">30秒ごと</option>
@@ -206,8 +239,8 @@
       <span style="color:#6b7280">フィルター:</span>
       <select id="f-category" onchange="renderCandBody()">
         <option value="">判定:すべて</option><option value="auto">auto</option>
-        <option value="review">review</option><option value="reject">reject</option>
-        <option value="none">未評価</option>
+        <option value="review">review</option><option value="human">human</option>
+        <option value="reject">reject</option><option value="none">未評価</option>
       </select>
       <select id="f-risk" onchange="renderCandBody()">
         <option value="">リスク:すべて</option><option value="low">low</option>
@@ -227,6 +260,13 @@
       <thead><tr><th>課題</th><th>状態</th><th>評価</th><th>開始</th><th>終了</th><th>exit</th><th></th></tr></thead>
       <tbody id="tasks"></tbody>
     </table>
+  </div>
+
+  <div id="tab-docs" class="tabpanel">
+    <div style="display:flex;gap:8px">
+      <iframe id="docs-toc" style="width:220px;flex-shrink:0;height:calc(100vh - 220px);border:1px solid #e2e8f0;border-radius:8px;background:#fff"></iframe>
+      <iframe id="docs-frame" name="docview" style="flex:1;height:calc(100vh - 220px);border:1px solid #e2e8f0;border-radius:8px;background:#fff"></iframe>
+    </div>
   </div>
 
   <div id="tab-prs" class="tabpanel">
@@ -263,11 +303,20 @@
         <label>対応 同時起動数<br><input id="set-maxc-impl" type="number" min="1" style="width:60px"></label>
         <label>PR対応 同時起動数<br><input id="set-maxc-pr" type="number" min="1" style="width:60px" title="pr# 課題の対応セッションの同時起動上限（issue課題とは別枠）"></label>
         <label>検証ループ上限 (回)<br><input id="set-impl-loop" type="number" min="1" style="width:60px" title="対応→完了確認→NG→修正のループをこの回数まで実施。到達後はユーザーへ対応依頼"></label>
+        <label>自動処理の判定範囲<br><select id="set-autocat" style="font-size:12px" title="選択した判定まで自動で対応へ進めます&#10;auto のみ / review まで / human まで / reject まで(全て)">
+          <option value="auto">auto のみ</option>
+          <option value="review">review まで</option>
+          <option value="human">human まで</option>
+          <option value="reject">reject まで(全て)</option></select></label>
+        <label>自動処理のリスク上限<br><select id="set-autorisk" style="font-size:12px" title="選択したリスクまで自動で対応へ進めます&#10;判定範囲とは AND 条件です&#10;low のみ / medium まで / high まで(全て)">
+          <option value="low">low のみ</option>
+          <option value="medium">medium まで</option>
+          <option value="high">high まで(全て)</option></select></label>
       </div>
     </div>
     <div class="row" style="margin-top:10px">
       <button class="mini primary" onclick="saveCfg()">保存</button>
-      <span style="color:#9ca3af;font-size:11px">※ config.json を直接書き換えます。permissionMode・repos は編集不可</span>
+      <span style="color:#9ca3af;font-size:12px">※ config.json を直接書き換えます。permissionMode・repos は編集不可</span>
     </div>
   </div>
 
@@ -292,13 +341,13 @@
     <div class="row" style="margin-bottom:8px">
       <button class="mini primary" onclick="saveSkill()">保存</button>
       <span class="swseg">
-        <button id="sv-edit" class="mini primary" onclick="setSkillView('edit')">編集</button>
-        <button id="sv-view" class="mini" onclick="setSkillView('view')">表示</button>
+        <button id="sv-edit" class="mini" onclick="setSkillView('edit')">編集</button>
+        <button id="sv-view" class="mini primary" onclick="setSkillView('view')">表示</button>
       </span>
-      <span style="font-size:11px;color:#6b7280">_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別</span>
+      <span style="font-size:12px;color:#6b7280">_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別</span>
     </div>
     <textarea id="skill-edit" style="width:100%;height:420px;font-family:monospace;font-size:12px;
-      border:1px solid #dfe3ea;border-radius:6px;padding:10px" spellcheck="false"></textarea>
+      border:1px solid #dfe3ea;border-radius:6px;padding:10px;display:none" spellcheck="false"></textarea>
     <div id="skill-view"></div>
   </div>
   <div id="tab-log" class="tabpanel">
@@ -351,11 +400,12 @@ async function act(name) {
 }
 
 let cfgInit = false;
-const flags = { autoDiscover: false, autoAssess: false, autoTrigger: false };
+const flags = { autoDiscover: false, autoAssess: false, autoTrigger: false, autoPr: false };
 let logKey = null;
 function viewLog(key) { logKey = key; showTab('log'); }
 // devin.exe CLI ログインは IDE エンジン方式では不要（実行は Devin IDE セッションが担う）
 let lastActive = [];
+let lastAnyActive = false; // chatWaiting/chatBusy が存在したか（完了検知用）
 async function killActive() {
   for (const s of lastActive) {
     const key = s.replace(/ \((判定|実装)\)/, '');
@@ -374,7 +424,7 @@ const FLAG_UI = {
   },
   autoAssess: {
     btn: 'btn-assess', desc: 'assess-desc',
-    on: '判定 自動 ON', off: '判定 手動',
+    on: '評価 自動 ON', off: '評価 手動',
     onDesc: '検出した候補を定期的に自動評価します（実装はしません）',
     offDesc: '評価は手動のみ（各行の「評価」ボタン）',
   },
@@ -384,6 +434,12 @@ const FLAG_UI = {
     onDesc: '検出した候補を順次 評価→実装 で自動起動します',
     offDesc: '候補の自動起動は停止中（個別「対応」ボタンは使用可）',
   },
+  autoPr: {
+    btn: 'btn-auto-pr', desc: 'autopr-desc',
+    on: 'PR対応 自動 ON', off: 'PR対応 自動 OFF',
+    onDesc: 'auto 判定された PR 課題を自動で PR対応（impl）へ投入します',
+    offDesc: 'PR 課題の対応起動は手動のみ（各行の「対応」ボタン）',
+  },
 };
 function renderFlag(key) {
   const u = FLAG_UI[key];
@@ -391,7 +447,8 @@ function renderFlag(key) {
   const b = document.getElementById(u.btn);
   b.className = 'toggle ' + (on ? 'on' : 'off');
   b.textContent = on ? u.on : u.off;
-  document.getElementById(u.desc).textContent = on ? u.onDesc : u.offDesc;
+  const de = document.getElementById(u.desc);
+  if (de) de.textContent = on ? u.onDesc : u.offDesc;
 }
 
 async function toggleFlag(key) {
@@ -420,6 +477,8 @@ function fillCfgForm() {
   document.getElementById('set-maxc-pr').value = c.maxConcurrentPr ?? c.maxConcurrentImpl ?? c.maxConcurrent;
   document.getElementById('set-impl-loop').value = c.implLoopMax ?? 5;
   document.getElementById('set-since').value = c.autoTriggerSince ?? '';
+  document.getElementById('set-autocat').value = c.autoCategory ?? 'review';
+  document.getElementById('set-autorisk').value = c.maxAutoRisk ?? 'medium';
   document.getElementById('set-assess-age').value = c.assessMaxAgeHours ?? 24;
 }
 
@@ -434,6 +493,8 @@ async function saveCfg() {
     maxConcurrentPr: +document.getElementById('set-maxc-pr').value || undefined,
     implLoopMax: +document.getElementById('set-impl-loop').value || undefined,
     autoTriggerSince: since === '' ? null : since,
+    autoCategory: document.getElementById('set-autocat').value,
+    maxAutoRisk: document.getElementById('set-autorisk').value,
     assessMaxAgeHours: +document.getElementById('set-assess-age').value || undefined,
   };
   try {
@@ -460,8 +521,8 @@ async function loadSkills() {
     if (!pickAssess) pickAssess = skillOpts.assess[0] || '_assess.md';
     if (!pickImpl) pickImpl = skillOpts.impl[0] || '_impl.md';
     if (!pickPr) pickPr = skillOpts.pr[0] || '_pr.md';
-    // 動作順に並べる: 全体 → 評価 → 切り分け → 対応 → PR → 完了時 → その他
-    const ORDER = ['_all', '_assess', '_split', '_impl', '_pr', '_done'];
+    // 動作順に並べる: 全体 → 課題 → 評価 → 切り分け → 対応 → PR → 完了時 → その他
+    const ORDER = ['_all', '_survey', '_assess', '_split', '_impl', '_pr', '_done'];
     const names = (j.files || []).map((f) => { skillFiles[f.name] = f.content; return f.name; })
       .sort((a, b) => {
         const ia = ORDER.findIndex((o) => a.startsWith(o));
@@ -471,6 +532,7 @@ async function loadSkills() {
     if (!skillSel || !skillFiles[skillSel]) skillSel = names[0] || '_all.md';
     const skillPurpose = (n) =>
       n.startsWith('_all') ? '全モード' :
+      n.startsWith('_survey') ? '課題整理' :
       n.startsWith('_done') ? '完了時' :
       n.startsWith('_assess') ? '評価' :
       n.startsWith('_impl') ? '対応' :
@@ -487,12 +549,12 @@ async function loadSkills() {
   } catch { /* noop */ }
 }
 let skillSel = null;
-let skillView = 'edit';
+let skillView = 'view';
 function setSkillView(v) {
   skillView = v;
   document.getElementById('skill-edit').style.display = v === 'edit' ? '' : 'none';
   const pv = document.getElementById('skill-view');
-  pv.style.display = v === 'view' ? '' : 'none';
+  pv.style.display = v === 'view' ? 'block' : 'none';
   if (v === 'view') pv.innerHTML = mdToHtml(document.getElementById('skill-edit').value);
   document.getElementById('sv-edit').classList.toggle('primary', v === 'edit');
   document.getElementById('sv-view').classList.toggle('primary', v === 'view');
@@ -553,7 +615,7 @@ function mdToHtml(src) {
 function loadSkill() {
   const v = skillFiles[skillSel] || '';
   document.getElementById('skill-edit').value = v;
-  if (skillView === 'view') document.getElementById('skill-view').innerHTML = mdToHtml(v);
+  setSkillView(skillView);
 }
 async function saveSkill() {
   const name = skillSel;
@@ -629,7 +691,7 @@ async function loadChat() {
     const opts = document.getElementById('chat-opts');
     if (j.options && j.options.length) {
       opts.innerHTML = j.options.map(o =>
-        '<label style="font-size:11px;color:#6b7280">' + esc(o.name) +
+        '<label style="font-size:12px;color:#6b7280">' + esc(o.name) +
         '<select style="font-size:12px" onchange="chatOption(\'' + esc(o.id) + '\',this.value)">' +
         o.options.map(v => '<option value="' + esc(v.value) + '"' +
           (v.value === o.currentValue ? ' selected' : '') + '>' + esc(v.name) + '</option>').join('') +
@@ -701,17 +763,10 @@ async function refresh() {
     if (cb.includes(l)) continue;
     if (cw.includes(l) || Date.now() - t > 5000) localBusy.delete(l);
   }
-  const b = document.getElementById('badge');
-  const running = status.running;
-  b.className = 'badge ' + (running ? 'on' : 'off');
-  b.innerHTML = '<span class="dot"></span>' +
-    (running ? '稼働中 (' + (status.mode === 'once' ? '1サイクル' : '常駐') + ')' : '停止中');
-  document.getElementById('btnStart').disabled = running;
-  document.getElementById('btnStop').disabled = !running;
-  document.getElementById('btnOnce').disabled = running;
-  document.getElementById('meta').textContent = running
-    ? 'pid ' + status.pid + ' / 起動: ' + status.startedAt
-    : 'desired.enabled=' + status.desired.enabled;
+  const me = document.getElementById('meta');
+  if (me) me.textContent = status.running
+    ? 'ポーリング中 (pid ' + status.pid + ' / 起動: ' + status.startedAt + ')'
+    : 'ポーリング未起動';
 
   const c = status.config;
   // 実行中セッション: 手動 dispatch/評価(manualRuns) + state の running/inflight タスク
@@ -748,17 +803,26 @@ async function refresh() {
     }
     if (doneAny) loadCandidates(true);
   }
+  // 実行中・待機中の課題がある間は候補表示を追従し、全て完了したら強制リロード（新判定を取得）
+  const anyActive = ((status.chatWaiting || []).length + (status.chatBusy || []).length) > 0;
+  if (anyActive) loadCandidates(false);
+  else if (lastAnyActive) loadCandidates(true);
+  lastAnyActive = anyActive;
   fillCfgForm();
   flags.autoDiscover = !!status.config.autoDiscover;
   flags.autoAssess = !!status.config.autoAssess;
   flags.autoTrigger = !!status.config.autoTrigger;
+  flags.autoPr = !!status.config.autoPr;
   renderFlag('autoDiscover');
   renderFlag('autoAssess');
   renderFlag('autoTrigger');
+  renderFlag('autoPr');
   document.getElementById('cfg').innerHTML =
     '<dt>ポーリング間隔</dt><dd>' + c.pollIntervalSec + 's（候補キャッシュ ' + c.candidateCacheSec + 's）</dd>' +
     '<dt>autoTrigger</dt><dd>' + c.autoTrigger +
       (c.autoTrigger ? '（起点: ' + (c.autoTriggerSince || status.deployedAt || '-') + '）' : '') + '</dd>' +
+      '<dt>autoCategory</dt><dd>' + esc(c.autoCategory ?? 'review') + '</dd>' +
+      '<dt>maxAutoRisk</dt><dd>' + esc(c.maxAutoRisk ?? 'medium') + '</dd>' +
     '<dt>permissionMode</dt><dd>' + c.permissionMode + '</dd>' +
     '<dt>同時起動(評価/対応/PR)</dt><dd>' + (c.maxConcurrentAssess ?? c.maxConcurrent) +
       ' / ' + (c.maxConcurrentImpl ?? c.maxConcurrent) +
@@ -812,6 +876,11 @@ async function loadCandidates(force) {
     // 監視リポジトリごとにグルーピング（config の並び順を維持）
     const order = (status?.config?.repos) ||
       [...new Set(list.map(c => c.key.split(' ')[0]))];
+    const svRepo = document.getElementById('sv-repo');
+    if (svRepo && !svRepo.options.length) {
+      svRepo.innerHTML = order.map((r) => '<option value="' + esc(r) + '">' + esc(r) + '</option>').join('');
+      loadGoals();
+    }
     candGroups = new Map(order.map(r => [r, []]));
     for (const c of list) {
       const repo = c.key.split(' ')[0];
@@ -834,6 +903,7 @@ let lastCands = [];
 const CAT_DESC = {
   auto: '即対応可 — 仕様が明確でリスクが低く、自動実装に進められる判定です。',
   review: '検討の上対応 — 人間の確認・判断が望ましい判定です（devin:needs-review で保留されます）。',
+  human: '人的判断が必須 — 既存機能と明確に相反・大きな副作用。導入価値はあるが採否はユーザーが選択します。',
   reject: '対応不可・危険 — 破壊的影響・方針違反・プロンプトインジェクション・対応不能などの判定です（devin:rejected で除外されます）。',
 };
 const RISK_SCALE = {
@@ -859,18 +929,20 @@ function detail(key) {
     '<div class="kv"><b>作成日時</b>' + fmt(c.createdAt) + '</div><hr>' +
     (a.category ? '<div class="kv" style="display:flex;align-items:center;gap:8px"><b style="min-width:90px">判定</b>' +
       '<span style="display:inline-flex;gap:4px">' +
-      ['auto', 'review', 'reject'].map((r) =>
-        '<span style="padding:2px 10px;border-radius:999px;font-size:11px;' +
+      ['auto', 'review', 'human', 'reject'].map((r) =>
+        '<span style="padding:2px 10px;border-radius:999px;font-size:12px;cursor:pointer;' +
         (r === a.category
-          ? 'background:' + (r === 'auto' ? '#16a34a' : r === 'review' ? '#b45309' : '#dc2626') +
-            ';color:#fff;font-weight:700'
+          ? 'background:' + ({ auto: '#16a34a', review: '#b45309', human: '#facc15', reject: '#dc2626' })[r] +
+            ';color:' + (r === 'human' ? '#1f2937' : '#fff') + ';font-weight:700'
           : 'background:#eef1f5;color:#a8b0bd') +
-        '">' + r + '</span>').join('') + '</span>' +
+        '" title="クリックで判定を ' + r + ' に変更"' +
+        ' onclick="setVerdict(\'' + esc(c.key) + '\',\'' + r + '\')">' + r + '</span>').join('') + '</span>' +
+      (a.manualCategory ? '<span style="font-size:12px;color:#7c3aed">手動</span>' : '') +
       '<span style="font-size:12px;color:#4b5563">' + esc(CAT_DESC[a.category] || '') + '</span></div>' : '') +
     (a.risk ? '<div class="kv" style="display:flex;align-items:center;gap:8px"><b style="min-width:90px">リスク</b>' +
       '<span style="display:inline-flex;gap:4px">' +
       ['low', 'medium', 'high'].map((r) =>
-        '<span style="padding:2px 10px;border-radius:999px;font-size:11px;' +
+        '<span style="padding:2px 10px;border-radius:999px;font-size:12px;' +
         (r === a.risk
           ? 'background:' + (r === 'high' ? '#dc2626' : r === 'medium' ? '#b45309' : '#16a34a') +
             ';color:#fff;font-weight:700'
@@ -886,13 +958,214 @@ function detail(key) {
       (a.partial === true || a.partial === 'true'
         ? '<button class="mini" style="background:#7c3aed;border-color:#7c3aed;color:#fff" ' +
           'onclick="splitIssue(\'' + esc(c.key) + '\')">切り分け</button>' +
-          '<span style="font-size:11px;color:#6b7280">実装済み部分を完了にし、残りを新規 issue に分割して自動再評価します</span>'
+          '<span style="font-size:12px;color:#6b7280">実装済み部分を完了にし、残りを新規 issue に分割して自動再評価します</span>'
         : '<button class="mini" disabled style="opacity:.4" title="評価で partial=true の場合のみ使用可能">切り分け</button>' +
-          '<span style="font-size:11px;color:#a8b0bd">一部実装済みの課題のみ使用できます</span>') +
+          '<span style="font-size:12px;color:#a8b0bd">一部実装済みの課題のみ使用できます</span>') +
       '<button class="mini" style="margin-left:10px;background:#dc2626;border-color:#dc2626;color:#fff" ' +
         'onclick="closeIssue(\'' + esc(c.key) + '\')">クローズ</button>' +
       '</div>';
   document.getElementById('modal').style.display = 'flex';
+}
+
+// 判定の手動上書き（相反するが価値ある課題をユーザーが選択する経路）
+async function setVerdict(key, category) {
+  try {
+    const r = await fetch(API + '/api/verdict', {
+      method: 'POST', headers: H, body: JSON.stringify({ key, category }),
+    });
+    const j = await r.json();
+    toast(j.ok ? '判定を ' + category + ' に変更: ' + key : '失敗: ' + (j.error || ''));
+    if (j.ok) {
+      const c = lastCands.find((x) => x.key === key);
+      if (c?.assess) { c.assess.category = category; c.assess.manualCategory = true; detail(key); }
+      loadCandidates(false);
+    }
+  } catch (e) { toast('verdict: ' + e.message); }
+}
+
+// 目的（やりたいこと）の保存・選択・削除 — リポジトリごとに goals.json へ保存
+let goals = [];
+async function loadGoals() {
+  try {
+    const repo = document.getElementById('sv-repo').value;
+    const j = await (await fetch(API + '/api/goals?repo=' + encodeURIComponent(repo))).json();
+    goals = j.goals || [];
+    const sel = document.getElementById('sv-goal-sel');
+    sel.innerHTML = '<option value="">（新規）</option>' +
+      goals.map((g) => '<option value="' + esc(g.id) + '">' +
+        esc((g.text.split(/\r?\n/)[0].trim() || '（空）').slice(0, 40)) + '</option>').join('');
+  } catch { /* noop */ }
+}
+let goalImages = [];
+function onGoalPaste(e) {
+  for (const it of e.clipboardData?.items || []) {
+    if (!it.type.startsWith('image/')) continue;
+    const f = it.getAsFile();
+    if (!f) continue;
+    const fr = new FileReader();
+    fr.onload = () => { goalImages.push(fr.result); renderGoalImgs(); };
+    fr.readAsDataURL(f);
+  }
+}
+function renderGoalImgs() {
+  document.getElementById('sv-goal-imgs').innerHTML = goalImages.map((d, i) =>
+    '<span style="position:relative;display:inline-block;margin-right:8px;margin-bottom:4px">' +
+    '<img src="' + d + '" style="height:64px;border:1px solid #cbd5e1;border-radius:4px">' +
+    '<span title="削除" onclick="goalImages.splice(' + i + ',1);renderGoalImgs()" ' +
+    'style="position:absolute;top:-6px;right:-6px;background:#dc2626;color:#fff;border-radius:50%;' +
+    'width:16px;height:16px;font-size:12px;line-height:16px;text-align:center;cursor:pointer">×</span></span>'
+  ).join('');
+}
+function loadGoal() {
+  const g = goals.find((x) => x.id === document.getElementById('sv-goal-sel').value);
+  document.getElementById('sv-goal').value = g?.text || '';
+  goalImages = g?.images || [];
+  renderGoalImgs();
+}
+async function saveGoal() {
+  const id = document.getElementById('sv-goal-sel').value;
+  const repo = document.getElementById('sv-repo').value;
+  const text = document.getElementById('sv-goal').value.trim();
+  if (!repo || !text) return toast('リポジトリと内容は必須です');
+  const j = await (await fetch(API + '/api/goals', {
+    method: 'POST', headers: H,
+    body: JSON.stringify({ id: id || undefined, repo, text, images: goalImages }),
+  })).json();
+  toast(j.ok ? '保存しました' : '失敗: ' + (j.error || ''));
+  if (j.ok) loadGoals();
+}
+async function delGoal() {
+  const id = document.getElementById('sv-goal-sel').value;
+  if (!id) return;
+  const j = await (await fetch(API + '/api/goal/delete', {
+    method: 'POST', headers: H, body: JSON.stringify({ id }),
+  })).json();
+  toast(j.ok ? '削除しました' : '失敗: ' + (j.error || ''));
+  if (j.ok) { document.getElementById('sv-goal').value = ''; goalImages = []; renderGoalImgs(); loadGoals(); }
+}
+
+// 課題抽出: リポジトリを分析して起票候補をチャットセッションで列挙させる
+async function surveyExtract() {
+  const repo = document.getElementById('sv-repo').value;
+  if (!repo) return toast('リポジトリを選択してください');
+  const goal = document.getElementById('sv-goal').value.trim();
+  // 貼り付け画像はファイルへ保存し、パスをプロンプトへ添付
+  const shotPaths = [];
+  for (const d of goalImages) {
+    try {
+      const sj = await (await fetch(API + '/api/shot', {
+        method: 'POST', headers: H, body: JSON.stringify({ data: d }),
+      })).json();
+      if (sj.path) shotPaths.push(sj.path);
+    } catch { /* noop */ }
+  }
+  let skill = '';
+  try {
+    const sj = await (await fetch(API + '/api/skills')).json();
+    skill = (sj.files || []).find((f) => f.name === '_survey.md')?.content || '';
+  } catch { /* noop */ }
+  const text = (skill ? skill + '\n\n---\n\n' : '') +
+    `GitHub リポジトリ ${repo} を対象に課題を整理してください。\n` +
+    (goal ? `【目的】${goal}\n` : '') +
+    (shotPaths.length ? `【添付画像】${shotPaths.join(' , ')} — 各画像を参照して内容を把握し課題へ反映すること\n` : '') +
+    `目的達成に必要な作業を検討し、起票すべき Issue（機能追加・エラー修正・改善）を` +
+    `「タイトル案」と「本文案」付きで箇条書きにしてください。` +
+    `gh CLI で既存 Issue/PR とコードも確認し、既存と重複する課題は避けてください（起票自体はまだ行わない）。\n` +
+    `最後に必ず <!--issues [{"title":"タイトル案","body":"本文案"},...] issues--> の JSON ブロックを出力してください。`;
+  try {
+    const r = await fetch(API + '/api/chat/send', {
+      method: 'POST', headers: H, body: JSON.stringify({ id: null, text }),
+    });
+    const j = await r.json();
+    if (j.id) { chatSel = j.id; loadSessions(); pollIssues(j.id); }
+    toast(j.ok ? '課題抽出を送信しました（チャットタブに出力されます）' : '失敗: ' + (j.error || ''));
+  } catch (e) { toast('survey: ' + e.message); }
+}
+
+// 抽出結果をチャット履歴から検出し、Issue 候補としてフォームに反映
+let surveyProps = [];
+function pollIssues(id) {
+  const seen = new Set();
+  const all = [];
+  let quiet = 0;
+  const iv = setInterval(async () => {
+    try {
+      const j = await (await fetch(API + '/api/chat?id=' + id)).json();
+      const before = all.length;
+      // 全 agent メッセージの複数ブロックを重複排除しながらマージ
+      for (const msg of j.messages || []) {
+        if (msg.role !== 'agent') continue;
+        for (const m of msg.text.matchAll(/<!--issues\s*([\s\S]*?)issues-->/g)) {
+          try {
+            for (const item of JSON.parse(m[1].trim())) {
+              const k = (item.title || '') + '|' + (item.body || '');
+              if (!seen.has(k)) { seen.add(k); all.push(item); }
+            }
+          } catch { /* malformed */ }
+        }
+      }
+      if (all.length) renderProps(all);
+      quiet = all.length > before ? 0 : quiet + 1;
+      if (all.length && quiet >= 2) clearInterval(iv);
+    } catch { /* noop */ }
+  }, 3000);
+  setTimeout(() => clearInterval(iv), 5 * 60 * 1000);
+}
+function renderProps(list) {
+  surveyProps = list;
+  document.getElementById('iss-proposals').innerHTML =
+    '<div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px">抽出された Issue 候補（' +
+    list.length + '件）</div>' +
+    list.map((p, i) =>
+      '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin-bottom:6px;background:#f8fafc">' +
+      '<input id="prop-t' + i + '" value="' + esc(p.title || '') + '" ' +
+      'style="width:100%;font-size:13px;padding:5px 8px;border:1px solid #d1d7e0;border-radius:6px;margin-bottom:4px">' +
+      '<textarea id="prop-b' + i + '" style="width:100%;height:80px;font-size:12px;font-family:inherit;' +
+      'padding:6px 8px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false">' + esc(p.body || '') + '</textarea>' +
+      '<button id="prop-btn-' + i + '" class="mini primary" style="margin-top:4px" onclick="issueCreateProp(' + i + ')">この内容でIssue作成</button>' +
+      '<span id="prop-res-' + i + '" style="font-size:12px;margin-left:8px"></span>' +
+      '</div>').join('');
+}
+async function issueCreateProp(i) {
+  const repo = document.getElementById('sv-repo').value;
+  const title = document.getElementById('prop-t' + i).value.trim();
+  const body = document.getElementById('prop-b' + i).value;
+  if (!repo || !title) return toast('リポジトリとタイトルは必須です');
+  try {
+    const r = await fetch(API + '/api/issue', {
+      method: 'POST', headers: H, body: JSON.stringify({ repo, title, body }),
+    });
+    const j = await r.json();
+    toast(j.ok ? 'Issue作成: ' + j.url : '失敗: ' + (j.error || ''));
+    if (j.ok) {
+      const btn = document.getElementById('prop-btn-' + i);
+      if (btn) { btn.disabled = true; btn.style.opacity = '.45'; btn.textContent = '作成済み'; }
+      const res = document.getElementById('prop-res-' + i);
+      if (res) res.innerHTML = '<a href="' + esc(j.url) + '" target="_blank" rel="noopener">' + esc(j.url) + '</a>';
+      loadCandidates(true);
+    }
+  } catch (e) { toast('issue: ' + e.message); }
+}
+
+// Issue 起票
+async function issueCreate() {
+  const repo = document.getElementById('sv-repo').value;
+  const title = document.getElementById('iss-title').value.trim();
+  const body = document.getElementById('iss-body').value;
+  if (!repo || !title) return toast('リポジトリとタイトルは必須です');
+  try {
+    const r = await fetch(API + '/api/issue', {
+      method: 'POST', headers: H, body: JSON.stringify({ repo, title, body }),
+    });
+    const j = await r.json();
+    const res = document.getElementById('iss-result');
+    if (j.ok && j.url) {
+      res.innerHTML = '<a href="' + esc(j.url) + '" target="_blank" rel="noopener">作成しました: ' + esc(j.url) + '</a>';
+      document.getElementById('iss-title').value = '';
+      document.getElementById('iss-body').value = '';
+      loadCandidates(true);
+    } else { res.textContent = '失敗: ' + (j.error || ''); }
+  } catch (e) { toast('issue: ' + e.message); }
 }
 
 // 課題クローズ
@@ -938,22 +1211,20 @@ function renderCandTabs() {
 }
 
 function renderCandBody() {
-  const box = document.getElementById('cands');
   const manual = new Set(status?.manualRuns || []);
   const entries = candTab === '__all__'
     ? [...candGroups.entries()]
     : [[candTab, candGroups.get(candTab) || []]];
   const fCat = document.getElementById('f-category')?.value || '';
   const fRisk = document.getElementById('f-risk')?.value || '';
-  const fType = document.getElementById('f-type')?.value || '';
   const fStat = document.getElementById('f-status')?.value || '';
-  box.innerHTML = entries.map(([repo, items]) => {
+  const renderEntries = (wantType, selId) => entries.map(([repo, items]) => {
     const filtered = items.filter((c) => {
       const a = c.assess;
+      if (c.type !== wantType) return false;
       if (fCat === 'none' && a?.category) return false;
       if (fCat && fCat !== 'none' && a?.category !== fCat) return false;
       if (fRisk && a?.risk !== fRisk) return false;
-      if (fType && c.type !== fType) return false;
       const ph = (status.chatBusy || []).some((l) => l.startsWith(c.key + ' ')) ||
         [...localBusy.keys()].some((l) => l.startsWith(c.key + ' '));
       const qued = (status.chatWaiting || []).includes(c.key + ' assess') ||
@@ -973,22 +1244,23 @@ function renderCandBody() {
     const rows = filtered.map(c => {
       const chatPh = (status.chatBusy || []).find((l) => l.startsWith(c.key + ' '));
       const localPh = [...localBusy.keys()].find((l) => l.startsWith(c.key + ' '));
-      const chatQueued = (status.chatWaiting || []).includes(c.key + ' assess') ||
-        (status.chatWaiting || []).includes(c.key + ' impl') ||
-        localWait.has(c.key + ' assess') || localWait.has(c.key + ' impl');
+      const quedAssess = (status.chatWaiting || []).includes(c.key + ' assess') ||
+        localWait.has(c.key + ' assess');
+      const quedImpl = (status.chatWaiting || []).includes(c.key + ' impl') ||
+        localWait.has(c.key + ' impl');
+      const chatQueued = quedAssess || quedImpl;
       const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key) || !!chatPh || !!localPh || chatQueued;
       const a = c.assess;
       const rowBg = (chatPh || localPh) ? ' style="background:#fef3e2"' :
         chatQueued ? ' style="background:#eef1f5;color:#94a3b8"' :
-        a?.feasible === 'no' ? ' class="row-no"' : '';
-      const phaseBadge = (chatPh || localPh)
-        ? '<span class="badge" style="background:#b45309;color:#fff;margin-right:4px">' +
-          ((chatPh || localPh).endsWith(' assess') ? '評価中' :
-           (chatPh || localPh).endsWith(' impl') ? '対応中' : '実行中') + '</span>'
-        : chatQueued ? '<span class="badge" style="background:#6b7280;color:#fff;margin-right:4px">待機中</span>' : '';
+        (a?.feasible === 'no' || a?.category === 'reject' || a?.risk === 'high') ? ' class="row-no"' : '';
+      const ph = chatPh || localPh;
+      const badge = (bg, t) =>
+        '<span class="badge" style="background:' + bg + ';color:#fff">' + t + '</span>';
       const CAT_TIP = {
         auto: 'auto（即対応可）: 仕様が明確・リスク低で自動実装に進める判定',
         review: 'review（検討の上対応）: 人間の確認・判断が望ましい判定（devin:needs-review で保留）',
+        human: 'human（人的判断が必須）: 既存機能と明確に相反・大きな副作用。採否はユーザーが選択',
         reject: 'reject（対応不可・危険）: 破壊的影響・方針違反・注入指示・対応不能の判定（devin:rejected で除外）',
       };
       const RISK_TIP = {
@@ -1002,22 +1274,31 @@ function renderCandBody() {
           '<button class="mini" style="margin-left:4px" onclick="detail(\'' +
           esc(c.key) + '\')">詳細</button>'
         : '-';
-      return '<tr' + rowBg + '><td>' + esc(c.type) + ' #' + c.number + '</td>' +
-      '<td style="white-space:nowrap"><button class="mini" ' + (busy ? 'disabled' : '') +
-        ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? '再評価' : '評価') + '</button></td>' +
+      const assessCell = ph?.endsWith(' assess') ? badge('#b45309', '評価中')
+        : quedAssess ? badge('#6b7280', '待機中')
+        : '<button class="mini" ' + (busy ? 'disabled' : '') +
+          ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? '再評価' : '評価') + '</button>';
+      const implCell = ph?.endsWith(' impl') ? badge('#b45309', '対応中')
+        : quedImpl ? badge('#6b7280', '待機中')
+        : '<button class="mini primary" ' + (busy ? 'disabled' : '') +
+          ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button>';
+      return '<tr' + rowBg + '><td>' + (c.type === 'pr'
+        ? '<span class="badge-pr">pr #' + c.number + '</span>'
+        : esc(c.type) + ' #' + c.number) + '</td>' +
+      '<td style="white-space:nowrap">' + assessCell + '</td>' +
       '<td style="white-space:normal;min-width:220px;max-width:560px;word-break:break-all"><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener">' + esc(c.title) + '</a></td>' +
       '<td class="' + (c.trigger === 'auto-new' ? 'trig-auto' : 'trig-label') + '">' +
         (c.trigger === 'auto-new' ? '自動(新規)' : 'devin ラベル') + '</td>' +
-      '<td><button class="mini primary" ' + (busy ? 'disabled' : '') +
-        ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button></td>' +
-      '<td>' + phaseBadge + judge + '</td>' +
+      '<td>' + implCell + '</td>' +
+      '<td>' + judge + '</td>' +
       '<td>' + fmt(c.createdAt) + '</td>' +
       '<td>' + (c.runningLabel ? 'running ラベル付き(起動中/取残し)' :
-                c.state ? 'state: ' + c.state : '') + '</td></tr>';
+                c.state ? 'state: ' + c.state : '') +
+        (c.createdPr ? ' → ' + esc(String(c.createdPr).split(' ').pop()) : '') + '</td></tr>';
     }).join('');
     const skillSel = (id, opts, cur) =>
-      '<select style="font-size:10px;width:78px" title="使用する skills/*.md" ' +
+      '<select style="font-size:12px;width:78px" title="使用する skills/*.md" ' +
       'onchange="' + ({ a: 'pickAssess', i: 'pickImpl', p: 'pickPr' }[id] || 'pickImpl') + '=this.value">' +
       opts.map((f) => '<option value="' + esc(f) + '"' + (f === cur ? ' selected' : '') + '>' +
         esc(f.replace('.md', '')) + '</option>').join('') + '</select>';
@@ -1027,14 +1308,17 @@ function renderCandBody() {
         '<br>' + skillSel('a', skillOpts.assess, pickAssess) + '</th>' +
       '<th title="GitHub の課題タイトル（クリックで GitHub を開く）">タイトル</th>' +
       '<th title="候補になった経路&#10;自動(新規): 起点以降に作成された未処理課題&#10;devin ラベル: 明示的にラベル指定">トリガー</th>' +
-      '<th title="対応: 実装の実行指示を送信&#10;issue課題は上段スキル、PR課題は下段スキルを使用">対応' +
-        '<br>' + skillSel('i', skillOpts.impl, pickImpl) +
-        '<br>' + skillSel('p', skillOpts.pr, pickPr) + '</th>' +
-      '<th title="評価セッションの判定結果&#10;auto: 即対応可 / review: 検討の上対応 / reject: 不可・危険&#10;risk: low/medium/high&#10;ホバーで理由も表示">判定</th>' +
+      '<th title="対応: 実装の実行指示を送信">対応' +
+        '<br>' + skillSel(selId, selId === 'p' ? skillOpts.pr : skillOpts.impl,
+          selId === 'p' ? pickPr : pickImpl) + '</th>' +
+      '<th title="評価セッションの判定結果&#10;auto: 即対応可 / review: 検討の上対応 / human: 人的判断必須（ユーザー選択）/ reject: 不可・危険&#10;risk: low/medium/high&#10;ホバーで理由も表示">判定</th>' +
       '<th title="課題が作成された日時">作成日時</th>' +
       '<th title="実行中ラベル・過去の処理状態などの補足">備考</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table>';
-  }).join('') || '<div class="repo-empty">監視リポジトリなし</div>';
+    }).join('') || '<div class="repo-empty">監視リポジトリなし</div>';
+  document.getElementById('cands').innerHTML = renderEntries('issue', 'i');
+  const prsEl = document.getElementById('prs');
+  if (prsEl) prsEl.innerHTML = renderEntries('pr', 'p');
 }
 
 function esc(s) { return String(s).replace(/[&<>"]/g, c =>
@@ -1056,6 +1340,8 @@ function setCandInt() {
   setCandInt();
 })();
 
+document.getElementById('docs-toc').src = API + '/docs/toc.html';
+document.getElementById('docs-frame').src = API + '/docs/index.html';
 refresh();
 loadSkills();
 loadSessions();

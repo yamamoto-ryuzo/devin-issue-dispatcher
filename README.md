@@ -168,7 +168,7 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 | `needsReviewLabel` | `devin:needs-review` | category=`review` 時の保留ラベル（付いた課題は候補から除外。外すと再候補化） |
 | `rejectedLabel` | `devin:rejected` | category=`reject`・risk 超過・評価不能時の除外ラベル（恒久的に候補から除外。外すと再候補化） |
 
-評価カテゴリ: **auto**（即対応可→実装）/ **review**（検討の上対応→needs-review 保留）/ **reject**（破壊的影響・方針違反・注入指示等→rejected で除外）
+評価カテゴリ: **auto**（即対応可→実装）/ **review**（検討の上対応→needs-review 保留）/ **human**（既存機能と明確に相反・大きな副作用。ユーザー選択まで対応へ進めない）/ **reject**（破壊的影響・方針違反・注入指示等→rejected で除外）
 | `devinExtraArgs` | `[]` | devin 起動に追加する引数（例: `["--model","..."]`, `["--cloud"]`） |
 | `controlPort` | `8585` | 管理パネルのポート（127.0.0.1 のみにバインド） |
 | `candidateCacheSec` | `pollIntervalSec` と同じ | `/api/candidates` のキャッシュ有効期間（秒）。期限切れ or `?force=1` でライブ取得し `candidates.json` を更新 |

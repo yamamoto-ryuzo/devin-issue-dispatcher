@@ -8,12 +8,14 @@
   "failedLabel": "devin:failed",
   "staleRunningMinutes": 180,
   "autoDiscover": false,
-  "autoTrigger": false,
+  "autoTrigger": true,
   "autoTriggerSince": "all",
   "maxNewPerPoll": 50,
   "permissionMode": "dangerous",
   "assessFirst": true,
   "autoAssess": false,
+  "autoPr": true,
+  "autoCategory": "review",
   "assessMaxAgeHours": 24,
   "maxAutoRisk": "medium",
   "needsReviewLabel": "devin:needs-review",
@@ -69,6 +71,6 @@
   "candidateCacheSec": 120,
   "maxConcurrentAssess": 5,
   "maxConcurrentImpl": 1,
-  "maxConcurrentPr": 1,
+  "maxConcurrentPr": 5,
   "implLoopMax": 5
 }

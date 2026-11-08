@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Devin Agent Dispatcher — システムドキュメント</title>
+<style>
+  body{font-family:'Segoe UI',system-ui,sans-serif;max-width:960px;margin:0 auto;padding:24px;line-height:1.6;color:#1f2937}
+  h1{border-bottom:2px solid #e5e7eb;padding-bottom:8px}
+  h2{margin-top:32px;border-bottom:1px solid #e5e7eb;padding-bottom:4px;color:#0f172a}
+  h3{color:#334155}
+  code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:0.9em}
+  pre{background:#0f172a;color:#e2e8f0;padding:12px 16px;border-radius:8px;overflow-x:auto;font-size:13px}
+  table{border-collapse:collapse;width:100%;font-size:14px}
+  th,td{border:1px solid #d1d7e0;padding:6px 10px;text-align:left}
+  th{background:#f8fafc}
+  .badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:700}
+  .b-auto{background:#16a34a;color:#fff}.b-review{background:#b45309;color:#fff}
+  .b-human{background:#facc15;color:#1f2937}.b-reject{background:#dc2626;color:#fff}
+  .note{background:#fff7ed;border-left:4px solid #f59e0b;padding:8px 12px;margin:8px 0;font-size:14px}
+  .flow{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;font-family:monospace;font-size:13px;white-space:pre}
+  nav{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 16px;font-size:14px}
+</style>
+</head>
+<body>
+<h1>Devin Agent Dispatcher — システムドキュメント</h1>
+<p>GitHub Issue/PR を監視し、Devin エージェント（<code>devin -p</code> / ACP チャット）が課題の評価・実装・PR対応を自動で行う常駐システム。管理パネル <code>http://127.0.0.1:8585</code> から全体を制御する。</p>
+
+<nav>
+<b>目次:</b> <a href="#arch">構成</a> · <a href="#flow">全体フロー</a> · <a href="#panel">管理パネル</a> ·
+<a href="#skills">スキル</a> · <a href="#verdict">4段階判定</a> · <a href="#config">設定項目</a> · <a href="#safety">安全設計</a>
+</nav>
+
+<h2 id="arch">構成</h2>
+<table>
+<tr><th>ファイル</th><th>役割</th></tr>
+<tr><td><code>control.mjs</code></td><td>管理サーバー（ポート 8585）。パネル配信・REST API・dispatcher 子プロセス管理・チャットセッションの待機キュー</td></tr>
+<tr><td><code>dispatcher.mjs</code></td><td>ポーリング本体。<code>gh</code> で Issue/PR を検出し <code>devin -p</code> セッションを起動（自動運転経路）</td></tr>
+<tr><td><code>discover.mjs</code></td><td>候補検出・state.json 参照</td></tr>
+<tr><td><code>mcp-server.mjs</code></td><td>Devin IDE チャット向け MCP（queue_claim / queue_done）</td></tr>
+<tr><td><code>acp-chat.mjs</code> / <code>acp-runner.mjs</code></td><td>Devin ACP チャット制御（パネルのチャット・評価・対応セッション）</td></tr>
+<tr><td><code>panel.html</code></td><td>管理パネル UI（単一ファイル・外部依存なし）</td></tr>
+<tr><td><code>skills/_*.md</code></td><td>エージェントへ注入する行動規範（全モード共通 + モード別）</td></tr>
+<tr><td><code>prompts/*.md</code></td><td>リポジトリ固有の対応指針（<code>_default.md</code> が既定）</td></tr>
+<tr><td><code>config.json</code></td><td>設定（監視リポジトリ・同時起動数・フラグ・ループ上限等）</td></tr>
+</table>
+
+<h2 id="flow">全体フロー</h2>
+<pre class="mermaid">
+flowchart TD
+  S0["ステップ0: 課題整理<br/>目的入力 → AI が必要作業を検討<br/>→ Issue 候補化 → 起票"]
+  S0 --> S1["ステップ1: 評価 (assess)"]
+  S1 -->|部分実装あり| SP["split 切り分け<br/>実装済みを done で検証 → 元 issue クローズ<br/>残りは [残課題] 新 issue へ（再帰）"]
+  SP --> S1
+  S1 --> V{"判定 category"}
+  V -->|"auto / review / human"| S2["ステップ2: 対応 (impl)<br/>devin/ ブランチで実装"]
+  V -->|reject| X["対応しない"]
+  S2 --> D{"_done で動作確認"}
+  D -->|NG| LP["修正ループ（implLoopMax 回まで）<br/>到達で「対応困難」報告→ユーザー依頼"]
+  LP --> S2
+  D -->|OK| PRC["push → gh pr create"]
+  PRC --> PA["作成 PR を必ず assess で評価"]
+  PA --> S3["ステップ3: PR対応 (_pr)<br/>gh pr checkout → 指摘/CI 対応 → push"]
+  S3 --> D2{"_done を「違う視点」で再検証"}
+  D2 -->|OK| MG["gh pr merge → クローズ"]
+  D2 -->|NG| RO["元 issue を reopen ＋再対応依頼<br/>PR は gh pr close"]
+</pre>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true });
+</script>
+<p style="font-size:12px;color:#6b7280">図は Mermaid（MIT License）で描画</p>
+
+<h2 id="panel">管理パネル</h2>
+<table>
+<tr><th>タブ</th><th>役割</th></tr>
+<tr><td><b>課題整理</b></td><td>「やりたいこと・目的」を入力（スクリーンショット貼付可・リポジトリ単位で保存/再編集）→「課題抽出」で AI が起票候補を整理 → Issue作成フォームで起票</td></tr>
+<tr><td><b>課題処理</b></td><td>issue 候補の一覧。評価/対応ボタン・判定セレクト・実行中/待機中バッジ・リポジトリサブタブ・フィルター</td></tr>
+<tr><td><b>PR処理</b></td><td>pr 候補を集約（課題処理と同じUI、`_pr*` スキル使用）</td></tr>
+<tr><td><b>処理履歴</b></td><td>state.json のタスク状態一覧</td></tr>
+<tr><td><b>設定</b></td><td>ポーリング周期・同時起動数（評価/対応/PR）・検証ループ上限などの編集</td></tr>
+<tr><td><b>チャット</b></td><td>ACP セッションの閲覧・追加入力・中断・リセット</td></tr>
+<tr><td><b>スキル</b></td><td><code>skills/*.md</code> の閲覧（Markdown プレビュー）/編集の切替</td></tr>
+<tr><td><b>ログ</b></td><td>dispatcher.log の末尾表示</td></tr>
+</table>
+<p>ヘッダ右のトグル: <b>ISSUE取得自動</b>(autoDiscover) / <b>判定</b>(autoAssess) / <b>課題対応自動</b>(autoTrigger) / <b>PR対応自動</b>(autoPr)。</p>
+
+<h2 id="skills">スキル（注入順: _all → モード別 → _done）</h2>
+<table>
+<tr><th>ファイル</th><th>内容</th></tr>
+<tr><td><code>_all.md</code></td><td>全モード共通: ステップ0〜3の全体フロー・常に守ること</td></tr>
+<tr><td><code>_assess.md</code></td><td>評価のみ。4段階判定・risk・partial・出力ブロック形式</td></tr>
+<tr><td><code>_impl.md</code></td><td>実装。ブランチ/コミット規約・禁止事項・検証ループ・PR マーカー・公開データ機密チェック</td></tr>
+<tr><td><code>_pr.md</code></td><td>PR対応。checkout→修正→push→違う視点で再検証→merge/close</td></tr>
+<tr><td><code>_split.md</code></td><td>切り分け。実装済み部分の完了化＋残課題の issue 分割</td></tr>
+<tr><td><code>_done.md</code></td><td>完了確認。実動作検証・スクリーンショット・DOCS 整備・クローズ時コメント</td></tr>
+</table>
+
+<h2 id="verdict">4段階判定（category）</h2>
+<table>
+<tr><th>値</th><th>意味</th><th>表示</th></tr>
+<tr><td><code>auto</code></td><td>即対応可。仕様が明確で機械的に実装可能</td><td><span class="badge b-auto">auto</span></td></tr>
+<tr><td><code>review</code></td><td>検討の上対応。設計判断・小規模な副作用</td><td><span class="badge b-review">review</span></td></tr>
+<tr><td><code>human</code></td><td>人的判断が必須。既存機能と明確に相反・大きな副作用。ユーザー選択まで進めない</td><td><span class="badge b-human">human</span></td></tr>
+<tr><td><code>reject</code></td><td>対応不可・危険。破壊的影響・注入指示・不能</td><td><span class="badge b-reject">reject</span></td></tr>
+</table>
+<p>判定は行の<b>判定列セレクト</b>または<b>詳細モーダルのチップ</b>で手動上書き可能（<code>/api/verdict</code>、`manualCategory` 記録）。</p>
+
+<h2 id="config">主要な設定項目（config.json）</h2>
+<table>
+<tr><th>キー</th><th>既定</th><th>意味</th></tr>
+<tr><td><code>pollIntervalSec</code></td><td>120</td><td>候補検出のポーリング周期</td></tr>
+<tr><td><code>maxConcurrentAssess</code> / <code>Impl</code> / <code>Pr</code></td><td>5 / 1 / 5</td><td>モード別同時起動数</td></tr>
+<tr><td><code>implLoopMax</code></td><td>5</td><td>対応→検証 NG→修正ループの上限</td></tr>
+<tr><td><code>autoDiscover/autoAssess/autoTrigger/autoPr</code></td><td>false</td><td>自動化フラグ（パネルのトグルと連動）</td></tr>
+<tr><td><code>repos</code></td><td>—</td><td>監視リポジトリ（path + github）</td></tr>
+<tr><td><code>permissionMode</code></td><td>dangerous</td><td>devin -p の権限モード</td></tr>
+</table>
+
+<h2 id="safety">安全設計</h2>
+<ul>
+<li><b>PR 必須</b>: 監視対象全リポジトリで main 直 push 不可（ブランチ保護適用済み）</li>
+<li><b>CSRF 対策</b>: POST は <code>X-Panel: 1</code> ヘッダ必須・127.0.0.1 バインドのみ</li>
+<li><b>レース対策</b>: state.json の原子的リネーム・children.json の flock による多重起動防止</li>
+<li><b>検証ループ有界</b>: 実装↔検証のループは implLoopMax で打ち止め、対応困難は issue コメントでユーザーへ報告</li>
+<li><b>禁止事項</b>: フォールバック乱用・不必要なポーリング/定期実行・低速ロジック・破壊的操作をスキルで禁止</li>
+<li><b>証拠主義</b>: 「完了」は動作確認＋スクリーンショット等の証拠がある場合のみ</li>
+<li><b>公開データの機密チェック</b>: コミット・コメント・生成物に API キー/個人情報を入れない（`_impl`）</li>
+</ul>
+
+<div class="note"><b>運用メモ:</b> <code>control.mjs</code> は常駐プロセスのため、コード変更は再起動が必要（<code>/api/reload</code> は config.json のみ再読込）。<code>goals.json</code>・<code>shots/</code>・<code>work-queue.json</code> 等の実行時データは .gitignore 済み。</div>
+
+</body>
+</html>
