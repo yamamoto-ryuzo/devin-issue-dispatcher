@@ -533,6 +533,7 @@ async function refresh() {
       loadCandidates(true);
     }
   }
+  if (lastCands.length) renderCandBody();
   fillCfgForm();
   flags.autoDiscover = !!status.config.autoDiscover;
   flags.autoAssess = !!status.config.autoAssess;
