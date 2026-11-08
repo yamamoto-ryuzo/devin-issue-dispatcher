@@ -349,8 +349,9 @@ async function chatReset() {
 async function loadChat() {
   try {
     const j = await (await fetch(API + '/api/chat')).json();
-    document.getElementById('chat-status').textContent = j.busy ? '（実行中…）' :
-      j.ready ? '' : '（未起動）';
+    document.getElementById('chat-status').textContent =
+      j.busy ? '（実行中…）' :
+      j.sessionId ? (j.live ? '（接続中）' : '（切断・次の送信で再接続）') : '（未起動）';
     // モデル/モード選択（ACP configOptions）
     const opts = document.getElementById('chat-opts');
     if (j.options && j.options.length) {

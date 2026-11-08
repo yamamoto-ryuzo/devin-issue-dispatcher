@@ -139,6 +139,7 @@ export class AcpChat {
   snapshot() {
     return {
       ready: this.ready, busy: this.busy, error: this.error,
+      live: !!this.proc,
       sessionId: this.sessionId, messages: this.messages,
       options: this.options ?? [], modes: this.modes,
     };
