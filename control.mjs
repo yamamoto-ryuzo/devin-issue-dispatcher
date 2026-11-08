@@ -21,6 +21,7 @@
  * 127.0.0.1 のみにバインドする。
  */
 import { createServer } from 'node:http';
+import { engineSendCore, injectExtraPrompt, ASSESS_RE, SPLIT_RE, IMPLPR_RE, PRURL_RE } from './engine.mjs';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
@@ -184,35 +185,7 @@ function assertApiUrlSafe(raw) {
 }
 
 async function engineSend(eng, prompt) {
-  if (eng === 'api') {
-    const url = (config.apiUrl || '').replace(/\/+$/, '');
-    if (!url || !config.apiModel) throw new Error('apiUrl/apiModel 未設定');
-    assertApiUrlSafe(url);
-    const r = await fetch(url + '/chat/completions', {
-      method: 'POST', redirect: 'manual',
-      headers: { 'Content-Type': 'application/json',
-        ...(effectiveApiKey() ? { Authorization: 'Bearer ' + effectiveApiKey() } : {}) },
-      body: JSON.stringify({ model: config.apiModel,
-        messages: [{ role: 'user', content: prompt }] }),
-    });
-    // Bearer キーがリダイレクト先の平文 http へ漏れないよう自動追跡しない
-    if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) {
-      throw new Error('api リダイレクトは拒否されます（https 直結のみ許可）: ' + (r.status || r.type));
-    }
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error?.message || 'api ' + r.status);
-    return j.choices?.[0]?.message?.content || '';
-  }
-  // bridge-hub（CANVAS 方式: copilot/devin/antigravity を共通プロトコルで呼ぶ）
-  const hub = (config.bridgeHub || 'http://127.0.0.1:8511').replace(/\/+$/, '');
-  const r = await fetch(hub + '/agent', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider: eng, prompt,
-      ...(config.bridgeModels?.[eng] ? { model: config.bridgeModels[eng] } : {}) }),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || 'bridge-hub ' + r.status);
-  return j.reply || j.text || '';
+  return engineSendCore(config, effectiveApiKey(), eng, prompt);
 }
 // ---- エンジン解決（課題単位指定 → 全体設定）----
 const ENGINES = ['devin', 'copilot', 'antigravity', 'api'];
@@ -245,7 +218,7 @@ function resolveEngine(key, mode, requested, tasksMap, issuesStore) {
 }
 async function dispatchChatTask(key, mode, skill, engine) {
   const p = taskPrompt(key, mode, skill);
-  if (p.text && config.extraPrompt) p.text += '\n\n【追加指示】\n' + config.extraPrompt;
+  p.text = injectExtraPrompt(p.text, config.extraPrompt);
   const eng = resolveEngine(key, mode, engine);
   // 実際に使われたエンジンを記録（パネル/ログで追跡）
   {
@@ -437,7 +410,7 @@ function watchAssess(key, ch) {
       if (msg.role !== 'agent') continue;
       scanned++;
       if (!verdictDone) {
-        const m = msg.text.match(/<!--devin-assess\s*([\s\S]*?)devin-assess-->/);
+        const m = msg.text.match(ASSESS_RE);
         if (m) {
           verdictDone = true;
           try {
@@ -471,7 +444,7 @@ function watchAssess(key, ch) {
         }
       }
       if (!splitDone) {
-        const sp = msg.text.match(/<!--split\s*([\s\S]*?)split-->/);
+        const sp = msg.text.match(SPLIT_RE);
         if (sp) {
           splitDone = true;
           try {
@@ -513,7 +486,7 @@ function watchSplit(key, ch) {
     for (let i = ch.messages.length - 1; i >= 0; i--) {
       const msg = ch.messages[i];
       if (msg.role !== 'agent') continue;
-      const m = msg.text.match(/<!--split\s*([\s\S]*?)split-->/);
+      const m = msg.text.match(SPLIT_RE);
       if (!m) continue;
       try {
         const { newKey } = JSON.parse(m[1].trim());
@@ -550,12 +523,12 @@ function watchImpl(key, ch) {
       if (ch.messages[i].role === 'agent') agentMsgs.push(ch.messages[i].text);
     }
     for (const text of agentMsgs) {
-      const m = text.match(/<!--impl-pr\s*([\s\S]*?)impl-pr-->/);
+      const m = text.match(IMPLPR_RE);
       if (m) { try { prKey = JSON.parse(m[1].trim()).prKey || null; } catch { /* noop */ } break; }
     }
     if (!prKey) {
       for (const text of agentMsgs) {
-        const u = text.match(/github\.com\/[^\s/]+\/[^\s/]+\/pull\/(\d+)/);
+        const u = text.match(PRURL_RE);
         if (u) { prKey = repo + ' pr#' + u[1]; break; }
       }
     }
