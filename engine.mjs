@@ -154,12 +154,12 @@ export function skillEnabled(cfg, name) {
 // トークンを config.json へ直接書かずに済む（シークレット分離ルール）。
 // 形状不正なエントリは warn() で通知してスキップ（session/new を失敗させない）
 export function mcpServersForSession(cfg, secrets = {}, warn = () => {}) {
-  const kv = (o) => Object.fromEntries(
-    Object.entries(o && typeof o === 'object' ? o : {})
-      .filter(([k, v]) => typeof k === 'string' && typeof v === 'string')
-      .map(([k, v]) => [k, v
-        .replace(/^\$\{env:([\w]+)\}$/, (m, n) => process.env[n] ?? m)
-        .replace(/^\$\{secrets:([\w.-]+)\}$/, (m, n) => secrets?.mcpTokens?.[n] ?? m)]));
+  // ACP schema は env/headers を {name,value} の配列で要求する（map 不可・省略不可）
+  const kv = (o) => Object.entries(o && typeof o === 'object' ? o : {})
+    .filter(([k, v]) => typeof k === 'string' && typeof v === 'string')
+    .map(([k, v]) => ({ name: k, value: v
+      .replace(/^\$\{env:([\w]+)\}$/, (m, n) => process.env[n] ?? m)
+      .replace(/^\$\{secrets:([\w.-]+)\}$/, (m, n) => secrets?.mcpTokens?.[n] ?? m) }));
   const out = [];
   for (const e of cfg?.mcpServers ?? []) {
     const name = typeof e?.name === 'string' ? e.name.trim() : '';

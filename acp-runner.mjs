@@ -137,7 +137,7 @@ proc.on('error', (e) => { out(`[spawn error] ${e.message}`); finish(1); });
     // 不正エントリは警告してスキップし、session/new を失敗させない
     const mcpServers = (existsSync(join(ROOT, 'mcp-server.mjs'))
       ? [{ name: 'issue-queue', command: process.execPath,
-          args: [join(ROOT, 'mcp-server.mjs')] }] : [])
+          args: [join(ROOT, 'mcp-server.mjs')], env: [] }] : [])
       .concat(mcpServersForSession(config,
         loadJ(join(ROOT, 'secrets.json'), {}), (w) => out('[mcp] ' + w)));
     const s = await rpc('session/new', { cwd: repo?.path ?? ROOT, mcpServers });

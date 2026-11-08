@@ -128,10 +128,11 @@ test('mcpServersForSession: stdio/http 正規化・不正スキップ・参照�
   const out = mcpServersForSession(cfg, { mcpTokens: { 'mcp-tok': 'TOK' } },
     (w) => warns.push(w));
   assert.equal(out.length, 3);
-  assert.deepEqual(out[0], { name: 'fs', command: 'npx', args: ['-y', 'srv'], env: { KEY: 'plain' } });
+  assert.deepEqual(out[0], { name: 'fs', command: 'npx', args: ['-y', 'srv'],
+    env: [{ name: 'KEY', value: 'plain' }] });
   assert.deepEqual(out[1], { name: 'web', type: 'sse', url: 'http://127.0.0.1:9/mcp',
-    headers: { Authorization: 'TOK' } });
-  assert.equal(out[2].env.V, '${env:__TEST_NONEXISTENT__}'); // 未解決はリテラル維持
+    headers: [{ name: 'Authorization', value: 'TOK' }] });
+  assert.equal(out[2].env[0].value, '${env:__TEST_NONEXISTENT__}'); // 未解決はリテラル維持
   assert.equal(warns.length, 2);
   assert.deepEqual(mcpServersForSession({}, {}), []);
 });

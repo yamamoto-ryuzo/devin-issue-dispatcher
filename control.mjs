@@ -253,7 +253,7 @@ function bridgeTokenOf(eng) {
 const sessionMcpServers = () =>
   (existsSync(join(ROOT, 'mcp-server.mjs'))
     ? [{ name: 'issue-queue', command: process.execPath,
-        args: [join(ROOT, 'mcp-server.mjs')] }] : [])
+        args: [join(ROOT, 'mcp-server.mjs')], env: [] }] : [])
     .concat(mcpServersForSession(config, secrets,
       (w) => console.warn('[mcp]', w)));
 async function engineSend(eng, prompt) {
