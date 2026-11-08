@@ -238,6 +238,7 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 - API: `POST /api/chat/task`・`/api/dispatch`・`/api/assess` のボディに `engine` を渡すとその実行だけエンジンを上書きできる
 - 実際に使われたエンジンは `state.tasks[key].engineUsed` に記録され、処理履歴タブの「エンジン」列に表示される
 - モデル選択: api エンジンはエンドポイント別の最終選択を `config.apiModels` に記憶しエンドポイント変更時に復元＋一覧自動取得。bridge プロバイダは AI タブのモデル欄（hub `/models` 実取得・fallback=未ログイン疑い）で `config.bridgeModels` へ保存し `/agent` へ `model` 付与。devin ACP のモデル/モード選択は `config.acpOptions` へ永続化し次回セッションへ自動再適用
+- **非 devin エンジンの委譲経路**: dispatcher が解決したエンジンが `devin` 以外の課題は `devin.exe` を起動せず `POST /api/chat/task` で control 側チャット経路へ委譲（`engine:copilot` 等の issue ラベル/本文 `engine: X` 行・`engineReq`・`engineModes`・`config.engine` の優先順で解決）。委譲中は state に `inflight`/`chatDelegated`/`chatId` を記録し、完了は control 側 watcher の `chatResult` で確定。devin 経路と同じく委譲開始時に `devin:running`、完了時に `devin:done`/`devin:failed`/`needs-review`/`AI:impl-done` 相当のラベル付与、`kill-requests.json`（パネル停止）は `/api/chat/cancel` へ転送して中断、委譲超過・通知喪失は stale 回収/インフライト期限切れで処理する
 
 ### シークレットの取り扱い（統一ルール）
 

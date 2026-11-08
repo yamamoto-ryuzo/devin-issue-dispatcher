@@ -402,6 +402,7 @@ async function dispatchViaChat(key, mode, eng) {
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`chat dispatch failed (engine=${eng}): ${j.error || r.status}`);
   log(`CHAT-ROUTE ${key}: engine=${eng} mode=${mode} -> ${JSON.stringify(j)}`);
+  return j;
 }
 
 // control 側（委譲チャット・パネル）が state.json に書く共有フィールド。
@@ -410,7 +411,7 @@ async function dispatchViaChat(key, mode, eng) {
 const SHARED_PULL = ['assess', 'assessedAt', 'splitTo', 'splitAt',
   'createdPr', 'prAt', 'closedAt', 'engineReq', 'inflightClearedAt',
   'chatResult', 'engineUsed', 'engineUsedAt'];
-function syncShared(state) {
+async function syncShared(state) {
   const disk = liveJson(STATE_PATH);
   if (!disk?.tasks) return;
   for (const [k, dt] of Object.entries(disk.tasks)) {
@@ -431,9 +432,55 @@ function syncShared(state) {
       cur.status = dt.chatResult.status ?? cur.status;
       delete cur.chatDelegated;
       delete cur.delegatedAt;
+      // 委譲完了時は devin 経路と同じラベル付与を行う
+      // （control は state.json しか書かず GitHub ラベルは操作しない）
+      const m2 = k.match(/^(\S+)\s+(issue|pr)#(\d+)$/);
+      const rst = dt.chatResult.status;
+      const add = rst === 'done' ? [LABEL.done]
+        : rst === 'impl-done' ? [LABEL.implDone]
+        : rst === 'needs-review' ? [LABEL.needsReview] : [];
+      if (m2) await setLabel(m2[1], +m2[3], m2[2], add,
+        [LABEL.running, LABEL.failed]);
+    }
+    // 委譲の完了通知が失われた場合に備え、古い inflight マーカーは期限切れにする
+    if (cur.inflight && cur.inflightAt &&
+        Date.now() - new Date(cur.inflightAt).getTime() > STALE_MS) {
+      delete cur.inflight;
+      delete cur.inflightAt;
     }
     if (dt.status === 'closed' && !cur.chatDelegated) cur.status = 'closed';
   }
+}
+
+// 委譲チャット課題への停止要求（kill-requests.json）は devin 経路の
+// spawnDevin では消費されないため、ここで /api/chat/cancel へ転送する。
+// chatId は dispatchChatTask の応答から runTask が state へ記録したもの
+async function handleDelegatedKills(state) {
+  const kr = readKillRequests();
+  if (!kr.keys?.length) return;
+  const cfg = liveJson(configPath) ?? config;
+  const base = `http://127.0.0.1:${cfg.controlPort ?? 8585}`;
+  let dirty = false;
+  for (const key of [...kr.keys]) {
+    const t = state.tasks[key];
+    if (!t?.chatId) continue; // devin 経路は spawnDevin 側が消費・委譲外は対象外
+    try {
+      await fetch(base + '/api/chat/cancel', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+        body: JSON.stringify({ id: t.chatId }) });
+    } catch { continue; } // control 未起動時は次サイクルで再試行
+    kr.keys = kr.keys.filter((x) => x !== key); dirty = true;
+    delete t.chatId; delete t.inflight; delete t.inflightAt;
+    if (t.chatDelegated) {
+      delete t.chatDelegated; delete t.delegatedAt;
+      t.status = 'failed'; t.note = 'ユーザー停止（委譲チャット取消）';
+      t.finishedAt = new Date().toISOString();
+      const m = key.match(/^(\S+)\s+(issue|pr)#(\d+)$/);
+      if (m) await setLabel(m[1], +m[3], m[2], [LABEL.failed], [LABEL.running]);
+    }
+    log(`delegated chat cancelled by user: ${key}`);
+  }
+  if (dirty) try { writeFileSync(KILL_PATH, JSON.stringify(kr)); } catch { /* noop */ }
 }
 
 async function runTask(task, state, { skipAssess = false } = {}) {
@@ -452,21 +499,29 @@ async function runTask(task, state, { skipAssess = false } = {}) {
       return;
     }
     const dmode = mode;
-    await dispatchViaChat(key, dmode, eng);
+    const j = await dispatchViaChat(key, dmode, eng);
     const now = new Date().toISOString();
     // assess 委譲: verdict 記録・impl 連鎖は watchAssess が担う。status='running'
     // にすると自動連鎖条件（status が running 系でないこと）を塞ぐため
     // inflight マーカーのみ立てる
     // impl/verify 委譲: chat 完了時に control 側 watchImpl が chatResult で
-    // status を確定するまで running 表示を維持
+    // status を確定するまで running 表示を維持。chatId は停止要求
+    // （kill-requests → /api/chat/cancel）用に記録する
     state.tasks[key] = { ...cur,
       inflight: dmode, inflightAt: now, engineUsed: eng,
+      ...(j?.id != null ? { chatId: j.id } : {}),
       note: `エンジン ${eng} のためチャット経路へ委譲(${dmode})`,
       ...(dmode !== 'assess'
         ? { status: 'running', chatDelegated: dmode === 'pr' ? 'verify' : 'impl',
             delegatedAt: now, startedAt: now }
         : {}) };
     saveState(state);
+    if (dmode !== 'assess') {
+      // devin 経路と同じ running ラベルを付与（完了時の done/failed 等は
+      // syncShared が chatResult 消費時に適用、stale 回収は reclaimStale が担う）
+      await setLabel(task.repo.github, task.number, task.type,
+        [LABEL.running], [LABEL.failed, LABEL.done, LABEL.needsReview, LABEL.rejected]);
+    }
     return;
   }
   const base = join(LOG_DIR,
@@ -713,6 +768,11 @@ async function reclaimStale(state) {
       for (const it of items) {
         const key = keyOf(r.github, type, it.number);
         if (running.has(key)) continue;
+        // 委譲チャット実行中の課題は control 側が追跡するため回収しない
+        // （委譲から STALE_MS 超過＝制御喪失とみなし通常の回収対象とする）
+        const dk = state.tasks[key];
+        if (dk?.chatDelegated && dk.delegatedAt &&
+            Date.now() - new Date(dk.delegatedAt).getTime() < STALE_MS) continue;
         const age = Date.now() - new Date(it.updatedAt).getTime();
         if (age < STALE_MS) continue;
         log(`stale running label reclaimed: ${key} (age ${Math.round(age / 60000)}min)`);
@@ -721,6 +781,9 @@ async function reclaimStale(state) {
           `前回の Devin セッションが中断しました（dispatcher 停止またはタイムアウト）。再試行はパネルの「再実行」ボタンまたは \`POST /api/dispatch\` から行えます。`);
         state.tasks[key] = { ...(state.tasks[key] ?? {}),
           status: 'failed', note: 'stale running label reclaimed', finishedAt: new Date().toISOString() };
+        delete state.tasks[key].chatDelegated;
+        delete state.tasks[key].delegatedAt;
+        delete state.tasks[key].chatId;
       }
     }
   }
@@ -830,7 +893,9 @@ function liveConfig(key, fallback) {
 
 async function cycle(state) {
   // control 側が進めた委譲タスクの完了・解除を先にメモリへ取り込む
-  syncShared(state);
+  await syncShared(state);
+  // 委譲チャット課題への停止要求を転送（devin 経路分は spawnDevin が消費）
+  await handleDelegatedKills(state);
   // autoDiscover OFF なら検出自体をスキップ（gh を叩かない・candidates.json も更新しない）
   if (!DRY_RUN && liveConfig('autoDiscover', true) === false) {
     return;
