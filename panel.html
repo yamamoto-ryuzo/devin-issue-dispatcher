@@ -517,7 +517,7 @@ async function loadChat() {
 }
 
 // 評価/対応ボタン → チャットへプロンプト自動送信 + チャットタブへ移動
-let awaitAssess = null; // {key, since} 評価完了を待っている課題
+const awaitAssess = new Map(); // key -> since: 評価完了を待っている課題（複数同時対応）
 const localBusy = new Set(); // 押下直後から即反映するローカルの実行中キー ("key assess"形式)
 
 async function assess(key) {
@@ -532,7 +532,7 @@ async function assess(key) {
       localBusy.add(key + ' assess');
       renderCandBody();
       if (!j.queued) {
-        awaitAssess = { key, since: new Date().toISOString() };
+        awaitAssess.set(key, new Date().toISOString());
         chatSel = j.id;
         showTab('chat'); loadSessions(); loadChat();
       }
@@ -594,16 +594,19 @@ async function refresh() {
         esc(s.replace(/ \((判定|実装)\)/, '')) + '\')">' + esc(s) + '</a>').join(' , ') +
       ' <button class="mini danger" onclick="killActive()">停止</button></span>'
     : '';
-  // 評価完了検知 → 対応候補タブへ自動復帰
-  if (awaitAssess) {
-    const t = (status.tasks || []).find((x) => x.key === awaitAssess.key);
-    if (t?.assess?.category && t.assessedAt > awaitAssess.since) {
-      toast('評価完了: ' + t.assess.category + '/' + t.assess.risk);
-      localBusy.delete(awaitAssess.key + ' assess');
-      awaitAssess = null;
-      showTab('cands');
-      loadCandidates(true);
+  // 評価完了検知 → 対応候補をリロード（複数同時評価も全件反映）
+  if (awaitAssess.size) {
+    let doneAny = false;
+    for (const [key, since] of [...awaitAssess.entries()]) {
+      const t = (status.tasks || []).find((x) => x.key === key);
+      if (t?.assess?.category && t.assessedAt > since) {
+        toast('評価完了: ' + t.assess.category + '/' + t.assess.risk + ' — ' + key.split(' ').pop());
+        localBusy.delete(key + ' assess');
+        awaitAssess.delete(key);
+        doneAny = true;
+      }
     }
+    if (doneAny) loadCandidates(true);
   }
   fillCfgForm();
   flags.autoDiscover = !!status.config.autoDiscover;

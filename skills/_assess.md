@@ -37,10 +37,14 @@
 
 ## 出力形式
 
-**最後に**必ず以下のブロックを出す:
+**最後に**必ず以下のブロックを出す。**これはパネルの判定列を更新する唯一の経路**なので、
+省略・変形・複数出力はしない:
 
 ```
 <!--devin-assess
 {"feasible":"yes|needs-human|no","risk":"low|medium|high","category":"auto|review|reject","partial":true|false,"reason":"判定理由（1-2文）","plan":"実施方針（箇条書き）"}
 devin-assess-->
 ```
+
+このブロックが検出されるとパネル側で判定（auto/review/reject・risk）が即座に反映される。
+テキストでの報告だけで終わらせないこと。
