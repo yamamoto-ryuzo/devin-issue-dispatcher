@@ -834,9 +834,9 @@ async function loadSessions() {
     if (chatSel == null && list.length) chatSel = list[0].id;
     document.getElementById('chat-sessions').innerHTML =
       list.map((s) => '<span class="csess' + (s.id === chatSel ? ' active' : '') +
-        (s.busy ? ' busy' : '') + '" onclick="chatSelect(' + s.id + ')">' +
+        (s.busy ? ' busy' : '') + '" onclick="chatSelect(' + JSON.stringify(s.id) + ')">' +
         esc(s.label || 'session ' + s.id) + (s.busy ? ' ●' : '') +
-        '<span class="x" onclick="event.stopPropagation();chatClose(' + s.id + ')">✕</span></span>'
+        '<span class="x" onclick="event.stopPropagation();chatClose(' + JSON.stringify(s.id) + ')">✕</span></span>'
       ).join('') +
       '<span class="csess" onclick="chatSelect(null)">＋新規</span>';
   } catch { /* noop */ }
