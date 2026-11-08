@@ -56,9 +56,19 @@
     {
       "path": "C:\\devin\\ReEarth_GeoSuite",
       "github": "yamamoto-ryuzo/ReEarth_GeoSuite"
+    },
+    {
+      "path": "C:\\devin\\agent",
+      "github": "yamamoto-ryuzo/devin-issue-dispatcher"
+    },
+    {
+      "path": "C:\\devin\\kasugai_qgis",
+      "github": "yamamoto-ryuzo/kasugai_qgis"
     }
   ],
   "candidateCacheSec": 120,
   "maxConcurrentAssess": 5,
-  "maxConcurrentImpl": 1
+  "maxConcurrentImpl": 1,
+  "maxConcurrentPr": 1,
+  "implLoopMax": 5
 }

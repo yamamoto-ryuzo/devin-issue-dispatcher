@@ -38,7 +38,7 @@
   .tabs { display: flex; gap: 4px; border-bottom: 2px solid #e3e7ee;
           margin-bottom: 0; padding: 0 8px; }
   .tabs button { border: none; border-radius: 8px 8px 0 0; background: transparent;
-           color: #6b7280; font-size: 14px; padding: 8px 16px; position: relative; top: 2px; }
+           color: #6b7280; font-size: 17px; padding: 10px 20px; position: relative; top: 2px; }
   .tabs button:hover { color: #1f2937; background: #f1f4f9; }
   .tabs button.active { color: #2563eb; font-weight: 600; background: #fff;
            border: 1px solid #e3e7ee; border-bottom: 2px solid #fff; }
@@ -71,6 +71,22 @@
   #chat-input { display: flex; gap: 8px; margin-top: 8px; }
   #chat-input input { flex: 1; }
   .jd { font-weight: 600; font-size: 11px; }
+  .swseg { display: inline-flex; border: 1px solid #d1d7e0; border-radius: 8px; overflow: hidden; }
+  .swseg button { border: 0; border-radius: 0; padding: 8px 14px; }
+  #skill-view { display: none; width: 100%; height: 420px; overflow-y: auto;
+    border: 1px solid #dfe3ea; border-radius: 6px; padding: 12px 16px;
+    font-size: 13px; line-height: 1.7; }
+  #skill-view .mdh { font-weight: 700; margin: 12px 0 4px; }
+  #skill-view .mdh1 { font-size: 18px; } #skill-view .mdh2 { font-size: 15px; }
+  #skill-view .mdh3, #skill-view .mdh4 { font-size: 13px; }
+  #skill-view .mdp { margin: 6px 0; }
+  #skill-view .mdli { margin: 1px 0; }
+  #skill-view pre { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px;
+    padding: 8px 10px; font-size: 12px; overflow-x: auto; margin: 6px 0; white-space: pre; }
+  #skill-view code { background: #f1f5f9; padding: 1px 4px; border-radius: 4px; font-size: 12px; }
+  #skill-view pre code { background: none; padding: 0; }
+  #skill-view table.mdtbl { width: auto; margin: 6px 0; }
+  #skill-view .mdtbl td { border: 1px solid #cbd5e1; padding: 3px 8px; white-space: normal; }
   #modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.35);
            z-index: 100; align-items: center; justify-content: center; }
   #modal .box { background: #fff; border-radius: 10px; max-width: 680px; width: 90%;
@@ -86,6 +102,11 @@
   #modal .closebtn { float: right; }
   .jd-auto { color: #16a34a; } .jd-review { color: #b45309; }
   .jd-reject { background: #dc2626; color: #fff; padding: 2px 8px; border-radius: 999px; }
+  #cands tr.row-no { background: #dc2626; color: #fff; }
+  #cands tr.row-no a { color: #fff; }
+  #cands tr.row-no .trig-auto, #cands tr.row-no .trig-label { color: #fff; }
+  #cands tr.row-no .jd { color: #fff; }
+  #cands tr.row-no .jd-reject { background: #7f1d1d; }
   pre { background: #f8fafc; border: 1px solid #e3e7ee; border-radius: 8px;
         padding: 12px; font: 12px/1.5 Consolas, monospace; overflow: auto;
         max-height: 400px; white-space: pre-wrap; word-break: break-all; margin: 0; }
@@ -98,8 +119,8 @@
   .h3 { margin: 0 0 10px; font-size: 14px; display: flex; justify-content: space-between;
         align-items: center; }
   .mini { padding: 2px 10px; font-size: 12px; }
-  .toggle { padding: 10px 22px; border-radius: 999px; font-size: 14px; font-weight: 700;
-            border: 2px solid; cursor: pointer; min-width: 220px; }
+  .toggle { padding: 5px 14px; border-radius: 999px; font-size: 12px; font-weight: 700;
+            border: 2px solid; cursor: pointer; min-width: 225px; }
   .toggle.on { background: #16a34a; border-color: #15803d; color: #fff;
                box-shadow: 0 0 0 3px #bbf7d0; }
   .toggle.on:hover { background: #15803d; }
@@ -120,8 +141,26 @@
 </style>
 </head>
 <body>
-<h1>Devin Agent Dispatcher</h1>
-<div class="sub">GitHub Issue/PR → devin -p 自動対応エージェントの管理パネル</div>
+<div class="row" style="align-items:flex-start;gap:24px;flex-wrap:nowrap;margin-bottom:14px">
+  <div>
+    <h1>Devin Agent Dispatcher</h1>
+    <div class="sub" style="margin-bottom:0">GitHub Issue/PR → devin -p 自動対応エージェントの管理パネル</div>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:10px;align-items:flex-start">
+    <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
+      <button id="btn-disc" class="toggle off" onclick="toggleFlag('autoDiscover')">…</button>
+      <span id="disc-desc" style="font-size:10px;color:#6b7280;text-align:center"></span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
+      <button id="btn-assess" class="toggle off" onclick="toggleFlag('autoAssess')">…</button>
+      <span id="assess-desc" style="font-size:10px;color:#6b7280;text-align:center"></span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
+      <button id="btn-auto" class="toggle off" onclick="toggleFlag('autoTrigger')">…</button>
+      <span id="auto-desc" style="font-size:10px;color:#6b7280;text-align:center"></span>
+    </div>
+  </div>
+</div>
 
 <div class="card">
   <div class="row">
@@ -135,25 +174,12 @@
     <span id="active" style="font-size:12px"></span>
     <span style="margin-left:auto"></span>
   </div>
-  <div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid #eef1f5">
-    <div style="display:flex;flex-direction:column;gap:4px">
-      <button id="btn-disc" class="toggle off" onclick="toggleFlag('autoDiscover')">…</button>
-      <span id="disc-desc" style="font-size:11px;color:#6b7280"></span>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:4px">
-      <button id="btn-assess" class="toggle off" onclick="toggleFlag('autoAssess')">…</button>
-      <span id="assess-desc" style="font-size:11px;color:#6b7280"></span>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:4px">
-      <button id="btn-auto" class="toggle off" onclick="toggleFlag('autoTrigger')">…</button>
-      <span id="auto-desc" style="font-size:11px;color:#6b7280"></span>
-    </div>
-  </div>
 </div>
 
 <div class="tabs" id="tabs">
   <button data-tab="cands" class="active" onclick="showTab('cands')">対応候補</button>
   <button data-tab="tasks" onclick="showTab('tasks')">処理履歴</button>
+  <button data-tab="prs" onclick="showTab('prs')">PR処理</button>
   <button data-tab="cfg" onclick="showTab('cfg')">設定</button>
   <button data-tab="chat" onclick="showTab('chat')">チャット</button>
   <button data-tab="skills" onclick="showTab('skills')">スキル</button>
@@ -187,10 +213,6 @@
         <option value="">リスク:すべて</option><option value="low">low</option>
         <option value="medium">medium</option><option value="high">high</option>
       </select>
-      <select id="f-type" onchange="renderCandBody()">
-        <option value="">種別:すべて</option><option value="issue">issue</option>
-        <option value="pr">pr</option>
-      </select>
       <select id="f-status" onchange="renderCandBody()">
         <option value="">状態:すべて</option><option value="busy">実行中</option>
         <option value="queued">待機中</option><option value="idle">非実行</option>
@@ -205,6 +227,11 @@
       <thead><tr><th>課題</th><th>状態</th><th>評価</th><th>開始</th><th>終了</th><th>exit</th><th></th></tr></thead>
       <tbody id="tasks"></tbody>
     </table>
+  </div>
+
+  <div id="tab-prs" class="tabpanel">
+    <div class="h3">PR処理（プルリクエスト課題を集約）</div>
+    <div id="prs" style="color:#6b7280;overflow-x:auto">読み込み中…</div>
   </div>
 
   <div id="tab-cfg" class="tabpanel">
@@ -234,6 +261,8 @@
       <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px">対応</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px;align-items:end">
         <label>対応 同時起動数<br><input id="set-maxc-impl" type="number" min="1" style="width:60px"></label>
+        <label>PR対応 同時起動数<br><input id="set-maxc-pr" type="number" min="1" style="width:60px" title="pr# 課題の対応セッションの同時起動上限（issue課題とは別枠）"></label>
+        <label>検証ループ上限 (回)<br><input id="set-impl-loop" type="number" min="1" style="width:60px" title="対応→完了確認→NG→修正のループをこの回数まで実施。到達後はユーザーへ対応依頼"></label>
       </div>
     </div>
     <div class="row" style="margin-top:10px">
@@ -262,10 +291,15 @@
     <div id="skill-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
     <div class="row" style="margin-bottom:8px">
       <button class="mini primary" onclick="saveSkill()">保存</button>
+      <span class="swseg">
+        <button id="sv-edit" class="mini primary" onclick="setSkillView('edit')">編集</button>
+        <button id="sv-view" class="mini" onclick="setSkillView('view')">表示</button>
+      </span>
       <span style="font-size:11px;color:#6b7280">_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別</span>
     </div>
     <textarea id="skill-edit" style="width:100%;height:420px;font-family:monospace;font-size:12px;
       border:1px solid #dfe3ea;border-radius:6px;padding:10px" spellcheck="false"></textarea>
+    <div id="skill-view"></div>
   </div>
   <div id="tab-log" class="tabpanel">
     <div class="h3"><span id="log-title">dispatcher.log（末尾）</span>
@@ -383,6 +417,8 @@ function fillCfgForm() {
   document.getElementById('set-maxnew').value = c.maxNewPerPoll;
   document.getElementById('set-maxc-assess').value = c.maxConcurrentAssess ?? c.maxConcurrent;
   document.getElementById('set-maxc-impl').value = c.maxConcurrentImpl ?? c.maxConcurrent;
+  document.getElementById('set-maxc-pr').value = c.maxConcurrentPr ?? c.maxConcurrentImpl ?? c.maxConcurrent;
+  document.getElementById('set-impl-loop').value = c.implLoopMax ?? 5;
   document.getElementById('set-since').value = c.autoTriggerSince ?? '';
   document.getElementById('set-assess-age').value = c.assessMaxAgeHours ?? 24;
 }
@@ -395,6 +431,8 @@ async function saveCfg() {
     maxNewPerPoll: +document.getElementById('set-maxnew').value || undefined,
     maxConcurrentAssess: +document.getElementById('set-maxc-assess').value || undefined,
     maxConcurrentImpl: +document.getElementById('set-maxc-impl').value || undefined,
+    maxConcurrentPr: +document.getElementById('set-maxc-pr').value || undefined,
+    implLoopMax: +document.getElementById('set-impl-loop').value || undefined,
     autoTriggerSince: since === '' ? null : since,
     assessMaxAgeHours: +document.getElementById('set-assess-age').value || undefined,
   };
@@ -410,18 +448,20 @@ async function saveCfg() {
 }
 
 let skillFiles = {};
-const skillOpts = { assess: [], impl: [] };
-let pickAssess = '', pickImpl = '';
+const skillOpts = { assess: [], impl: [], pr: [] };
+let pickAssess = '', pickImpl = '', pickPr = '';
 async function loadSkills() {
   try {
     const j = await (await fetch(API + '/api/skills')).json();
     skillFiles = {};
     skillOpts.assess = (j.files || []).map((f) => f.name).filter((n) => n.startsWith('_assess'));
     skillOpts.impl = (j.files || []).map((f) => f.name).filter((n) => n.startsWith('_impl'));
+    skillOpts.pr = (j.files || []).map((f) => f.name).filter((n) => n.startsWith('_pr'));
     if (!pickAssess) pickAssess = skillOpts.assess[0] || '_assess.md';
     if (!pickImpl) pickImpl = skillOpts.impl[0] || '_impl.md';
-    // 動作順に並べる: 全体 → 評価 → 切り分け → 対応 → 完了時 → その他
-    const ORDER = ['_all', '_assess', '_split', '_impl', '_done'];
+    if (!pickPr) pickPr = skillOpts.pr[0] || '_pr.md';
+    // 動作順に並べる: 全体 → 評価 → 切り分け → 対応 → PR → 完了時 → その他
+    const ORDER = ['_all', '_assess', '_split', '_impl', '_pr', '_done'];
     const names = (j.files || []).map((f) => { skillFiles[f.name] = f.content; return f.name; })
       .sort((a, b) => {
         const ia = ORDER.findIndex((o) => a.startsWith(o));
@@ -434,6 +474,7 @@ async function loadSkills() {
       n.startsWith('_done') ? '完了時' :
       n.startsWith('_assess') ? '評価' :
       n.startsWith('_impl') ? '対応' :
+      n.startsWith('_pr') ? 'PR' :
       n.startsWith('_split') ? '切り分け' : '';
     document.getElementById('skill-tabs').innerHTML = names.map((n) => {
       const purp = skillPurpose(n);
@@ -446,8 +487,73 @@ async function loadSkills() {
   } catch { /* noop */ }
 }
 let skillSel = null;
+let skillView = 'edit';
+function setSkillView(v) {
+  skillView = v;
+  document.getElementById('skill-edit').style.display = v === 'edit' ? '' : 'none';
+  const pv = document.getElementById('skill-view');
+  pv.style.display = v === 'view' ? '' : 'none';
+  if (v === 'view') pv.innerHTML = mdToHtml(document.getElementById('skill-edit').value);
+  document.getElementById('sv-edit').classList.toggle('primary', v === 'edit');
+  document.getElementById('sv-view').classList.toggle('primary', v === 'view');
+}
+// スキルmdの簡易レンダラ（見出し/箇条書き/太字/コード/フェンス/テーブル対応・外部依存なし）
+function mdToHtml(src) {
+  const e = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const inline = (s) => e(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) =>
+      /^https?:\/\//i.test(u)
+        ? '<a href="' + u.replace(/"/g, '&quot;') + '" target="_blank" rel="noopener">' +
+          t + '</a>'
+        : m);
+  const rows = String(src).split(/\r?\n/);
+  const out = [];
+  let i = 0;
+  while (i < rows.length) {
+    const l = rows[i];
+    if (l.trim() === '') { i++; continue; }
+    if (/^\s*```/.test(l)) {
+      const buf = [];
+      while (++i < rows.length && !/^\s*```/.test(rows[i])) buf.push(rows[i]);
+      i++;
+      out.push('<pre><code>' + e(buf.join('\n')) + '</code></pre>');
+    } else if (/^#{1,4}\s+/.test(l)) {
+      const n = Math.min(4, l.match(/^#+/)[0].length);
+      out.push('<div class="mdh mdh' + n + '">' + inline(l.replace(/^#+\s+/, '')) + '</div>');
+      i++;
+    } else if (/^\s*\|.*\|\s*$/.test(l) && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(rows[i + 1] || '')) {
+      const head = l;
+      i += 2;
+      const body = [];
+      while (i < rows.length && /^\s*\|.*\|\s*$/.test(rows[i])) body.push(rows[i++]);
+      const cells = (r) => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '')
+        .split('|').map((c) => '<td>' + inline(c.trim()) + '</td>').join('');
+      out.push('<table class="mdtbl"><thead><tr>' + cells(head) + '</tr></thead><tbody>' +
+        body.map((r) => '<tr>' + cells(r) + '</tr>').join('') + '</tbody></table>');
+    } else if (/^\s*([-*]|\d+\.)\s+/.test(l)) {
+      while (i < rows.length && /^\s*([-*]|\d+\.)\s+/.test(rows[i])) {
+        const m = rows[i].match(/^(\s*)(?:[-*]|\d+\.)\s+(.*)$/);
+        const depth = Math.min(3, Math.floor(m[1].length / 2));
+        out.push('<div class="mdli" style="padding-left:' + (depth * 16 + 16) +
+          'px">• ' + inline(m[2]) + '</div>');
+        i++;
+      }
+    } else {
+      const buf = [l];
+      while (i + 1 < rows.length && rows[i + 1].trim() !== '' &&
+        !/^\s*(```|#+\s|[-*]\s|\d+\.\s|\|.*\|)/.test(rows[i + 1])) buf.push(rows[++i]);
+      out.push('<div class="mdp">' + buf.map(inline).join('<br>') + '</div>');
+      i++;
+    }
+  }
+  return out.join('');
+}
 function loadSkill() {
-  document.getElementById('skill-edit').value = skillFiles[skillSel] || '';
+  const v = skillFiles[skillSel] || '';
+  document.getElementById('skill-edit').value = v;
+  if (skillView === 'view') document.getElementById('skill-view').innerHTML = mdToHtml(v);
 }
 async function saveSkill() {
   const name = skillSel;
@@ -538,9 +644,10 @@ async function loadChat() {
   } catch { /* noop */ }
 }
 
-// 評価/対応ボタン → チャットへプロンプト自動送信 + チャットタブへ移動
+// 評価/対応ボタン → チャットへプロンプト自動送信（タブ移動はしない）
 const awaitAssess = new Map(); // key -> since: 評価完了を待っている課題（複数同時対応）
-const localBusy = new Set(); // 押下直後から即反映するローカルの実行中キー ("key assess"形式)
+const localBusy = new Map(); // 押下直後から即反映するローカルの実行中キー ("key assess"形式) -> 追加時刻
+const localWait = new Set(); // 待機キューへ入れた直後から即反映するローカルの待機キー ("key impl"形式)
 
 async function assess(key) {
   try {
@@ -551,13 +658,14 @@ async function assess(key) {
     toast(j.queued ? '同時起動上限のため待機キューに登録しました（空き次第自動実行）: ' + key
           : j.ok ? '評価を送信: ' + key : '失敗: ' + (j.error || ''));
     if (j.ok) {
-      localBusy.add(key + ' assess');
-      renderCandBody();
-      if (!j.queued) {
+      if (j.queued) { localWait.add(key + ' assess'); awaitAssess.set(key, new Date().toISOString()); }
+      else {
+        localBusy.set(key + ' assess', Date.now());
         awaitAssess.set(key, new Date().toISOString());
         chatSel = j.id;
         loadSessions();
       }
+      renderCandBody();
     }
   } catch (e) { toast('assess: ' + e.message); }
 }
@@ -565,15 +673,15 @@ async function assess(key) {
 async function dispatch(key) {
   try {
     const r = await fetch(API + '/api/chat/task', {
-      method: 'POST', headers: H, body: JSON.stringify({ key, mode: 'impl', skill: pickImpl }),
+      method: 'POST', headers: H, body: JSON.stringify({ key, mode: 'impl', skill: key.includes(' pr#') ? pickPr : pickImpl }),
     });
     const j = await r.json();
     toast(j.queued ? '同時起動上限のため待機キューに登録しました（空き次第自動実行）: ' + key
           : j.ok ? '対応を送信: ' + key : '失敗: ' + (j.error || ''));
     if (j.ok) {
-      localBusy.add(key + ' impl');
+      if (j.queued) localWait.add(key + ' impl');
+      else { localBusy.set(key + ' impl', Date.now()); chatSel = j.id; loadSessions(); }
       renderCandBody();
-      if (!j.queued) { chatSel = j.id; showTab('chat'); loadSessions(); loadChat(); }
     }
   } catch (e) { toast('dispatch: ' + e.message); }
   setTimeout(loadCandidates, 1000);
@@ -583,6 +691,16 @@ async function refresh() {
   try {
     status = await (await fetch(API + '/api/status')).json();
   } catch { return; }
+  // ローカル記録の掃除: サーバ状態（chatWaiting/chatBusy）へ反映・消滅した分を手放す
+  const cw = status.chatWaiting || [], cb = status.chatBusy || [];
+  for (const l of [...localWait]) {
+    const key = l.slice(0, l.lastIndexOf(' '));
+    if (cw.includes(l) || cb.some((b) => b.startsWith(key + ' '))) localWait.delete(l);
+  }
+  for (const [l, t] of [...localBusy]) {
+    if (cb.includes(l)) continue;
+    if (cw.includes(l) || Date.now() - t > 5000) localBusy.delete(l);
+  }
   const b = document.getElementById('badge');
   const running = status.running;
   b.className = 'badge ' + (running ? 'on' : 'off');
@@ -642,8 +760,9 @@ async function refresh() {
     '<dt>autoTrigger</dt><dd>' + c.autoTrigger +
       (c.autoTrigger ? '（起点: ' + (c.autoTriggerSince || status.deployedAt || '-') + '）' : '') + '</dd>' +
     '<dt>permissionMode</dt><dd>' + c.permissionMode + '</dd>' +
-    '<dt>同時起動(評価/対応)</dt><dd>' + (c.maxConcurrentAssess ?? c.maxConcurrent) +
-      ' / ' + (c.maxConcurrentImpl ?? c.maxConcurrent) + '</dd>' +
+    '<dt>同時起動(評価/対応/PR)</dt><dd>' + (c.maxConcurrentAssess ?? c.maxConcurrent) +
+      ' / ' + (c.maxConcurrentImpl ?? c.maxConcurrent) +
+      ' / ' + (c.maxConcurrentPr ?? c.maxConcurrentImpl ?? c.maxConcurrent) + '</dd>' +
     '<dt>監視リポジトリ</dt><dd>' + c.repos.map(r =>
       '<a href="https://github.com/' + esc(r) + '" target="_blank" rel="noopener">' +
       esc(r) + '</a>').join('<br>') + '</dd>';
@@ -836,9 +955,10 @@ function renderCandBody() {
       if (fRisk && a?.risk !== fRisk) return false;
       if (fType && c.type !== fType) return false;
       const ph = (status.chatBusy || []).some((l) => l.startsWith(c.key + ' ')) ||
-        [...localBusy].some((l) => l.startsWith(c.key + ' '));
+        [...localBusy.keys()].some((l) => l.startsWith(c.key + ' '));
       const qued = (status.chatWaiting || []).includes(c.key + ' assess') ||
-        (status.chatWaiting || []).includes(c.key + ' impl');
+        (status.chatWaiting || []).includes(c.key + ' impl') ||
+        localWait.has(c.key + ' assess') || localWait.has(c.key + ' impl');
       if (fStat === 'busy' && !ph) return false;
       if (fStat === 'queued' && !qued) return false;
       if (fStat === 'idle' && (ph || qued)) return false;
@@ -852,18 +972,20 @@ function renderCandBody() {
     if (!filtered.length) return head + '<div class="repo-empty">候補なし</div>';
     const rows = filtered.map(c => {
       const chatPh = (status.chatBusy || []).find((l) => l.startsWith(c.key + ' '));
-      const localPh = [...localBusy].find((l) => l.startsWith(c.key + ' '));
+      const localPh = [...localBusy.keys()].find((l) => l.startsWith(c.key + ' '));
       const chatQueued = (status.chatWaiting || []).includes(c.key + ' assess') ||
-        (status.chatWaiting || []).includes(c.key + ' impl');
-      const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key) || !!chatPh || !!localPh;
+        (status.chatWaiting || []).includes(c.key + ' impl') ||
+        localWait.has(c.key + ' assess') || localWait.has(c.key + ' impl');
+      const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key) || !!chatPh || !!localPh || chatQueued;
+      const a = c.assess;
       const rowBg = (chatPh || localPh) ? ' style="background:#fef3e2"' :
-        chatQueued ? ' style="background:#eef1f5;color:#94a3b8"' : '';
+        chatQueued ? ' style="background:#eef1f5;color:#94a3b8"' :
+        a?.feasible === 'no' ? ' class="row-no"' : '';
       const phaseBadge = (chatPh || localPh)
         ? '<span class="badge" style="background:#b45309;color:#fff;margin-right:4px">' +
           ((chatPh || localPh).endsWith(' assess') ? '評価中' :
            (chatPh || localPh).endsWith(' impl') ? '対応中' : '実行中') + '</span>'
         : chatQueued ? '<span class="badge" style="background:#6b7280;color:#fff;margin-right:4px">待機中</span>' : '';
-      const a = c.assess;
       const CAT_TIP = {
         auto: 'auto（即対応可）: 仕様が明確・リスク低で自動実装に進める判定',
         review: 'review（検討の上対応）: 人間の確認・判断が望ましい判定（devin:needs-review で保留）',
@@ -882,13 +1004,13 @@ function renderCandBody() {
         : '-';
       return '<tr' + rowBg + '><td>' + esc(c.type) + ' #' + c.number + '</td>' +
       '<td style="white-space:nowrap"><button class="mini" ' + (busy ? 'disabled' : '') +
-        ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? '再評価' : '評価') + '</button>' +
-      '<button class="mini primary" ' + (busy ? 'disabled' : '') +
-        ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button></td>' +
+        ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? '再評価' : '評価') + '</button></td>' +
       '<td style="white-space:normal;min-width:220px;max-width:560px;word-break:break-all"><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener">' + esc(c.title) + '</a></td>' +
       '<td class="' + (c.trigger === 'auto-new' ? 'trig-auto' : 'trig-label') + '">' +
         (c.trigger === 'auto-new' ? '自動(新規)' : 'devin ラベル') + '</td>' +
+      '<td><button class="mini primary" ' + (busy ? 'disabled' : '') +
+        ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button></td>' +
       '<td>' + phaseBadge + judge + '</td>' +
       '<td>' + fmt(c.createdAt) + '</td>' +
       '<td>' + (c.runningLabel ? 'running ラベル付き(起動中/取残し)' :
@@ -896,16 +1018,18 @@ function renderCandBody() {
     }).join('');
     const skillSel = (id, opts, cur) =>
       '<select style="font-size:10px;width:78px" title="使用する skills/*.md" ' +
-      'onchange="' + (id === 'a' ? 'pickAssess' : 'pickImpl') + '=this.value">' +
+      'onchange="' + ({ a: 'pickAssess', i: 'pickImpl', p: 'pickPr' }[id] || 'pickImpl') + '=this.value">' +
       opts.map((f) => '<option value="' + esc(f) + '"' + (f === cur ? ' selected' : '') + '>' +
         esc(f.replace('.md', '')) + '</option>').join('') + '</select>';
     return head + '<table><thead><tr>' +
       '<th title="課題の種別（issue / PR）と番号">種別</th>' +
-      '<th title="評価: チャットで対応可否だけを評価（変更しない）&#10;対応: 実装の実行指示を送信">操作' +
-        '<br>' + skillSel('a', skillOpts.assess, pickAssess) +
-        '<br>' + skillSel('i', skillOpts.impl, pickImpl) + '</th>' +
+      '<th title="評価: チャットで対応可否だけを評価（変更しない）">操作' +
+        '<br>' + skillSel('a', skillOpts.assess, pickAssess) + '</th>' +
       '<th title="GitHub の課題タイトル（クリックで GitHub を開く）">タイトル</th>' +
       '<th title="候補になった経路&#10;自動(新規): 起点以降に作成された未処理課題&#10;devin ラベル: 明示的にラベル指定">トリガー</th>' +
+      '<th title="対応: 実装の実行指示を送信&#10;issue課題は上段スキル、PR課題は下段スキルを使用">対応' +
+        '<br>' + skillSel('i', skillOpts.impl, pickImpl) +
+        '<br>' + skillSel('p', skillOpts.pr, pickPr) + '</th>' +
       '<th title="評価セッションの判定結果&#10;auto: 即対応可 / review: 検討の上対応 / reject: 不可・危険&#10;risk: low/medium/high&#10;ホバーで理由も表示">判定</th>' +
       '<th title="課題が作成された日時">作成日時</th>' +
       '<th title="実行中ラベル・過去の処理状態などの補足">備考</th>' +

@@ -1,0 +1,5 @@
+- これは Devin Agent Dispatcher 本体。Node.js（標準モジュールのみ）+ gh CLI + devin.exe 構成。外部依存パッケージは追加しない
+- skills/*.md・prompts/*.md の変更は次回ディスパッチのプロンプトへ**即反映**される。自律動作の指示そのものなので、意図しない挙動変更を防ぐため最小差分で行う
+- panel.html は単一ファイル UI（外部ライブラリ依存なし）。CDN 等の外部依存を増やさない
+- 新規スキル追加時は control.mjs の既知名一覧（/api/skills）・panel.html の用途ラベル/選択肢も同期する
+- control.mjs の変更は実行中プロセスの再起動が必要（/api/reload は config.json のみ再読込）
