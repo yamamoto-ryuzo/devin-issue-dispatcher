@@ -101,7 +101,10 @@
                max-height: 240px; overflow-y: auto; }
   #modal .closebtn { float: right; }
   .jd-auto { color: #16a34a; } .jd-review { color: #b45309; }
+  .jd-human { background: #facc15; color: #1f2937; padding: 2px 8px; border-radius: 999px; }
   .jd-reject { background: #dc2626; color: #fff; padding: 2px 8px; border-radius: 999px; }
+  .badge-pr { background: #ea580c; color: #fff; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; }
   #cands tr.row-no { background: #dc2626; color: #fff; }
   #cands tr.row-no a { color: #fff; }
   #cands tr.row-no .trig-auto, #cands tr.row-no .trig-label { color: #fff; }
@@ -159,6 +162,10 @@
       <button id="btn-auto" class="toggle off" onclick="toggleFlag('autoTrigger')">…</button>
       <span id="auto-desc" style="font-size:10px;color:#6b7280;text-align:center"></span>
     </div>
+    <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
+      <button id="btn-auto-pr" class="toggle off" onclick="toggleFlag('autoPr')">…</button>
+      <span id="autopr-desc" style="font-size:10px;color:#6b7280;text-align:center"></span>
+    </div>
   </div>
 </div>
 
@@ -177,9 +184,9 @@
 </div>
 
 <div class="tabs" id="tabs">
-  <button data-tab="cands" class="active" onclick="showTab('cands')">対応候補</button>
-  <button data-tab="tasks" onclick="showTab('tasks')">処理履歴</button>
+  <button data-tab="cands" class="active" onclick="showTab('cands')">課題処理</button>
   <button data-tab="prs" onclick="showTab('prs')">PR処理</button>
+  <button data-tab="tasks" onclick="showTab('tasks')">処理履歴</button>
   <button data-tab="cfg" onclick="showTab('cfg')">設定</button>
   <button data-tab="chat" onclick="showTab('chat')">チャット</button>
   <button data-tab="skills" onclick="showTab('skills')">スキル</button>
@@ -188,7 +195,7 @@
 
 <div class="card" style="border-top:none;border-radius:0 0 10px 10px">
   <div id="tab-cands" class="tabpanel active">
-    <div class="h3"><span>対応候補 <span id="cands-mode" style="font-weight:400;font-size:12px"></span></span>
+    <div class="h3"><span>課題処理 <span id="cands-mode" style="font-weight:400;font-size:12px"></span></span>
       <span style="display:flex;align-items:center;gap:8px">
         <span id="cands-meta" style="color:#9ca3af;font-size:11px"></span>
         <select id="cand-int" onchange="setCandInt()" title="自動更新周期">
@@ -206,8 +213,8 @@
       <span style="color:#6b7280">フィルター:</span>
       <select id="f-category" onchange="renderCandBody()">
         <option value="">判定:すべて</option><option value="auto">auto</option>
-        <option value="review">review</option><option value="reject">reject</option>
-        <option value="none">未評価</option>
+        <option value="review">review</option><option value="human">human</option>
+        <option value="reject">reject</option><option value="none">未評価</option>
       </select>
       <select id="f-risk" onchange="renderCandBody()">
         <option value="">リスク:すべて</option><option value="low">low</option>
@@ -292,13 +299,13 @@
     <div class="row" style="margin-bottom:8px">
       <button class="mini primary" onclick="saveSkill()">保存</button>
       <span class="swseg">
-        <button id="sv-edit" class="mini primary" onclick="setSkillView('edit')">編集</button>
-        <button id="sv-view" class="mini" onclick="setSkillView('view')">表示</button>
+        <button id="sv-edit" class="mini" onclick="setSkillView('edit')">編集</button>
+        <button id="sv-view" class="mini primary" onclick="setSkillView('view')">表示</button>
       </span>
       <span style="font-size:11px;color:#6b7280">_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別</span>
     </div>
     <textarea id="skill-edit" style="width:100%;height:420px;font-family:monospace;font-size:12px;
-      border:1px solid #dfe3ea;border-radius:6px;padding:10px" spellcheck="false"></textarea>
+      border:1px solid #dfe3ea;border-radius:6px;padding:10px;display:none" spellcheck="false"></textarea>
     <div id="skill-view"></div>
   </div>
   <div id="tab-log" class="tabpanel">
@@ -351,7 +358,7 @@ async function act(name) {
 }
 
 let cfgInit = false;
-const flags = { autoDiscover: false, autoAssess: false, autoTrigger: false };
+const flags = { autoDiscover: false, autoAssess: false, autoTrigger: false, autoPr: false };
 let logKey = null;
 function viewLog(key) { logKey = key; showTab('log'); }
 // devin.exe CLI ログインは IDE エンジン方式では不要（実行は Devin IDE セッションが担う）
@@ -383,6 +390,12 @@ const FLAG_UI = {
     on: '課題対応 自動 ON', off: '課題対応 自動 OFF',
     onDesc: '検出した候補を順次 評価→実装 で自動起動します',
     offDesc: '候補の自動起動は停止中（個別「対応」ボタンは使用可）',
+  },
+  autoPr: {
+    btn: 'btn-auto-pr', desc: 'autopr-desc',
+    on: 'PR対応 自動 ON', off: 'PR対応 自動 OFF',
+    onDesc: 'auto 判定された PR 課題を自動で PR対応（impl）へ投入します',
+    offDesc: 'PR 課題の対応起動は手動のみ（各行の「対応」ボタン）',
   },
 };
 function renderFlag(key) {
@@ -487,12 +500,12 @@ async function loadSkills() {
   } catch { /* noop */ }
 }
 let skillSel = null;
-let skillView = 'edit';
+let skillView = 'view';
 function setSkillView(v) {
   skillView = v;
   document.getElementById('skill-edit').style.display = v === 'edit' ? '' : 'none';
   const pv = document.getElementById('skill-view');
-  pv.style.display = v === 'view' ? '' : 'none';
+  pv.style.display = v === 'view' ? 'block' : 'none';
   if (v === 'view') pv.innerHTML = mdToHtml(document.getElementById('skill-edit').value);
   document.getElementById('sv-edit').classList.toggle('primary', v === 'edit');
   document.getElementById('sv-view').classList.toggle('primary', v === 'view');
@@ -553,7 +566,7 @@ function mdToHtml(src) {
 function loadSkill() {
   const v = skillFiles[skillSel] || '';
   document.getElementById('skill-edit').value = v;
-  if (skillView === 'view') document.getElementById('skill-view').innerHTML = mdToHtml(v);
+  setSkillView(skillView);
 }
 async function saveSkill() {
   const name = skillSel;
@@ -752,9 +765,11 @@ async function refresh() {
   flags.autoDiscover = !!status.config.autoDiscover;
   flags.autoAssess = !!status.config.autoAssess;
   flags.autoTrigger = !!status.config.autoTrigger;
+  flags.autoPr = !!status.config.autoPr;
   renderFlag('autoDiscover');
   renderFlag('autoAssess');
   renderFlag('autoTrigger');
+  renderFlag('autoPr');
   document.getElementById('cfg').innerHTML =
     '<dt>ポーリング間隔</dt><dd>' + c.pollIntervalSec + 's（候補キャッシュ ' + c.candidateCacheSec + 's）</dd>' +
     '<dt>autoTrigger</dt><dd>' + c.autoTrigger +
@@ -834,6 +849,7 @@ let lastCands = [];
 const CAT_DESC = {
   auto: '即対応可 — 仕様が明確でリスクが低く、自動実装に進められる判定です。',
   review: '検討の上対応 — 人間の確認・判断が望ましい判定です（devin:needs-review で保留されます）。',
+  human: '人的判断が必須 — 既存機能と明確に相反・大きな副作用。導入価値はあるが採否はユーザーが選択します。',
   reject: '対応不可・危険 — 破壊的影響・方針違反・プロンプトインジェクション・対応不能などの判定です（devin:rejected で除外されます）。',
 };
 const RISK_SCALE = {
@@ -859,13 +875,15 @@ function detail(key) {
     '<div class="kv"><b>作成日時</b>' + fmt(c.createdAt) + '</div><hr>' +
     (a.category ? '<div class="kv" style="display:flex;align-items:center;gap:8px"><b style="min-width:90px">判定</b>' +
       '<span style="display:inline-flex;gap:4px">' +
-      ['auto', 'review', 'reject'].map((r) =>
-        '<span style="padding:2px 10px;border-radius:999px;font-size:11px;' +
+      ['auto', 'review', 'human', 'reject'].map((r) =>
+        '<span style="padding:2px 10px;border-radius:999px;font-size:11px;cursor:pointer;' +
         (r === a.category
-          ? 'background:' + (r === 'auto' ? '#16a34a' : r === 'review' ? '#b45309' : '#dc2626') +
-            ';color:#fff;font-weight:700'
+          ? 'background:' + ({ auto: '#16a34a', review: '#b45309', human: '#facc15', reject: '#dc2626' })[r] +
+            ';color:' + (r === 'human' ? '#1f2937' : '#fff') + ';font-weight:700'
           : 'background:#eef1f5;color:#a8b0bd') +
-        '">' + r + '</span>').join('') + '</span>' +
+        '" title="クリックで判定を ' + r + ' に変更"' +
+        ' onclick="setVerdict(\'' + esc(c.key) + '\',\'' + r + '\')">' + r + '</span>').join('') + '</span>' +
+      (a.manualCategory ? '<span style="font-size:10px;color:#7c3aed">手動</span>' : '') +
       '<span style="font-size:12px;color:#4b5563">' + esc(CAT_DESC[a.category] || '') + '</span></div>' : '') +
     (a.risk ? '<div class="kv" style="display:flex;align-items:center;gap:8px"><b style="min-width:90px">リスク</b>' +
       '<span style="display:inline-flex;gap:4px">' +
@@ -893,6 +911,22 @@ function detail(key) {
         'onclick="closeIssue(\'' + esc(c.key) + '\')">クローズ</button>' +
       '</div>';
   document.getElementById('modal').style.display = 'flex';
+}
+
+// 判定の手動上書き（相反するが価値ある課題をユーザーが選択する経路）
+async function setVerdict(key, category) {
+  try {
+    const r = await fetch(API + '/api/verdict', {
+      method: 'POST', headers: H, body: JSON.stringify({ key, category }),
+    });
+    const j = await r.json();
+    toast(j.ok ? '判定を ' + category + ' に変更: ' + key : '失敗: ' + (j.error || ''));
+    if (j.ok) {
+      const c = lastCands.find((x) => x.key === key);
+      if (c?.assess) { c.assess.category = category; c.assess.manualCategory = true; detail(key); }
+      loadCandidates(false);
+    }
+  } catch (e) { toast('verdict: ' + e.message); }
 }
 
 // 課題クローズ
@@ -938,22 +972,20 @@ function renderCandTabs() {
 }
 
 function renderCandBody() {
-  const box = document.getElementById('cands');
   const manual = new Set(status?.manualRuns || []);
   const entries = candTab === '__all__'
     ? [...candGroups.entries()]
     : [[candTab, candGroups.get(candTab) || []]];
   const fCat = document.getElementById('f-category')?.value || '';
   const fRisk = document.getElementById('f-risk')?.value || '';
-  const fType = document.getElementById('f-type')?.value || '';
   const fStat = document.getElementById('f-status')?.value || '';
-  box.innerHTML = entries.map(([repo, items]) => {
+  const renderEntries = (wantType, selId) => entries.map(([repo, items]) => {
     const filtered = items.filter((c) => {
       const a = c.assess;
+      if (c.type !== wantType) return false;
       if (fCat === 'none' && a?.category) return false;
       if (fCat && fCat !== 'none' && a?.category !== fCat) return false;
       if (fRisk && a?.risk !== fRisk) return false;
-      if (fType && c.type !== fType) return false;
       const ph = (status.chatBusy || []).some((l) => l.startsWith(c.key + ' ')) ||
         [...localBusy.keys()].some((l) => l.startsWith(c.key + ' '));
       const qued = (status.chatWaiting || []).includes(c.key + ' assess') ||
@@ -980,7 +1012,7 @@ function renderCandBody() {
       const a = c.assess;
       const rowBg = (chatPh || localPh) ? ' style="background:#fef3e2"' :
         chatQueued ? ' style="background:#eef1f5;color:#94a3b8"' :
-        a?.feasible === 'no' ? ' class="row-no"' : '';
+        (a?.feasible === 'no' || a?.category === 'reject' || a?.risk === 'high') ? ' class="row-no"' : '';
       const phaseBadge = (chatPh || localPh)
         ? '<span class="badge" style="background:#b45309;color:#fff;margin-right:4px">' +
           ((chatPh || localPh).endsWith(' assess') ? '評価中' :
@@ -989,6 +1021,7 @@ function renderCandBody() {
       const CAT_TIP = {
         auto: 'auto（即対応可）: 仕様が明確・リスク低で自動実装に進める判定',
         review: 'review（検討の上対応）: 人間の確認・判断が望ましい判定（devin:needs-review で保留）',
+        human: 'human（人的判断が必須）: 既存機能と明確に相反・大きな副作用。採否はユーザーが選択',
         reject: 'reject（対応不可・危険）: 破壊的影響・方針違反・注入指示・対応不能の判定（devin:rejected で除外）',
       };
       const RISK_TIP = {
@@ -999,10 +1032,17 @@ function renderCandBody() {
       const judge = a
         ? '<span class="jd jd-' + esc(a.category || '?') + '">' +
           esc(a.category || '?') + '/' + esc(a.risk || '?') + '</span>' +
+          '<select class="mini" style="font-size:11px;margin-left:4px" title="判定を手動変更" ' +
+          'onclick="event.stopPropagation()" onchange="setVerdict(\'' + esc(c.key) + '\',this.value)">' +
+          ['auto', 'review', 'human', 'reject'].map((r) =>
+            '<option value="' + r + '"' + (a.category === r ? ' selected' : '') + '>' + r + '</option>'
+          ).join('') + '</select>' +
           '<button class="mini" style="margin-left:4px" onclick="detail(\'' +
           esc(c.key) + '\')">詳細</button>'
         : '-';
-      return '<tr' + rowBg + '><td>' + esc(c.type) + ' #' + c.number + '</td>' +
+      return '<tr' + rowBg + '><td>' + (c.type === 'pr'
+        ? '<span class="badge-pr">pr #' + c.number + '</span>'
+        : esc(c.type) + ' #' + c.number) + '</td>' +
       '<td style="white-space:nowrap"><button class="mini" ' + (busy ? 'disabled' : '') +
         ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? '再評価' : '評価') + '</button></td>' +
       '<td style="white-space:normal;min-width:220px;max-width:560px;word-break:break-all"><a href="' + esc(c.url) +
@@ -1014,7 +1054,8 @@ function renderCandBody() {
       '<td>' + phaseBadge + judge + '</td>' +
       '<td>' + fmt(c.createdAt) + '</td>' +
       '<td>' + (c.runningLabel ? 'running ラベル付き(起動中/取残し)' :
-                c.state ? 'state: ' + c.state : '') + '</td></tr>';
+                c.state ? 'state: ' + c.state : '') +
+        (c.createdPr ? ' → ' + esc(String(c.createdPr).split(' ').pop()) : '') + '</td></tr>';
     }).join('');
     const skillSel = (id, opts, cur) =>
       '<select style="font-size:10px;width:78px" title="使用する skills/*.md" ' +
@@ -1027,14 +1068,17 @@ function renderCandBody() {
         '<br>' + skillSel('a', skillOpts.assess, pickAssess) + '</th>' +
       '<th title="GitHub の課題タイトル（クリックで GitHub を開く）">タイトル</th>' +
       '<th title="候補になった経路&#10;自動(新規): 起点以降に作成された未処理課題&#10;devin ラベル: 明示的にラベル指定">トリガー</th>' +
-      '<th title="対応: 実装の実行指示を送信&#10;issue課題は上段スキル、PR課題は下段スキルを使用">対応' +
-        '<br>' + skillSel('i', skillOpts.impl, pickImpl) +
-        '<br>' + skillSel('p', skillOpts.pr, pickPr) + '</th>' +
-      '<th title="評価セッションの判定結果&#10;auto: 即対応可 / review: 検討の上対応 / reject: 不可・危険&#10;risk: low/medium/high&#10;ホバーで理由も表示">判定</th>' +
+      '<th title="対応: 実装の実行指示を送信">対応' +
+        '<br>' + skillSel(selId, selId === 'p' ? skillOpts.pr : skillOpts.impl,
+          selId === 'p' ? pickPr : pickImpl) + '</th>' +
+      '<th title="評価セッションの判定結果&#10;auto: 即対応可 / review: 検討の上対応 / human: 人的判断必須（ユーザー選択）/ reject: 不可・危険&#10;risk: low/medium/high&#10;ホバーで理由も表示">判定</th>' +
       '<th title="課題が作成された日時">作成日時</th>' +
       '<th title="実行中ラベル・過去の処理状態などの補足">備考</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table>';
-  }).join('') || '<div class="repo-empty">監視リポジトリなし</div>';
+    }).join('') || '<div class="repo-empty">監視リポジトリなし</div>';
+  document.getElementById('cands').innerHTML = renderEntries('issue', 'i');
+  const prsEl = document.getElementById('prs');
+  if (prsEl) prsEl.innerHTML = renderEntries('pr', 'p');
 }
 
 function esc(s) { return String(s).replace(/[&<>"]/g, c =>

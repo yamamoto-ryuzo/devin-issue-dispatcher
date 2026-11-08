@@ -120,6 +120,7 @@ async function dispatchChatTask(key, mode, skill) {
   await chats.get(id).chat.send(p.text);
   if (mode === 'assess') watchAssess(key, chats.get(id).chat);
   if (mode === 'split') watchSplit(key, chats.get(id).chat);
+  if (mode === 'impl') watchImpl(key, chats.get(id).chat);
   return id;
 }
 setInterval(() => {
@@ -157,7 +158,7 @@ function taskPrompt(key, mode, skillFile) {
   return { key, text: mode === 'assess'
     ? head + `この課題の対応可否を【評価のみ】してください（コード変更・コミット禁止）。\n` +
       `最後に <!--devin-assess\\n{"feasible":"yes|needs-human|no","risk":"low|medium|high",` +
-      `"category":"auto|review|reject","partial":true|false,"reason":"理由","plan":"方針"}` +
+      `"category":"auto|review|human|reject","partial":true|false,"reason":"理由","plan":"方針"}` +
       `\\ndevin-assess--> ブロックを出力。\n` +
       `partial は「要求の一部が既に実装済み・分割可能な残作業がある」場合のみ true。`
     : mode === 'split'
@@ -175,7 +176,9 @@ function taskPrompt(key, mode, skillFile) {
           `gh pr create（本文に Closes #${m[3]}）。main直push・force push禁止。\n`) +
       `検証が NG の場合は修正→再検証のループを最大 ${config.implLoopMax ?? 5} 回まで行う。\n` +
       `上限に達しても完了しない場合は「対応困難」として理由と現状を ` +
-      `${m[2] === 'pr' ? 'PR' : 'issue'} コメントで報告し、ユーザーへ対応を依頼する。` };
+      `${m[2] === 'pr' ? 'PR' : 'issue'} コメントで報告し、ユーザーへ対応を依頼する。\n` +
+      `PR を作成した場合は最後に <!--impl-pr\\n{"prKey":"${m[1]} pr#<作成したPR番号>"}\\nimpl-pr--> ` +
+      `ブロックを出力（作成した PR は評価スキルで評価されてから PR 対応へ進む）。` };
 }
 
 const readBody = (req, limit = 64 * 1024) => new Promise((resolve, reject) => {
@@ -244,6 +247,11 @@ function watchAssess(key, ch) {
             st.tasks[key] = { ...(st.tasks[key] ?? {}),
               assess: v, assessedAt: new Date().toISOString(), engine: 'chat' };
             writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+            // autoPr: auto 判定された PR 課題は自動で PR対応（impl）へ投入
+            if (key.includes(' pr#') && (config.autoPr ?? false) &&
+                v.category === 'auto' && !chatWait.some((w) => w.key === key)) {
+              chatWait.push({ key, mode: 'impl' });
+            }
           } catch { /* malformed JSON */ }
         }
       }
@@ -302,6 +310,46 @@ function watchSplit(key, ch) {
   setTimeout(() => clearInterval(iv), 30 * 60 * 1000).unref?.();
 }
 
+// 対応完了を監視: <!--impl-pr {"prKey":...}--> または PR URL を検出したら作成 PR を評価キューへ投入
+const implWatchers = new Set();
+function watchImpl(key, ch) {
+  if (implWatchers.has(key)) return;
+  implWatchers.add(key);
+  const repo = key.slice(0, key.indexOf(' '));
+  const iv = setInterval(() => {
+    if (ch.busy) return;
+    clearInterval(iv);
+    implWatchers.delete(key);
+    // 直近30件の agent メッセージから検出: まずマーカー（正規経路）、無ければ PR URL で補完
+    let prKey = null;
+    const agentMsgs = [];
+    for (let i = ch.messages.length - 1; i >= 0 && agentMsgs.length < 30; i--) {
+      if (ch.messages[i].role === 'agent') agentMsgs.push(ch.messages[i].text);
+    }
+    for (const text of agentMsgs) {
+      const m = text.match(/<!--impl-pr\s*([\s\S]*?)impl-pr-->/);
+      if (m) { try { prKey = JSON.parse(m[1].trim()).prKey || null; } catch { /* noop */ } break; }
+    }
+    if (!prKey) {
+      for (const text of agentMsgs) {
+        const u = text.match(/github\.com\/[^\s/]+\/[^\s/]+\/pull\/(\d+)/);
+        if (u) { prKey = repo + ' pr#' + u[1]; break; }
+      }
+    }
+    if (!prKey) return;
+    const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+    st.tasks[key] = { ...(st.tasks[key] ?? {}),
+      createdPr: prKey, prAt: new Date().toISOString() };
+    writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+    if (!chatWait.some((w) => w.key === prKey) &&
+        ![...chats.values()].some((s) => s.chat.busy && s.label === prKey + ' assess') &&
+        !st.tasks[prKey]?.assess?.category) {
+      chatWait.push({ key: prKey, mode: 'assess' });
+    }
+  }, 3000);
+  setTimeout(() => { clearInterval(iv); implWatchers.delete(key); }, 30 * 60 * 1000).unref?.();
+}
+
 function status() {
   const state = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
   const tasks = Object.entries(state.tasks ?? {})
@@ -322,6 +370,7 @@ function status() {
       autoDiscover: config.autoDiscover ?? true,
       autoTrigger: config.autoTrigger ?? false,
       autoAssess: config.autoAssess ?? false,
+      autoPr: config.autoPr ?? false,
       assessMaxAgeHours: config.assessMaxAgeHours ?? 24,
       autoTriggerSince: config.autoTriggerSince ?? null,
       permissionMode: config.permissionMode ?? 'dangerous',
@@ -398,7 +447,8 @@ async function candidates(force) {
     candidates: raw.map((c) => {
       const key = keyOf(c.repo, c.type, c.number);
       const t = state.tasks?.[key];
-      return { key, ...c, state: t?.status ?? null, assess: t?.assess ?? null };
+      return { key, ...c, state: t?.status ?? null, assess: t?.assess ?? null,
+        createdPr: t?.createdPr ?? null };
     }),
   };
 }
@@ -463,7 +513,7 @@ const server = createServer(async (req, res) => {
         // config.json の一部キーを更新（ファイル + メモリ両方）
         const allowed = ['pollIntervalSec', 'candidateCacheSec', 'maxNewPerPoll',
           'maxConcurrent', 'maxConcurrentAssess', 'maxConcurrentImpl', 'maxConcurrentPr',
-          'autoDiscover', 'autoTrigger', 'autoAssess',
+          'autoDiscover', 'autoTrigger', 'autoAssess', 'autoPr',
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
@@ -476,6 +526,17 @@ const server = createServer(async (req, res) => {
         }
         writeFileSync(CONFIG_PATH, JSON.stringify(fresh, null, 2) + '\n');
         config = fresh;
+        // autoPr を ON にした時点で、auto 判定済み・未完了の pr# 課題を対応キューへ投入
+        if (applied.autoPr === true) {
+          const st = loadJson(STATE_PATH, { tasks: {} });
+          for (const [k, t] of Object.entries(st.tasks || {})) {
+            if (k.includes(' pr#') && t?.assess?.category === 'auto' &&
+                t?.status !== 'done' && t?.status !== 'running' &&
+                !chatWait.some((w) => w.key === k)) {
+              chatWait.push({ key: k, mode: 'impl' });
+            }
+          }
+        }
         return json(200, { ok: true, applied });
       }
       if (url.pathname === '/api/skill') {
@@ -536,6 +597,18 @@ const server = createServer(async (req, res) => {
           writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
           return json(200, { ok: true });
         } catch (e) { return json(500, { ok: false, error: e.message }); }
+      }
+      if (url.pathname === '/api/verdict') {
+        // パネルから判定を手動上書き（相反するが価値ある課題のユーザー判断の委ね先）
+        const { key, category } = JSON.parse((await readBody(req)) || '{}');
+        if (!['auto', 'review', 'human', 'reject'].includes(category)) {
+          return json(400, { ok: false, error: 'bad category: ' + category });
+        }
+        const st = loadJson(STATE_PATH, { tasks: {} });
+        if (!st.tasks[key]?.assess) return json(404, { ok: false, error: 'no assess: ' + key });
+        st.tasks[key].assess = { ...st.tasks[key].assess, category, manualCategory: true };
+        writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+        return json(200, { ok: true });
       }
       if (url.pathname === '/api/chat/task') {
         // パネルの「評価」「対応」ボタン → 空き/新規セッションへ自動送信

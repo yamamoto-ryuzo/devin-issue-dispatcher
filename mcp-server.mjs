@@ -53,7 +53,7 @@ const call = (name, args) => {
       return { task: it, instructions: common +
         `この課題の対応可否を【評価のみ】してください（コード変更・コミット禁止）。\n` +
         `判定は feasible=yes|needs-human|no, risk=low|medium|high,\n` +
-        `category=auto(即対応可)|review(検討の上対応)|reject(破壊的・不能) で、\n` +
+        `category=auto(即対応可)|review(検討の上対応)|human(既存機能と明確に相反・大きな副作用でユーザー判断必須)|reject(破壊的・不能) で、\n` +
         `完了時に queue_done({key:"${it.key}",status:"needs-review"または"done",\n` +
         `note:"{category|risk|reason}形式のJSON"}) を呼ぶ。` };
     }

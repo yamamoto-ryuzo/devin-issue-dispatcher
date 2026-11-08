@@ -14,6 +14,7 @@
   "permissionMode": "dangerous",
   "assessFirst": true,
   "autoAssess": false,
+  "autoPr": true,
   "assessMaxAgeHours": 24,
   "maxAutoRisk": "medium",
   "needsReviewLabel": "devin:needs-review",
@@ -69,6 +70,6 @@
   "candidateCacheSec": 120,
   "maxConcurrentAssess": 5,
   "maxConcurrentImpl": 1,
-  "maxConcurrentPr": 1,
+  "maxConcurrentPr": 5,
   "implLoopMax": 5
 }
