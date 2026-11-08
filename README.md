@@ -269,6 +269,7 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
     - **ACP（devin/copilot）・bridge 経由タスク**: プロンプト末尾へ「ツール実行の往復は最大 N 回。到達時は作業内容と未完了事項をまとめて報告し終了」の指示を注入する（dispatcher/control の両経路）。bridge-hub `POST /agent` に同種パラメータは無いため指示注入で代替。**エージェントの自律遵守に依存するソフトリミット**であり、到達時は打ち切り報告＝課題は未完了扱い（ユーザーが再対応を判断）
     - **パネル内蔵 AI チャット**（apiUrl/apiModel 指定の OpenAI 互換 tool-calling ループ）: ループ自体のハードリミット。到達時は `truncated:true` と「（ツール往復上限に達しました）」を返して打ち切る
     - **api エンジンの課題処理**: 単発応答でツール往復が無いため実効なし（UI 注記あり）
+  - `apiProvider`: api エンジンのプロバイダ種別（`openai` 既定 / `anthropic` / `azure`）。anthropic=`{apiUrl}/messages`+`x-api-key`+`anthropic-version`（max_tokens 必須・応答 `content[]` 連結、一覧は `/models`）。azure=`apiUrl`=リソースベース URL・`apiModel`=デプロイメント名で `/openai/deployments/{model}/chat/completions?api-version={apiVersion}`（既定 `2024-10-21`・`config.apiVersion` で上書き可）+`api-key` ヘッダ。パネル内蔵 AI チャットのツールループは OpenAI 形式前提のため openai/azure のみ（anthropic 選択時は明示エラー。課題処理の単発送信は全プロバイダ対応）
 - `config.example.json` — config.json の構成例（追跡対象へキーが入らない形）
 - `secrets.json` — APIキー等のシークレット（自動生成・gitignore 済）
 - `state.json` — 処理済み課題の状態（自動生成）

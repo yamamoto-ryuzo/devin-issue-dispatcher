@@ -22,7 +22,7 @@
  */
 import { createServer } from 'node:http';
 import { engineSendCore, injectExtraPrompt, ASSESS_RE, SPLIT_RE, skillEnabled,
-         mcpServersForSession } from './engine.mjs';
+         mcpServersForSession, apiAdapter, apiListModels } from './engine.mjs';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
@@ -659,6 +659,8 @@ function status() {
       engine: config.engine ?? 'devin',
       bridgeHub: config.bridgeHub ?? 'http://127.0.0.1:8511',
       apiUrl: config.apiUrl ?? '', apiModel: config.apiModel ?? '',
+      apiProvider: config.apiProvider ?? 'openai',
+      apiVersion: config.apiVersion ?? '',
       apiModels: config.apiModels ?? {},
       bridgeModels: config.bridgeModels ?? {},
       plugins: config.plugins ?? [],
@@ -937,6 +939,12 @@ async function aiChat(messages, maxSteps) {
   if (!url || !config.apiModel)
     throw new Error('apiUrl/apiModel 未設定（設定タブ「AI」で指定）');
   assertApiUrlSafe(url);
+  // ツール呼出ループは OpenAI 形式の tool_calls が前提のため anthropic は
+  // 明示エラー（課題処理の単発送信 engineSend は全プロバイダ対応済み）
+  const apiProvider = String(config.apiProvider ?? 'openai').toLowerCase();
+  if (apiProvider === 'anthropic')
+    throw new Error('内蔵チャットのツールループは anthropic 未対応です（課題処理の api 送信は対応済み）');
+  const ad = apiAdapter(config);
   const limit = Math.min(Math.max(+maxSteps || +(config.toolMaxSteps ?? 10), 1), 20);
   const tools = MCP_TOOLS.map((t) => ({ type: 'function',
     function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
@@ -948,11 +956,13 @@ async function aiChat(messages, maxSteps) {
     ...messages];
   const calls = [];
   for (let step = 0; step < limit; step++) {
-    const r = await fetch(url + '/chat/completions', {
+    const r = await fetch(ad.chatUrl(url, config), {
       method: 'POST', redirect: 'manual',
       headers: { 'Content-Type': 'application/json',
-        ...(effectiveApiKey() ? { Authorization: 'Bearer ' + effectiveApiKey() } : {}) },
-      body: JSON.stringify({ model: config.apiModel, messages: msgs, tools }),
+        ...ad.headers(effectiveApiKey()) },
+      // azure はデプロイメントが URL 内のため model フィールドを送らない
+      body: JSON.stringify({ ...(apiProvider === 'azure' ? {} : { model: config.apiModel }),
+        messages: msgs, tools }),
     });
     // Bearer キーがリダイレクト先の平文 http へ漏れないよう自動追跡しない
     if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) {
@@ -1165,9 +1175,14 @@ const server = createServer(async (req, res) => {
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax',
           'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt', 'extraOrigins',
           'toolMaxSteps', 'apiModels', 'bridgeModels', 'acpOptions', 'plugins',
-          'mcpServers'];
+          'mcpServers', 'apiProvider', 'apiVersion'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
+        // apiProvider は実装済みアダプタの種別のみ受理
+        if (patch.apiProvider !== undefined &&
+            !['openai', 'anthropic', 'azure'].includes(String(patch.apiProvider))) {
+          return json(400, { ok: false, error: 'apiProvider は openai/anthropic/azure のみ' });
+        }
         // mcpServers は ACP 形式 [{name,command|url,...}] のみ受理
         if (patch.mcpServers !== undefined && !(Array.isArray(patch.mcpServers) &&
             patch.mcpServers.every((e) => e && typeof e === 'object' &&
@@ -1331,17 +1346,11 @@ const server = createServer(async (req, res) => {
         }
         const u = (config.apiUrl || '').replace(/\/+$/, '');
         if (!u) return json(400, { ok: false, error: 'apiUrl 未設定' });
-        try { assertApiUrlSafe(u); }
-        catch (e) { return json(400, { ok: false, error: e.message }); }
-        const r = await fetch(u + '/models',
-          { redirect: 'manual',
-            headers: effectiveApiKey() ? { Authorization: 'Bearer ' + effectiveApiKey() } : {} });
-        if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) {
-          return json(502, { ok: false, error: 'models 取得のリダイレクトは未対応（https 直結のみ許可）' });
-        }
-        const j = await r.json().catch(() => null);
-        if (!r.ok || !j?.data) return json(502, { ok: false, error: 'models ' + r.status });
-        return json(200, { ok: true, models: j.data.map((m) => m.id).filter(Boolean) });
+        try {
+          // apiProvider（openai/anthropic/azure）に応じた一覧 API を呼ぶ
+          return json(200, { ok: true,
+            models: await apiListModels(config, effectiveApiKey()) });
+        } catch (e) { return json(502, { ok: false, error: e.message }); }
       }
       if (url.pathname === '/api/bridge-install') {
         // bridge-hub.exe を CDN から取得して自己インストール（8511 常駐）を起動

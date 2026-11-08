@@ -363,11 +363,23 @@
         <span id="bridge-model-note" style="color:#b45309;font-size:11px;margin-left:8px"></span>
       </div>
       <div id="eng-api" style="display:none">
+        <label style="display:block;margin-bottom:6px">プロバイダ種別<br>
+          <select id="set-apiprovider" style="width:320px" onchange="engProviderChanged()">
+            <option value="openai">OpenAI 互換</option>
+            <option value="anthropic">Anthropic（/v1/messages）</option>
+            <option value="azure">Azure OpenAI（デプロイメント URL）</option>
+          </select></label>
+        <div id="api-provider-hint" style="color:#6b7280;margin-bottom:6px"></div>
+        <div id="eng-azure" style="display:none">
+          <label style="display:block;margin-bottom:6px">api-version（Azure 用・空欄なら 2024-10-21）<br>
+            <input id="set-apiversion" type="text" placeholder="2024-10-21" style="width:140px"></label>
+        </div>
         <label style="display:block;margin-bottom:6px">プリセット<br>
           <select id="set-apipreset" style="width:320px" onchange="engPreset()">
             <option value="">（カスタム）</option>
             <option value="https://api.ai.sakura.ad.jp/v1">【API】さくらAIEngine</option>
             <option value="https://api.openai.com/v1">【API】OpenAI</option>
+            <option value="https://api.anthropic.com/v1">【API】Anthropic</option>
             <option value="https://models.github.ai/inference/v1">【API】GitHub Models</option>
             <option value="https://generativelanguage.googleapis.com/v1beta/openai">【API】Gemini（OpenAI互換）</option>
           </select></label>
@@ -844,7 +856,20 @@ async function engHealth() {
 function engPreset() {
   const v = document.getElementById('set-apipreset').value;
   if (v) document.getElementById('set-apiurl').value = v;
+  // Anthropic プリセットはプロバイダ種別も切り替える（非 OpenAI 互換のため）
+  if (v === 'https://api.anthropic.com/v1') {
+    document.getElementById('set-apiprovider').value = 'anthropic';
+  }
+  engProviderChanged();
   apiEndpointChanged();
+}
+function engProviderChanged() {
+  const p = document.getElementById('set-apiprovider').value;
+  document.getElementById('eng-azure').style.display = p === 'azure' ? '' : 'none';
+  document.getElementById('api-provider-hint').textContent =
+    p === 'anthropic' ? 'x-api-key + anthropic-version で送信（max_tokens=8192・応答 content[]）。一覧は /models' :
+    p === 'azure' ? 'apiUrl=リソース URL、モデル名=デプロイメント名。api-key ヘッダ + api-version で送信' :
+    'OpenAI 互換（/chat/completions + Bearer）。モデル一覧は /models';
 }
 function apiEndpointChanged() {
   // エンドポイント別の最終選択モデルを復元し、一覧を自動取得する
@@ -981,6 +1006,9 @@ function fillCfgForm() {
   document.getElementById('set-bridgehub').value = c.bridgeHub ?? '';
   document.getElementById('set-apiurl').value = c.apiUrl ?? '';
   document.getElementById('set-apimodel').value = c.apiModel ?? '';
+  document.getElementById('set-apiprovider').value = c.apiProvider ?? 'openai';
+  document.getElementById('set-apiversion').value = c.apiVersion ?? '';
+  engProviderChanged();
   apiModels = c.apiModels ?? {};
   bridgeModels = c.bridgeModels ?? {};
   document.getElementById('set-apikey').placeholder = c.apiKeySet ? '（設定済み・secrets.json）' : '（必要時）';
@@ -1009,6 +1037,8 @@ async function saveCfg() {
     bridgeHub: document.getElementById('set-bridgehub').value.trim(),
     apiUrl: document.getElementById('set-apiurl').value.trim(),
     apiModel: document.getElementById('set-apimodel').value.trim(),
+    apiProvider: document.getElementById('set-apiprovider').value,
+    apiVersion: document.getElementById('set-apiversion').value.trim() || undefined,
     apiModels: { ...apiModels,
       ...(document.getElementById('set-apiurl').value.trim()
         ? { [document.getElementById('set-apiurl').value.trim()]:

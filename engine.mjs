@@ -25,7 +25,71 @@ export function assertApiUrlSafe(raw) {
   throw new Error('apiUrl は外部ホストへ https のみ許可（http は loopback/LAN 限定）: ' + raw);
 }
 
-// cfg: {apiUrl, apiModel, bridgeHub, bridgeModels}
+// api エンジンのプロバイダ別アダプタ（cfg.apiProvider で選択・既定 openai）。
+// 非 OpenAI 互換 API の URL・認証ヘッダ・ボディ・応答形状の差異をここに集約する
+// openai:    {apiUrl}/chat/completions + Bearer + /models
+// anthropic: {apiUrl}/messages + x-api-key + anthropic-version + max_tokens 必須。
+//            応答 content[].text 連結。一覧は /models（同ヘッダ）
+// azure:     apiUrl=リソースベース URL・apiModel=デプロイメント名。
+//            /openai/deployments/{model}/chat/completions?api-version= + api-key
+const API_ADAPTERS = {
+  openai: {
+    chatUrl: (u) => u + '/chat/completions',
+    modelsUrl: (u) => u + '/models',
+    headers: (key) => (key ? { Authorization: 'Bearer ' + key } : {}),
+    body: (cfg, prompt) => ({ model: cfg.apiModel,
+      messages: [{ role: 'user', content: prompt }] }),
+    reply: (j) => j?.choices?.[0]?.message?.content || '',
+    models: (j) => (j?.data ?? []).map((m) => m.id).filter(Boolean),
+    error: (j) => j?.error?.message,
+  },
+  anthropic: {
+    chatUrl: (u) => u + '/messages',
+    modelsUrl: (u) => u + '/models',
+    headers: (key) => ({ 'x-api-key': key, 'anthropic-version': '2023-06-01' }),
+    body: (cfg, prompt) => ({ model: cfg.apiModel, max_tokens: 8192,
+      messages: [{ role: 'user', content: prompt }] }),
+    reply: (j) => (j?.content ?? [])
+      .map((b) => (b?.type === 'text' ? b.text : '') || '').join(''),
+    models: (j) => (j?.data ?? []).map((m) => m.id ?? m.name).filter(Boolean),
+    error: (j) => j?.error?.message,
+  },
+  azure: {
+    chatUrl: (u, cfg) => u + '/openai/deployments/' +
+      encodeURIComponent(cfg.apiModel) + '/chat/completions?api-version=' +
+      encodeURIComponent(cfg.apiVersion ?? '2024-10-21'),
+    modelsUrl: (u, cfg) => u + '/openai/models?api-version=' +
+      encodeURIComponent(cfg.apiVersion ?? '2024-10-21'),
+    headers: (key) => (key ? { 'api-key': key } : {}),
+    body: (cfg, prompt) => ({ messages: [{ role: 'user', content: prompt }] }),
+    reply: (j) => j?.choices?.[0]?.message?.content || '',
+    models: (j) => (j?.data ?? []).map((m) => m.id).filter(Boolean),
+    error: (j) => j?.error?.message,
+  },
+};
+export const API_PROVIDER_NAMES = Object.keys(API_ADAPTERS);
+export function apiAdapter(cfg) {
+  return API_ADAPTERS[String(cfg?.apiProvider ?? 'openai').toLowerCase()]
+    ?? API_ADAPTERS.openai;
+}
+// モデル一覧取得（プロバイダ別。対応しない一覧 API を持たない
+// プロバイダは呼出側で手入力フォールバックとして扱う）
+export async function apiListModels(cfg, apiKey) {
+  const url = (cfg.apiUrl || '').replace(/\/+$/, '');
+  if (!url) throw new Error('apiUrl 未設定');
+  assertApiUrlSafe(url);
+  const ad = apiAdapter(cfg);
+  const r = await fetch(ad.modelsUrl(url, cfg),
+    { redirect: 'manual', headers: ad.headers(apiKey) });
+  if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) {
+    throw new Error('models 取得のリダイレクトは未対応（https 直結のみ許可）');
+  }
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(ad.error(j) || 'models ' + r.status);
+  return ad.models(j);
+}
+
+// cfg: {apiUrl, apiModel, apiProvider, apiVersion, bridgeHub, bridgeModels}
 // bridgeToken: ハブ側がプロバイダ別 Bearer（COPILOT_BRIDGE_TOKEN 等）を
 // 設定している場合の Authorization: Bearer 値（未設定なら無認証で送信）
 export async function engineSendCore(cfg, apiKey, eng, prompt, bridgeToken = '') {
@@ -33,16 +97,19 @@ export async function engineSendCore(cfg, apiKey, eng, prompt, bridgeToken = '')
     const url = (cfg.apiUrl || '').replace(/\/+$/, '');
     if (!url || !cfg.apiModel) throw new Error('apiUrl/apiModel 未設定');
     assertApiUrlSafe(url);
-    const r = await fetch(url + '/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json',
-        ...(apiKey ? { Authorization: 'Bearer ' + apiKey } : {}) },
-      body: JSON.stringify({ model: cfg.apiModel,
-        messages: [{ role: 'user', content: prompt }] }),
+    const ad = apiAdapter(cfg);
+    const r = await fetch(ad.chatUrl(url, cfg), {
+      method: 'POST', redirect: 'manual',
+      headers: { 'Content-Type': 'application/json', ...ad.headers(apiKey) },
+      body: JSON.stringify(ad.body(cfg, prompt)),
     });
+    // キーがリダイレクト先へ漏れないよう自動追跡しない（aiChat と同じ方針）
+    if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) {
+      throw new Error('api リダイレクトは拒否されます（https 直結のみ許可）');
+    }
     const j = await r.json();
-    if (!r.ok) throw new Error(j.error?.message || 'api ' + r.status);
-    return j.choices?.[0]?.message?.content || '';
+    if (!r.ok) throw new Error(ad.error(j) || 'api ' + r.status);
+    return ad.reply(j);
   }
   const hub = (cfg.bridgeHub || 'http://127.0.0.1:8511').replace(/\/+$/, '');
   // bridge-hub POST /agent 仕様: 本文は {provider, message, project, model,

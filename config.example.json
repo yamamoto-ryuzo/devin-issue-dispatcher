@@ -40,6 +40,8 @@
   "bridgeHub": "http://127.0.0.1:8511",
   "apiUrl": "",
   "apiModel": "",
+  "apiProvider": "openai",
+  "apiVersion": "",
   "apiKey": "secrets.json に保存すること（このファイルには書かない）",
   "extraPrompt": "",
   "toolMaxSteps": 10,

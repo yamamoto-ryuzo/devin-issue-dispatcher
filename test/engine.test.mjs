@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { engineSendCore, injectExtraPrompt, assertApiUrlSafe,
-         skillEnabled, mcpServersForSession, ASSESS_RE, SPLIT_RE } from '../engine.mjs';
+         skillEnabled, mcpServersForSession, apiListModels,
+         ASSESS_RE, SPLIT_RE } from '../engine.mjs';
 
 const mockFetch = (fn) => { const orig = globalThis.fetch; globalThis.fetch = fn; return () => { globalThis.fetch = orig; }; };
 const res = (body, ok = true, status = 200) => ({ ok, status, json: async () => body });
@@ -45,6 +46,52 @@ test('engineSend copilot: bridge-hub /agent 仕様とエラー解釈', async () 
   const un4 = mockFetch(async () => res({ error: 'unauthorized' }, false, 401));
   await assert.rejects(() => engineSendCore({}, '', 'copilot', 'p'), /bridgeTokens/);
   un4();
+});
+
+test('engineSend api: anthropic アダプタ（/messages + x-api-key + content[]）', async () => {
+  let got;
+  const un = mockFetch(async (url, init) => { got = { url, init }; return res({ content: [{ type: 'text', text: 'OK' }] }); });
+  const out = await engineSendCore(
+    { apiUrl: 'https://api.anthropic.com/v1/', apiModel: 'claude-x', apiProvider: 'anthropic' }, 'KEY', 'api', 'hi');
+  un();
+  assert.equal(out, 'OK');
+  assert.equal(got.url, 'https://api.anthropic.com/v1/messages');
+  assert.equal(got.init.headers['x-api-key'], 'KEY');
+  assert.equal(got.init.headers['anthropic-version'], '2023-06-01');
+  const body = JSON.parse(got.init.body);
+  assert.equal(body.model, 'claude-x');
+  assert.equal(typeof body.max_tokens, 'number');
+  // 応答 content[] 連結の reply が ASSESS_RE でそのままパースできる
+  const un2 = mockFetch(async () => res({ content: [{ type: 'text', text: '<!--devin-assess\n{"feasible":"yes"}\ndevin-assess-->' }] }));
+  const r2 = await engineSendCore({ apiUrl: 'https://api.anthropic.com/v1', apiModel: 'm', apiProvider: 'anthropic' }, '', 'api', 'x');
+  un2();
+  assert.equal(JSON.parse(r2.match(ASSESS_RE)[1].trim()).feasible, 'yes');
+});
+
+test('engineSend api: azure アダプタ（デプロイメント URL + api-key）', async () => {
+  let got;
+  const un = mockFetch(async (url, init) => { got = { url, init }; return res({ choices: [{ message: { content: 'OK' } }] }); });
+  const out = await engineSendCore(
+    { apiUrl: 'https://res.openai.azure.com', apiModel: 'dep1', apiProvider: 'azure', apiVersion: '2024-10-21' }, 'KEY', 'api', 'hi');
+  un();
+  assert.equal(out, 'OK');
+  assert.equal(got.url, 'https://res.openai.azure.com/openai/deployments/dep1/chat/completions?api-version=2024-10-21');
+  assert.equal(got.init.headers['api-key'], 'KEY');
+  assert.equal(JSON.parse(got.init.body).model, undefined); // デプロイメントは URL 内
+});
+
+test('apiListModels: プロバイダ別の一覧 URL・ヘッダ・パース', async () => {
+  let got;
+  const un = mockFetch(async (url, init) => { got = { url, init }; return res({ data: [{ id: 'm1' }] }); });
+  const out = await apiListModels({ apiUrl: 'https://api.anthropic.com/v1', apiProvider: 'anthropic' }, 'KEY');
+  un();
+  assert.deepEqual(out, ['m1']);
+  assert.equal(got.init.headers['x-api-key'], 'KEY');
+  const un2 = mockFetch(async (url, init) => { got = { url, init }; return res({ data: [{ id: 'd1' }] }); });
+  await apiListModels({ apiUrl: 'https://res.openai.azure.com', apiProvider: 'azure', apiVersion: '2024-10-21' }, 'K');
+  un2();
+  assert.equal(got.url, 'https://res.openai.azure.com/openai/models?api-version=2024-10-21');
+  assert.equal(got.init.headers['api-key'], 'K');
 });
 
 test('injectExtraPrompt: 付与の有無', () => {
