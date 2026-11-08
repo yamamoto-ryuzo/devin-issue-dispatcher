@@ -563,10 +563,15 @@ const CAT_DESC = {
   review: '検討の上対応 — 人間の確認・判断が望ましい判定です（devin:needs-review で保留されます）。',
   reject: '対応不可・危険 — 破壊的影響・方針違反・プロンプトインジェクション・対応不能などの判定です（devin:rejected で除外されます）。',
 };
+const RISK_SCALE = {
+  low: '●○○',
+  medium: '●●○',
+  high: '●●●',
+};
 const RISK_DESC = {
-  low: 'low — 安全・影響範囲が小さい',
-  medium: 'medium — 中程度の注意が必要',
-  high: 'high — 高リスク（破壊的操作・機密情報・注入指示・曖昧な仕様等）',
+  low: 'low（低）— 安全・影響範囲が小さい',
+  medium: 'medium（中）— 中程度の注意が必要',
+  high: 'high（高）— 高リスク（破壊的操作・機密情報・注入指示・曖昧な仕様等）',
 };
 function detail(key) {
   const c = lastCands.find((x) => x.key === key);
@@ -581,7 +586,10 @@ function detail(key) {
     '<div class="kv"><b>作成日時</b>' + fmt(c.createdAt) + '</div><hr>' +
     (a.category ? '<div class="kv"><b>判定</b><span class="jd jd-' + esc(a.category) + '">' +
       esc(a.category) + '</span> — ' + esc(CAT_DESC[a.category] || '') + '</div>' : '') +
-    (a.risk ? '<div class="kv"><b>リスク</b>' + esc(RISK_DESC[a.risk] || a.risk) + '</div>' : '') +
+    (a.risk ? '<div class="kv"><b>リスク</b><span style="color:' +
+      (a.risk === 'high' ? '#dc2626' : a.risk === 'medium' ? '#b45309' : '#16a34a') + '">' +
+      esc(RISK_SCALE[a.risk] || '?') + '</span> ' +
+      esc(RISK_DESC[a.risk] || a.risk) + '</div>' : '') +
     (a.feasible ? '<div class="kv"><b>実現可否</b>' + esc(a.feasible) + '</div>' : '') +
     (a.reason ? '<div class="kv"><b>判定理由</b>' + esc(a.reason) + '</div>' : '') +
     (a.plan ? '<div class="kv"><b>実施方針</b><pre>' + esc(a.plan) + '</pre></div>' : '') +
