@@ -388,6 +388,19 @@ const server = createServer(async (req, res) => {
         saveDesired({ enabled: false });
         return json(200, stopDispatcher());
       }
+      if (url.pathname === '/api/assess-all') {
+        // 全候補のうち判定未出力のものを評価キューへ（上限は待機キューで調整）
+        const cands = loadJson(join(ROOT, 'candidates.json'), { candidates: [] }).candidates ?? [];
+        const st = loadJson(STATE_PATH, { tasks: {} }).tasks ?? {};
+        let n = 0;
+        for (const c of cands) {
+          if (!st[c.key]?.assess?.category && !chatWait.some((w) => w.key === c.key)) {
+            chatWait.push({ key: c.key, mode: 'assess' });
+            n++;
+          }
+        }
+        return json(200, { ok: true, queued: n });
+      }
       if (url.pathname === '/api/once') {
         return json(200, startDispatcher('once'));
       }

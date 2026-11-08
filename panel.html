@@ -126,8 +126,8 @@
     <span id="badge" class="badge off"><span class="dot"></span>確認中…</span>
     <button id="btnStart" class="primary" onclick="act('start')">起動</button>
     <button id="btnStop" class="danger" onclick="act('stop')">停止</button>
-    <button id="btnOnce" onclick="act('once')"
-      title="監視リポジトリの対応候補を1回だけスキャンし、&#10;devin ラベル付きの新着課題を検出します。&#10;常駐ポーリングとは別に手動で1回だけ実行されます。">1サイクル実行</button>
+    <button id="btnOnce" onclick="act('assess-all')"
+      title="判定が出ていない全候補を評価キューへ投入します。&#10;評価 同時起動数の上限までは並列セッションで即実行、&#10;超過分は待機キューで順次実行されます。">評価実行</button>
     <button onclick="act('reload')">設定再読込</button>
     <span id="meta" style="color:#6b7280;font-size:12px"></span>
     <span id="active" style="font-size:12px"></span>
