@@ -970,10 +970,10 @@ async function loadSessions() {
     if (chatSel == null && list.length) chatSel = list[0].id;
     document.getElementById('chat-sessions').innerHTML =
       list.map((s) => '<span class="csess' + (s.id === chatSel ? ' active' : '') +
-        (s.busy ? ' busy' : '') + '" onclick="chatSelect(' + s.id + ')">' +
+        (s.busy ? ' busy' : '') + '" onclick="chatSelect(' + JSON.stringify(s.id) + ')">' +
         ((s.engine && s.engine !== 'devin') ? '[' + esc(s.engine) + '] ' : '') +
         esc(s.label || 'session ' + s.id) + (s.busy ? ' ●' : '') +
-        '<span class="x" onclick="event.stopPropagation();chatClose(' + s.id + ')">✕</span></span>'
+        '<span class="x" onclick="event.stopPropagation();chatClose(' + JSON.stringify(s.id) + ')">✕</span></span>'
       ).join('') +
       '<span class="csess" onclick="chatSelect(null)">＋新規</span>';
   } catch { /* noop */ }
@@ -1795,7 +1795,7 @@ function renderCandBody() {
             'href="https://github.com/' + esc(prM[1]) + '/pull/' + prM[2] +
             '" target="_blank" rel="noopener" title="対応は PR #' + prM[2] +
             ' へ移行しました（PR一覧で継続中）">PR中#' + prM[2] + '</a>'
-        : c.engine === 'api'
+        : (c.engineImpl ?? c.engine) === 'api'
           ? '<span style="font-size:11px;color:#9ca3af" title="api エンジンは評価専用のため対応を起動できません">評価専用(api)</span>'
           : '<button class="mini primary" ' + (busy ? 'disabled' : '') +
             ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button>';

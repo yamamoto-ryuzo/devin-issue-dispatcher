@@ -75,9 +75,33 @@ function loadState() {
   try { return JSON.parse(readFileSync(STATE_PATH, 'utf8')); }
   catch { return { tasks: {} }; }
 }
+// control 側（委譲チャット・パネル）が state.json に書く共有フィールドを
+// 古いメモリ値で上書きしないよう、書き込み前に state.json の最新値を併合する
+// （解除時刻・完了結果のタイムスタンプで最終状態を調停）
 function saveState(state) {
+  const disk = liveJson(STATE_PATH);
+  const out = { ...state, tasks: { ...(disk?.tasks ?? {}) } };
+  for (const [k, cur] of Object.entries(state.tasks ?? {})) {
+    const dt = out.tasks[k];
+    if (!dt || running.has(k)) { out.tasks[k] = cur; continue; }
+    const merged = { ...dt, ...cur };
+    // control が委譲評価の完了（verdict）・タイムアウトで inflight を解除済みなら
+    // メモリ側の滞留マーカーも消す（パネルで engineReq が解除された場合も追従）
+    if (dt.inflightClearedAt && (!cur.inflightAt || dt.inflightClearedAt > cur.inflightAt)) {
+      delete merged.inflight;
+      delete merged.inflightAt;
+    }
+    // control が委譲 impl の完了を chatResult で確定済みなら委譲マーカーを消す
+    if (dt.chatResult && (!cur.delegatedAt || dt.chatResult.at > cur.delegatedAt)) {
+      merged.status = dt.chatResult.status ?? merged.status;
+      delete merged.chatDelegated;
+      delete merged.delegatedAt;
+    }
+    if (!('engineReq' in dt)) delete merged.engineReq;
+    out.tasks[k] = merged;
+  }
   const tmp = STATE_PATH + '.tmp';
-  writeFileSync(tmp, JSON.stringify(state, null, 2));
+  writeFileSync(tmp, JSON.stringify(out, null, 2));
   renameSync(tmp, STATE_PATH);
 }
 
@@ -254,7 +278,8 @@ function spawnDevin(prompt, task, logPath, key, phase = 'impl') {
       windowsHide: true,
       env: { ...process.env },
     });
-    running.set(key, { proc, logPath, startedAt: Date.now(), phase });
+    // dest（行き先フェーズ: drainQueue の先行登録）は保持したまま更新
+    running.set(key, { ...(running.get(key) ?? {}), proc, logPath, startedAt: Date.now(), phase });
     // パネルの「停止」→ kill-requests.json を2秒ごと監視してプロセスを kill
     const iv = setInterval(() => {
       const ks = readKillRequests().keys ?? [];
@@ -294,8 +319,116 @@ function parseVerdict(logPath) {
   } catch { return null; }
 }
 
+// ---- 課題単位のエンジン解決（control.mjs resolveEngine と同等の縮約版）----
+// 優先順位: issue ラベル/本文の engine 指定 > パネル保存の engineReq
+//          > モード別既定(config.engineModes) > config.engine > devin
+const ENGINES = ['devin', 'copilot', 'antigravity', 'api'];
+const normEngine = (v) => {
+  const e = String(v ?? '').trim().toLowerCase();
+  return ENGINES.includes(e) ? e : null;
+};
+// config.json は呼出ごとに読み直す（パネルからのエンジン変更を
+// dispatcher 再起動なしで反映するため。liveConfig と同じ方針）
+const liveJson = (p) => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; } };
+function resolveTaskEngine(key, mode, state) {
+  const it = readIssueStore(ISSUES_PATH).issues?.[key];
+  if (it) {
+    for (const l of it.labels ?? []) {
+      const m = String(l).match(/^engine\s*[:：]\s*(\S+)$/i);
+      const e = m && normEngine(m[1]);
+      if (e) return e;
+    }
+    const m = String(it.body ?? '').match(/^[ 	>]*engine\s*[:：]\s*([a-zA-Z]+)\s*$/im);
+    const e = m && normEngine(m[1]);
+    if (e) return e;
+  }
+  const cfg = liveJson(configPath) ?? config;
+  return normEngine(state.tasks[key]?.engineReq)
+    ?? normEngine(cfg.engineModes?.[mode])
+    ?? normEngine(cfg.engine)
+    ?? 'devin';
+}
+
+// 非 devin 解決の課題は devin -p を起動せず control のチャット経路
+// （/api/chat/task → dispatchChatTask）へ委譲する。
+// verdict 記録・評価→対応の連鎖は control 側の watchAssess が担う
+async function dispatchViaChat(key, mode, eng) {
+  const cfg = liveJson(configPath) ?? config;
+  const r = await fetch(`http://127.0.0.1:${cfg.controlPort ?? 8585}/api/chat/task`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+    body: JSON.stringify({ key, mode, engine: eng }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`chat dispatch failed (engine=${eng}): ${j.error || r.status}`);
+  log(`CHAT-ROUTE ${key}: engine=${eng} mode=${mode} -> ${JSON.stringify(j)}`);
+}
+
+// control 側（委譲チャット・パネル）が state.json に書く共有フィールド。
+// 各ポーリングでメモリへ追従させないと、委譲完了後も古い inflight が残って
+// 課題が永久にスキップされる（running 管理下の課題は dispatcher が正）
+const SHARED_PULL = ['assess', 'assessedAt', 'splitTo', 'splitAt',
+  'createdPr', 'prAt', 'closedAt', 'engineReq', 'inflightClearedAt',
+  'chatResult', 'engineUsed', 'engineUsedAt'];
+function syncShared(state) {
+  const disk = liveJson(STATE_PATH);
+  if (!disk?.tasks) return;
+  for (const [k, dt] of Object.entries(disk.tasks)) {
+    if (running.has(k)) continue;
+    const cur = state.tasks[k];
+    if (!cur) { state.tasks[k] = dt; continue; }
+    for (const f of SHARED_PULL) {
+      if (f in dt) cur[f] = dt[f];
+      else if (f === 'engineReq') delete cur[f];
+    }
+    if (cur.inflight && dt.inflightClearedAt &&
+        (!cur.inflightAt || dt.inflightClearedAt > cur.inflightAt)) {
+      delete cur.inflight;
+      delete cur.inflightAt;
+    }
+    if (cur.chatDelegated && dt.chatResult &&
+        (!cur.delegatedAt || dt.chatResult.at > cur.delegatedAt)) {
+      cur.status = dt.chatResult.status ?? cur.status;
+      delete cur.chatDelegated;
+      delete cur.delegatedAt;
+    }
+    if (dt.status === 'closed' && !cur.chatDelegated) cur.status = 'closed';
+  }
+}
+
 async function runTask(task, state, { skipAssess = false } = {}) {
   const key = keyOf(task.repo.github, task.type, task.number);
+  // 非 devin 解決時はチャット経路へ委譲（評価→対応の連鎖は watchAssess/autoTrigger 側が担う）
+  const mode = skipAssess ? 'impl' : 'assess';
+  const eng = resolveTaskEngine(key, mode, state);
+  if (eng !== 'devin') {
+    const cur = state.tasks[key] ?? {};
+    const verdictFresh = cur.assess?.category && cur.assessedAt
+      && Date.now() - new Date(cur.assessedAt).getTime() <= ASSESS_MAX_AGE_MS;
+    // 委譲が飛行中、または判定済み（impl 連鎖は control 側 watchAssess が担う）
+    // なら二重送信しない
+    if (cur.inflight || cur.chatDelegated || (!skipAssess && verdictFresh)) {
+      log(`CHAT-ROUTE-SKIP ${key}: delegated in flight or verdict recorded`);
+      return;
+    }
+    const dmode = skipAssess ? 'impl' : 'assess';
+    await dispatchViaChat(key, dmode, eng);
+    const now = new Date().toISOString();
+    // assess 委譲: verdict 記録・impl 連鎖は watchAssess が担う。status='running'
+    // にすると自動連鎖条件（status が running 系でないこと）を塞ぐため
+    // inflight マーカーのみ立てる
+    // impl 委譲: chat 完了時に control 側 watchImpl が chatResult で status を
+    // 確定する（PR 有=done / 無=needs-review）まで running 表示を維持
+    state.tasks[key] = { ...cur,
+      inflight: dmode, inflightAt: now, engineUsed: eng,
+      note: `エンジン ${eng} のためチャット経路へ委譲(${dmode})`,
+      ...(dmode === 'impl'
+        ? { status: 'running', chatDelegated: 'impl', delegatedAt: now,
+            startedAt: now }
+        : {}) };
+    saveState(state);
+    return;
+  }
   const base = join(LOG_DIR,
     `${task.repo.github.replace('/', '_')}_${task.type}${task.number}_${Date.now()}`);
   log(`START ${key}`);
@@ -304,8 +437,10 @@ async function runTask(task, state, { skipAssess = false } = {}) {
   await comment(task.repo.github, task.number, task.type,
     `Devin エージェントが起動しました。完了時に結果を報告します。`);
 
-  running.set(key, { proc: null, logPath: base, startedAt: Date.now(), phase: 'assess' });
-  state.tasks[key] = { status: 'running', phase: 'assess', startedAt: new Date().toISOString() };
+  running.set(key, { proc: null, logPath: base, startedAt: Date.now(), phase: 'assess', dest: 'impl' });
+  // スプレッド保持: パネル保存の engineReq 等を消さない
+  state.tasks[key] = { ...(state.tasks[key] ?? {}),
+    status: 'running', phase: 'assess', startedAt: new Date().toISOString() };
   saveState(state);
 
   try {
@@ -409,32 +544,42 @@ let draining = false;
 function drainQueue(state) {
   if (draining) return;
   draining = true;
-  (async () => {
-    while (queue.length) {
-      const idx = queue.findIndex((t) => {
-        const phase = t.assessOnly ? 'assess' : 'impl';
-        const isPr = phase === 'impl' && t.type === 'pr';
-        const max = phase === 'assess' ? MAX_ASSESS : isPr ? MAX_PR : MAX_IMPL;
-        const busy = [...running.entries()].filter(([k, v]) =>
-          v.phase === phase &&
-          (phase === 'assess' || k.includes(isPr ? ' pr#' : ' issue#'))).length;
-        // 同一リポジトリの impl は同じ作業ツリーで checkout/push が衝突するため直列化
-        const repoBusy = phase === 'impl' && [...running.entries()]
-          .some(([k, v]) => v.phase === 'impl' && k.startsWith(t.repo.github + ' '));
-        return busy < max && !repoBusy;
-      });
-      if (idx < 0) break;
-      const task = queue.splice(idx, 1)[0];
-      const key = keyOf(task.repo.github, task.type, task.number);
-      try {
-        if (task.assessOnly) await doAssess(task, state);
-        else await runTask(task, state);
-      }
-      catch (e) { log(`runTask error ${key}: ${e.message}`); }
-      finally { running.delete(key); }
-    }
-    draining = false;
-  })();
+  // 起動可能なタスクを全て起動して抜ける（await しない）。
+  // 各タスクの完了時に再度 drainQueue が呼ばれ、空いた枠で次が起動される
+  for (;;) {
+    const idx = queue.findIndex((t) => {
+      const dest = t.assessOnly ? 'assess' : 'impl';
+      const isPr = dest === 'impl' && t.type === 'pr';
+      // 同時起動数はフェーズ別（パネル変更を即時反映するため都度 config を読む）
+      const base = liveConfig('maxConcurrent', config.maxConcurrent ?? 1);
+      // 0 以下の設定値はキュー永久滞留になるため 1 に丸める
+      const max = Math.max(1, dest === 'assess'
+        ? liveConfig('maxConcurrentAssess', base)
+        : isPr
+          ? liveConfig('maxConcurrentPr', liveConfig('maxConcurrentImpl', base))
+          : liveConfig('maxConcurrentImpl', base));
+      // dest（行き先フェーズ）で数える: impl 予定のタスクは評価中でも impl 枠を占有し、
+      // 評価通過後に上限を超えて impl へ進まないようにする
+      const busy = [...running.entries()].filter(([k, v]) =>
+        v.dest === dest &&
+        (dest === 'assess' || k.includes(isPr ? ' pr#' : ' issue#'))).length;
+      // 同一リポジトリの impl は同じ作業ツリーで checkout/push が衝突するため直列化
+      const repoBusy = dest === 'impl' && [...running.entries()]
+        .some(([k, v]) => v.dest === 'impl' && k.startsWith(t.repo.github + ' '));
+      return busy < max && !repoBusy;
+    });
+    if (idx < 0) break;
+    const task = queue.splice(idx, 1)[0];
+    const key = keyOf(task.repo.github, task.type, task.number);
+    // running.set は runTask/doAssess 内で非同期に行われるため、ここで先行登録して
+    // 続く findIndex の busy/repoBusy 判定へ即時反映する
+    running.set(key, { proc: null, logPath: null,
+      startedAt: Date.now(), phase: 'assess', dest: task.assessOnly ? 'assess' : 'impl' });
+    (task.assessOnly ? doAssess(task, state) : runTask(task, state))
+      .catch((e) => log(`runTask error ${key}: ${e.message}`))
+      .finally(() => { running.delete(key); drainQueue(state); });
+  }
+  draining = false;
 }
 
 // ---------- reclaim stale ----------
@@ -460,7 +605,8 @@ async function reclaimStale(state) {
         await setLabel(r.github, it.number, type, [LABEL.failed], [LABEL.running]);
         await comment(r.github, it.number, type,
           `前回の Devin セッションが中断しました（dispatcher 停止またはタイムアウト）。再試行はパネルの「再実行」ボタンまたは \`POST /api/dispatch\` から行えます。`);
-        state.tasks[key] = { status: 'failed', note: 'stale running label reclaimed', finishedAt: new Date().toISOString() };
+        state.tasks[key] = { ...(state.tasks[key] ?? {}),
+          status: 'failed', note: 'stale running label reclaimed', finishedAt: new Date().toISOString() };
       }
     }
   }
@@ -501,10 +647,21 @@ async function runSingleTask(spec, state) {
 // task = { repo, type, number, title, body, url, labels }
 async function doAssess(task, state) {
   const key = keyOf(task.repo.github, task.type, task.number);
+  // 非 devin 解決時はチャット経路へ委譲。verdict は control 側 watchAssess が
+  // state.tasks[key].assess へ記録する（委譲中は inflight で多重キューを抑止）
+  const eng = resolveTaskEngine(key, 'assess', state);
+  if (eng !== 'devin') {
+    await dispatchViaChat(key, 'assess', eng);
+    state.tasks[key] = { ...(state.tasks[key] ?? {}),
+      inflight: 'assess', engineUsed: eng,
+      note: `エンジン ${eng} のためチャット経路へ委譲` };
+    saveState(state);
+    return;
+  }
   const ap = join(LOG_DIR,
     `${task.repo.github.replace('/', '_')}_${task.type}${task.number}_assess_${Date.now()}.log`);
   log(`ASSESS-ONLY ${key} -> ${ap}`);
-  running.set(key, { proc: null, logPath: ap, startedAt: Date.now(), phase: 'assess' });
+  running.set(key, { proc: null, logPath: ap, startedAt: Date.now(), phase: 'assess', dest: 'assess' });
   state.tasks[key] = { ...(state.tasks[key] ?? {}), inflight: 'assess' };
   saveState(state);
   try {
@@ -556,6 +713,8 @@ function liveConfig(key, fallback) {
 }
 
 async function cycle(state) {
+  // control 側が進めた委譲タスクの完了・解除を先にメモリへ取り込む
+  syncShared(state);
   // autoDiscover OFF なら検出自体をスキップ（gh を叩かない・candidates.json も更新しない）
   if (!DRY_RUN && liveConfig('autoDiscover', true) === false) {
     return;
@@ -581,7 +740,8 @@ async function cycle(state) {
       const stale = !assessedAt
         || Date.now() - new Date(assessedAt).getTime() > ASSESS_MAX_AGE_MS;
       if (!stale) continue;
-      if (running.has(key) || queue.some((q) => keyOf(q.repo.github, q.type, q.number) === key)) continue;
+      if (running.has(key) || queue.some((q) => keyOf(q.repo.github, q.type, q.number) === key)
+        || state.tasks[key]?.inflight) continue;
       queue.push({ ...t, assessOnly: true });
       log(`queued assess ${key} "${t.title}"`);
     }
@@ -590,11 +750,17 @@ async function cycle(state) {
   const autoTrigger = liveConfig('autoTrigger', AUTO_TRIGGER);
   if (!autoTrigger) {
     if (found.length) log(`${found.length} candidate(s) detected (autoTrigger OFF: launch skipped)`);
+    // autoAssess で積んだ評価キューだけでも起動する（drainQueue は実装キュー到達前に
+    // return されると呼ばれず、タスクが滞留する）
+    drainQueue(state);
     return;
   }
   for (const t of found) {
     const key = keyOf(t.repo.github, t.type, t.number);
-    if (running.has(key) || queue.some((q) => keyOf(q.repo.github, q.type, q.number) === key)) continue;
+    // PR 課題の自動対応は autoPr がゲート（autoTrigger は issue 課題の自動対応）
+    if (t.type === 'pr' && !liveConfig('autoPr', false)) continue;
+    if (running.has(key) || queue.some((q) => keyOf(q.repo.github, q.type, q.number) === key)
+      || state.tasks[key]?.inflight) continue;
     if (t.labels.includes(LABEL.running) && !running.has(key)) continue; // reclaimStale が処理
     queue.push(t);
     log(`queued ${key} "${t.title}"`);
@@ -603,10 +769,14 @@ async function cycle(state) {
 }
 
 async function main() {
-  log(`dispatcher start (poll ${POLL_MS / 1000}s, maxAssess ${MAX_ASSESS}, maxImpl ${MAX_IMPL}, mode=${config.permissionMode ?? 'dangerous'}, autoTrigger=${AUTO_TRIGGER})`);
+  log(`dispatcher start (poll ${POLL_MS / 1000}s, maxAssess ${MAX_ASSESS}, maxImpl ${MAX_IMPL}, maxPr ${MAX_PR}, mode=${config.permissionMode ?? 'dangerous'}, autoTrigger=${AUTO_TRIGGER})`);
   if (!existsSync(config.devinExe)) {
-    log(`FATAL: devin exe not found: ${config.devinExe}`);
-    process.exit(1);
+    // 既定エンジンが非 devin なら起動は継続（devin 解決の課題のみ起動失敗する）
+    if ((normEngine(config.engine) ?? 'devin') === 'devin') {
+      log(`FATAL: devin exe not found: ${config.devinExe}`);
+      process.exit(1);
+    }
+    log(`WARN: devin exe not found: ${config.devinExe}（devin 解決の課題は起動失敗します）`);
   }
   const state = loadState();
   state.deployedAt ??= new Date().toISOString();
