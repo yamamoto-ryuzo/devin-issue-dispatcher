@@ -46,6 +46,7 @@
   .tabpanel.active { display: block; }
 
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  #cands table { min-width: 1100px; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eef1f5;
            white-space: nowrap; }
   th { color: #6b7280; font-weight: 500; }
@@ -174,7 +175,7 @@
         <button class="mini" onclick="loadCandidates(true)">今すぐ取得</button>
       </span></div>
     <div class="subtabs" id="cand-tabs"></div>
-    <div id="cands" style="color:#6b7280">読み込み中…</div>
+    <div id="cands" style="color:#6b7280;overflow-x:auto">読み込み中…</div>
   </div>
 
   <div id="tab-tasks" class="tabpanel">
