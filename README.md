@@ -265,6 +265,10 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 - `config.json` — 設定（Git 追跡対象。シークレットは入れない）
   - `plugins`: 拡張レジストリ `[{type,name,enabled}]`。`type:"skill"` は skills/*.md のプロンプト注入を制御（`enabled:false` で注入除外・ファイル自体は残りスキルタブで編集可）。パネルのプラグインペインで切替、`/api/config` で永続化。`"skill"` 以外の type（MCP・フック等）は将来の拡張種別用の登録枠
   - `mcpServers`: ACP `session/new` へ渡す MCP サーバー（stdio 型 `{name,command,args?,env?}` / http・sse 型 `{name,type,url,headers?}`）。パネルのデータソースペインで一覧・追加・削除し `/api/config` で永続化。内蔵 `issue-queue`（mcp-server.mjs）は常に既定接続で config には含めず削除不可。`env`/`headers` の値は `${secrets:キー}`（secrets.json の `mcpTokens`）または `${env:変数}` で参照でき、トークンを config.json へ直書きしない。形状不正なエントリは警告してスキップ（session/new は失敗しない）
+  - `toolMaxSteps`: エージェントのツール実行往復の上限（1-20・既定 10。`implLoopMax`=対応→検証→修正のループ上限とは別概念）。適用先と到達時の振る舞い:
+    - **ACP（devin/copilot）・bridge 経由タスク**: プロンプト末尾へ「ツール実行の往復は最大 N 回。到達時は作業内容と未完了事項をまとめて報告し終了」の指示を注入する（dispatcher/control の両経路）。bridge-hub `POST /agent` に同種パラメータは無いため指示注入で代替。**エージェントの自律遵守に依存するソフトリミット**であり、到達時は打ち切り報告＝課題は未完了扱い（ユーザーが再対応を判断）
+    - **パネル内蔵 AI チャット**（apiUrl/apiModel 指定の OpenAI 互換 tool-calling ループ）: ループ自体のハードリミット。到達時は `truncated:true` と「（ツール往復上限に達しました）」を返して打ち切る
+    - **api エンジンの課題処理**: 単発応答でツール往復が無いため実効なし（UI 注記あり）
 - `config.example.json` — config.json の構成例（追跡対象へキーが入らない形）
 - `secrets.json` — APIキー等のシークレット（自動生成・gitignore 済）
 - `state.json` — 処理済み課題の状態（自動生成）

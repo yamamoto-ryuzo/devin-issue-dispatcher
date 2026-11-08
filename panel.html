@@ -386,6 +386,11 @@
         <datalist id="apimodels"></datalist>
         <button class="mini" style="margin-left:8px" onclick="fetchModels()" title="エンドポイントからモデル一覧を取得（apiUrl/APIキーは先に保存してください）">モデル一覧を取得</button>
       </div>
+      <div style="margin-top:8px">
+        <label style="display:inline-block">ツール往復上限 (回)<br>
+          <input id="set-toolsteps" type="number" min="1" max="20" style="width:60px" title="エージェントのツール実行（コマンド・編集の往復）の上限（1-20）。ACP/bridge タスクはプロンプトへ上限指示を注入。api エンジンの課題処理は単発応答のため実効なし"></label>
+        <span style="color:#6b7280;font-size:11px;margin-left:6px">ACP/bridge タスクへ「最大 N 回・到達時はまとめて報告して終了」を指示注入。内蔵 AI チャット（api 接続時のツールループ）は硬い上限として打ち切り。api エンジンの課題処理は単発応答のため実効なし</span>
+      </div>
     </div>
 
     <div id="engt-bridge" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
@@ -459,7 +464,7 @@
         <label>対応 同時起動数<br><input id="set-maxc-impl" type="number" min="1" style="width:60px"></label>
         <label>PR/再検証 同時起動数<br><input id="set-maxc-pr" type="number" min="1" style="width:60px" title="pr# 課題・AI:impl-done 再検証セッションの同時起動上限（issue課題とは別枠）"></label>
         <label>検証ループ上限 (回)<br><input id="set-impl-loop" type="number" min="1" style="width:60px" title="対応→完了確認→NG→修正のループをこの回数まで実施。到達後はユーザーへ対応依頼"></label>
-        <label>ツール往復上限 (回)<br><input id="set-toolsteps" type="number" min="1" max="20" style="width:60px" title="エージェントのツール実行（コマンド・編集の往復）の上限としてプロンプトへ注入される指示（1-20）。到達時は作業をまとめて報告し終了。api エンジンは単発応答のため実効なし"></label>
+
         <label>自動処理の判定範囲<br><select id="set-autocat" style="font-size:12px" title="選択した判定まで自動で対応へ進めます&#10;auto のみ / review まで / human まで / reject まで(全て)">
           <option value="auto">auto のみ</option>
           <option value="review">review まで</option>
