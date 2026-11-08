@@ -147,6 +147,7 @@ HTTP API 一覧（POST は `X-Panel: 1` 必須）:
 | GET | `/api/candidates` | 対応候補一覧（`?force=1` でキャッシュ無視） |
 | GET | `/api/log?n=50` | dispatcher ログ末尾 |
 | GET | `/api/chat?id=N`・`/api/chat/sessions` | チャットセッション履歴・一覧 |
+| GET | `/api/skills`・`/api/prompts` | skills/*.md（enabled 付き）・prompts/*.md の一覧（読み取り専用） |
 | POST | `/api/start` `/api/stop` `/api/once` `/api/reload` | ループ起停・1サイクル・設定再読込 |
 | POST | `/api/dispatch` `{key}`・`/api/assess` `{key}` | 課題を作業キューへ登録（MCP pull 型） |
 | POST | `/api/chat/task` `{key,mode,skill?,engine?}` | 課題をエンジンセッションで即時実行（assess/impl/split） |

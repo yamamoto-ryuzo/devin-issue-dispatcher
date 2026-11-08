@@ -422,7 +422,12 @@
     <div id="engt-extra" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
       <label style="display:block">全タスク共通の追加指示<br>
         <textarea id="set-extraprompt" style="width:100%;height:120px" placeholder="例: コミットメッセージは日本語で / テストが無い場合は最小限の検証に留める 等"></textarea></label>
-      <div style="color:#6b7280">評価・対応・PR・完了確認のすべてのプロンプト末尾に【追加指示】として付与します。スキル自体の編集は「スキル」タブへ。</div>
+      <div style="color:#6b7280">評価・対応・PR・完了確認のすべてのプロンプト末尾に【追加指示】として付与します（スキル注入の後に追加）。スキルはモード別にプロンプトへ注入される skills/*.md で、下の一覧または「スキル」タブで編集します。</div>
+      <div style="margin-top:8px;font-weight:600">スキル（skills/*.md — モード別注入）</div>
+      <div id="eng-extra-skills"></div>
+      <div style="margin-top:8px;font-weight:600">リポジトリ指針（prompts/*.md — 読み取り専用）</div>
+      <div id="eng-extra-prompts"></div>
+      <div id="eng-extra-preview" style="display:none;margin-top:4px"></div>
     </div>
 
     <div id="engt-data" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
@@ -580,7 +585,72 @@ function showEngTab(name) {
   });
   if (name === 'plugin') renderPlugins();
   if (name === 'data') renderMcpServers();
+  if (name === 'extra') renderExtraPane();
   if (name === 'bridge') refreshBridgeCli();
+}
+// ---- 追加指示ペインのスキル一覧・指針プレビュー（engt-extra 統合表示）----
+// スキル名の接頭辞から注入対象モードを推定（skill-tabs の用途ラベルと同一規則）
+const skillModeOf = (n) =>
+  n.startsWith('_all') ? '全モード' :
+  n.startsWith('_survey') ? '課題整理' :
+  n.startsWith('_done') ? '完了時' :
+  n.startsWith('_assess') ? '評価' :
+  n.startsWith('_impl') ? '対応' :
+  n.startsWith('_pr') ? 'PR' :
+  n.startsWith('_split') ? '切り分け' : 'カスタム';
+async function renderExtraPane() {
+  const el = document.getElementById('eng-extra-skills');
+  if (el) {
+    try {
+      const j = await (await fetch(API + '/api/skills')).json();
+      el.innerHTML = (j.files || []).map((f) =>
+        '<div style="display:flex;gap:6px;align-items:center;padding:1px 0">' +
+        '<span style="background:#e0e7ff;color:#3730a3;border-radius:4px;' +
+        'padding:0 5px;font-size:11px">' + esc(skillModeOf(f.name)) + '</span>' +
+        '<span>' + esc(f.name) + '</span>' +
+        (f.enabled === false ? '<span style="color:#c62828">（無効）</span>' : '') +
+        '<button class="mini" onclick="openSkill(\'' + esc(f.name) + '\')">編集</button>' +
+        '</div>').join('');
+    } catch (e) { el.textContent = '取得失敗: ' + e.message; }
+  }
+  const pl = document.getElementById('eng-extra-prompts');
+  if (pl) {
+    try {
+      const j = await (await fetch(API + '/api/prompts')).json();
+      window.__promptFiles = {};
+      (j.files || []).forEach((f) => { window.__promptFiles[f.name] = f.content; });
+      pl.innerHTML = (j.files || []).map((f) =>
+        '<div style="display:flex;gap:6px;align-items:center;padding:1px 0">' +
+        '<span>' + esc(f.name) + '</span>' +
+        '<button class="mini" onclick="previewPrompt(\'' + esc(f.name) + '\')">プレビュー</button>' +
+        '</div>').join('') || '<span style="color:#6b7280">（prompts/ なし）</span>';
+    } catch (e) {
+      // /api/prompts は旧 control.mjs では未実装（control 再起動後に利用可）
+      pl.innerHTML = '<span style="color:#6b7280">取得失敗: ' + esc(e.message) +
+        '（control 再起動前は未対応の場合あり）</span>';
+    }
+  }
+}
+// スキルタブの該当スキル編集へ直接遷移
+async function openSkill(name) {
+  skillSel = name;
+  showTab('skills');
+  await loadSkills();
+  setSkillView('edit');
+}
+// prompts/*.md の読み取り専用プレビュー（同じ行を再度押すと閉じる）
+let extraPreviewName = null;
+function previewPrompt(name) {
+  const pv = document.getElementById('eng-extra-preview');
+  if (extraPreviewName === name) {
+    pv.style.display = 'none'; extraPreviewName = null; return;
+  }
+  extraPreviewName = name;
+  pv.style.display = 'block';
+  pv.innerHTML = '<b>' + esc(name) + '</b>' +
+    '<pre style="white-space:pre-wrap;max-height:240px;overflow:auto;' +
+    'background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px">' +
+    esc(window.__promptFiles?.[name] ?? '') + '</pre>';
 }
 // ---- MCP サーバー管理（config.mcpServers。内蔵 issue-queue は config 非保存で削除不可）----
 function renderMcpServers() {

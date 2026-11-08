@@ -1595,6 +1595,17 @@ const server = createServer(async (req, res) => {
       // plugins: 種別付き拡張レジストリ（'skill' 以外の将来拡張種別も含め公開）
       return json(200, { files, plugins: config.plugins ?? [] });
     }
+    if (url.pathname === '/api/prompts') {
+      // prompts/ の *.md を読み取り専用一覧（リポジトリ指針のプレビュー用。
+      // 書き込み経路は持たない。taskPrompt/loadPolicy が使う正本そのものを返す）
+      const dir = join(ROOT, 'prompts');
+      let files = [];
+      try {
+        files = readdirSync(dir).filter((f) => f.endsWith('.md')).sort()
+          .map((f) => ({ name: f, content: readFileSync(join(dir, f), 'utf8') }));
+      } catch { /* noop */ }
+      return json(200, { files });
+    }
     if (url.pathname === '/api/log') {
       const n = Math.min(parseInt(url.searchParams.get('n') ?? '200', 10) || 200, 2000);
       return json(200, { log: tailLines(LOG_PATH, n) });
