@@ -639,8 +639,16 @@ function detail(key) {
     '<div class="kv"><b>種別</b>' + esc(c.type) + ' #' + c.number + '</div>' +
     '<div class="kv"><b>トリガー</b>' + esc(c.trigger || '-') + '</div>' +
     '<div class="kv"><b>作成日時</b>' + fmt(c.createdAt) + '</div><hr>' +
-    (a.category ? '<div class="kv"><b>判定</b><span class="jd jd-' + esc(a.category) + '">' +
-      esc(a.category) + '</span> — ' + esc(CAT_DESC[a.category] || '') + '</div>' : '') +
+    (a.category ? '<div class="kv" style="display:flex;align-items:center;gap:8px"><b style="min-width:90px">判定</b>' +
+      '<span style="display:inline-flex;gap:4px">' +
+      ['auto', 'review', 'reject'].map((r) =>
+        '<span style="padding:2px 10px;border-radius:999px;font-size:11px;' +
+        (r === a.category
+          ? 'background:' + (r === 'auto' ? '#16a34a' : r === 'review' ? '#b45309' : '#dc2626') +
+            ';color:#fff;font-weight:700'
+          : 'background:#eef1f5;color:#a8b0bd') +
+        '">' + r + '</span>').join('') + '</span>' +
+      '<span style="font-size:12px;color:#4b5563">' + esc(CAT_DESC[a.category] || '') + '</span></div>' : '') +
     (a.risk ? '<div class="kv" style="display:flex;align-items:center;gap:8px"><b style="min-width:90px">リスク</b>' +
       '<span style="display:inline-flex;gap:4px">' +
       ['low', 'medium', 'high'].map((r) =>
