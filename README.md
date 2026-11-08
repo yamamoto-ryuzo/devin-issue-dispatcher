@@ -209,3 +209,59 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 - **冪等性**: ラベル + state.json の二重管理。再起動しても二重起動しない。
 - **破壊的操作の抑止**: プロンプトで main 直 push・force push を禁止し、
   常に `devin/issue-N` ブランチ → PR 経由に限定している。
+
+## エンジン別の動作検証（非 devin エンジン E2E）
+
+`config.engine` に `copilot` / `antigravity` / `api` を指定すると、control.mjs の
+`engineSend` が bridge-hub（既定 `http://127.0.0.1:8511`）または OpenAI 互換 API へ
+単発送信し、応答を擬似チャット（shim）として watcher
+（`watchAssess` / `watchSplit` / `watchImpl`）へ渡す。
+
+2026-11-08 に本リポジトリの実課題（issue #14/#15）を対象に、別ポート隔離インスタンスで
+実コード経路の E2E 検証を実施した結果は以下の通り。
+
+### 前提: bridge-hub `/agent` の送信フィールド（Issue #3）
+
+- 現行コードは `{provider, prompt}` を POST するが、ハブは `body.message` を読むため
+  **プロンプトが無視され定型応答が返る**（例:「地図の状態は取得できていません」）。
+  判定ブロックは出力されず `state.tasks` にも反映されない。
+  `prompt` → `message` の1行修正で解消することを本検証で確認済み。
+
+### 検証結果マトリクス（`message` キー送信時）
+
+| 項目 | copilot | antigravity | api |
+|---|---|---|---|
+| assess 判定ブロック出力 | ○ `<!--devin-assess-->` 出力 | ○ 同左 | 未検証 |
+| `state.tasks[key].assess` 反映 | ○ | ○ | — |
+| autoTrigger 連鎖（assess→impl 自動投入） | ○ | ○ | — |
+| impl 到達（編集〜PR 作成） | × | × | ×（単発応答） |
+
+### 制限事項（検証で判明・確認した挙動）
+
+- **bridge プロバイダはリポジトリ操作ツールを持たず impl は成立しない**
+  - copilot:「地図操作のみを扱う設定で、リポジトリの閲覧・変更や GitHub 操作は
+    できません」と応答。ファイル編集・push・`gh pr create` ができず
+    `<!--impl-pr-->` も出力されない
+  - antigravity: ツール基盤自体はあるが `command` が権限拒否される
+    （`~/.gemini/antigravity-cli/settings.json` の `permissions.allow` 設定が必要。
+    許可すれば将来 impl が可能になる可能性あり）
+  - assess も**コード未参照のテキスト評価**になる点に注意（プロバイダ自身が
+    「コードを参照できないため実装状況は未確認」と回答）
+- **エラー応答は静かに消える**: ハブ未到達等で `engineSend` が失敗すると shim に
+  `[engine error] <msg>` が入るが、watcher はマーカー非検出で何も記録せず終了する。
+  `devin:failed` ラベル・state へのエラー記録・再試行は行われない（実機確認済み）
+- **watcher タイムアウト（30分）も記録なし**: 監視が解除されるだけで状態遷移は
+  起きない（コード確認。長時間実測は未実施）
+- **shim 経路では split 継続が機能しない**: `<!--split-->` 検出後の新規課題再評価は
+  `ch.send()` を呼ぶが shim に `send` がなく、TypeError が catch で握りつぶされ
+  静かに失敗する（コード確認）
+- **shim セッションは `/api/chat?id=` で内容を参照できない**: id が `engN` 形式で
+  数値変換に失敗し messages が空になる（`snapshot()` も未実装。コード確認）
+- **`engine` はグローバル設定**: 切替中は投入される全タスクがそのエンジン経路になる。
+  検証後は `devin` へ戻すこと
+
+### 推奨される使い分け（現状）
+
+- `devin`: 全モード（assess / split / impl / pr）対応の本体エンジン
+- `copilot` / `antigravity`: **assess 限定**で動作（impl/split は制約上不可）
+- `api`: assess 向け。impl を抑止する用途限定の整理は Issue #6 を参照
