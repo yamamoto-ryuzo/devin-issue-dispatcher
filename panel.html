@@ -586,15 +586,16 @@ function detail(key) {
     '<div class="kv"><b>作成日時</b>' + fmt(c.createdAt) + '</div><hr>' +
     (a.category ? '<div class="kv"><b>判定</b><span class="jd jd-' + esc(a.category) + '">' +
       esc(a.category) + '</span> — ' + esc(CAT_DESC[a.category] || '') + '</div>' : '') +
-    (a.risk ? '<div class="kv"><b>リスク</b><span style="display:inline-flex;gap:4px">' +
+    (a.risk ? '<div class="kv" style="display:flex;align-items:center;gap:8px"><b style="min-width:90px">リスク</b>' +
+      '<span style="display:inline-flex;gap:4px">' +
       ['low', 'medium', 'high'].map((r) =>
         '<span style="padding:2px 10px;border-radius:999px;font-size:11px;' +
         (r === a.risk
           ? 'background:' + (r === 'high' ? '#dc2626' : r === 'medium' ? '#b45309' : '#16a34a') +
             ';color:#fff;font-weight:700'
           : 'background:#eef1f5;color:#a8b0bd') +
-        '">' + r + '</span>').join('') + '</span> ' +
-      esc(RISK_DESC[a.risk] || a.risk) + '</div>' : '') +
+        '">' + r + '</span>').join('') + '</span>' +
+      '<span style="font-size:12px;color:#4b5563">' + esc(RISK_DESC[a.risk] || a.risk) + '</span></div>' : '') +
     (a.feasible ? '<div class="kv"><b>実現可否</b>' + esc(a.feasible) + '</div>' : '') +
     (a.reason ? '<div class="kv"><b>判定理由</b>' + esc(a.reason) + '</div>' : '') +
     (a.plan ? '<div class="kv"><b>実施方針</b><pre>' + esc(a.plan) + '</pre></div>' : '') +
