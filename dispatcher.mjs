@@ -329,7 +329,10 @@ async function runTask(task, state, { skipAssess = false } = {}) {
 
       const tooRisky = verdict && (RISK_RANK[verdict.risk] ?? 2) > MAX_RISK();
       const reject = code !== 0 || !verdict || verdict.category === 'reject' || tooRisky;
-      const proceed = !reject && verdict.category === 'auto';
+      const CAT_ORDER = ['auto', 'review', 'human', 'reject'];
+      const lim = config.autoCategory ?? 'review';
+      const proceed = !reject &&
+        CAT_ORDER.indexOf(verdict.category) <= CAT_ORDER.indexOf(lim);
       if (reject) {
         // reject: 破壊的影響・方針違反・評価不能など。実施せず恒久的に除外
         const why = verdict

@@ -10,3 +10,5 @@ logs/
 node_modules/
 *.tmp
 work-queue.json
+goals.json
+shots/

@@ -69,5 +69,5 @@
 devin-assess-->
 ```
 
-このブロックが検出されるとパネル側で判定（auto/review/reject・risk）が即座に反映される。
+このブロックが検出されるとパネル側で判定（auto/review/human/reject・risk）が即座に反映される。
 テキストでの報告だけで終わらせないこと。
