@@ -734,6 +734,53 @@ async function mcpToolCall(tool, args) {
   return await res.json().catch(() => ({}));
 }
 
+// ---- AI チャット（CANVAS の AI タブ相当）----
+// OpenAI 互換 LLM のツール呼出ループ。ツール面は MCP_TOOLS を OpenAI tools
+// 形式で公開し、実行は mcpToolCall（自前 /api/* への内部プロキシ）で
+// 権限・検証ロジックを単一実装に保つ。
+async function aiChat(messages, maxSteps) {
+  const url = (config.apiUrl || '').replace(/\/+$/, '');
+  if (!url || !config.apiModel)
+    throw new Error('apiUrl/apiModel 未設定（設定タブ「AI」で指定）');
+  const limit = Math.min(Math.max(+maxSteps || +(config.toolMaxSteps ?? 10), 1), 20);
+  const tools = MCP_TOOLS.map((t) => ({ type: 'function',
+    function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
+  const msgs = [{ role: 'system',
+    content: 'あなたは Devin Agent Dispatcher の管理アシスタントです。' +
+      '課題一覧・状態確認・評価/対応のディスパッチ・設定参照などは提供ツールを使い、' +
+      '結果を日本語で簡潔に報告してください。' +
+      'kill・issue_close・stop などの破壊的ツールはユーザーが明示した場合のみ実行してください。' },
+    ...messages];
+  const calls = [];
+  for (let step = 0; step < limit; step++) {
+    const r = await fetch(url + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json',
+        ...(effectiveApiKey() ? { Authorization: 'Bearer ' + effectiveApiKey() } : {}) },
+      body: JSON.stringify({ model: config.apiModel, messages: msgs, tools }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error?.message || 'api ' + r.status);
+    const m = j.choices?.[0]?.message ?? {};
+    const tcs = m.tool_calls ?? [];
+    if (!tcs.length) return { ok: true, reply: m.content || '', calls, steps: step + 1 };
+    msgs.push({ role: 'assistant', content: m.content ?? null, tool_calls: tcs });
+    for (const tc of tcs) {
+      const name = tc.function?.name;
+      let args = {};
+      try { args = JSON.parse(tc.function?.arguments || '{}'); } catch { /* noop */ }
+      const tool = MCP_TOOLS.find((t) => t.name === name);
+      let out;
+      if (!tool) out = { error: 'unknown tool: ' + name };
+      else { try { out = await mcpToolCall(tool, args); }
+        catch (e) { out = { error: String(e?.message ?? e) }; } }
+      calls.push({ name, args, result: out });
+      msgs.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(out) });
+    }
+  }
+  return { ok: true, reply: '（ツール往復上限に達しました）', calls, steps: limit, truncated: true };
+}
+
 async function handleMcp(req, res, acao) {
   const headers = { 'Content-Type': 'application/json; charset=utf-8' };
   if (acao) headers['Access-Control-Allow-Origin'] = acao;
@@ -934,6 +981,14 @@ const server = createServer(async (req, res) => {
         if (!text) return json(400, { ok: false, error: 'empty text' });
         const sid = id && chats.has(id) ? id : pickChatId('chat');
         try { await chats.get(sid).chat.send(String(text)); return json(200, { ok: true, id: sid }); }
+        catch (e) { return json(500, { ok: false, error: e.message }); }
+      }
+      if (url.pathname === '/api/ai/chat') {
+        // CANVAS AI タブ相当: OpenAI 互換 LLM + MCP_TOOLS ツール呼出ループ
+        const { messages, maxSteps } = JSON.parse((await readBody(req)) || '{}');
+        if (!Array.isArray(messages) || !messages.length)
+          return json(400, { ok: false, error: 'messages required' });
+        try { return json(200, await aiChat(messages, maxSteps)); }
         catch (e) { return json(500, { ok: false, error: e.message }); }
       }
       if (url.pathname === '/api/chat/option') {
