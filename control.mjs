@@ -412,8 +412,9 @@ const server = createServer(async (req, res) => {
         const st = loadJson(STATE_PATH, { tasks: {} }).tasks ?? {};
         let n = 0;
         for (const c of cands) {
-          if (!st[c.key]?.assess?.category && !chatWait.some((w) => w.key === c.key)) {
-            chatWait.push({ key: c.key, mode: 'assess' });
+          const key = c.key ?? `${c.repo} ${c.type}#${c.number}`;
+          if (!st[key]?.assess?.category && !chatWait.some((w) => w.key === key)) {
+            chatWait.push({ key, mode: 'assess' });
             n++;
           }
         }
