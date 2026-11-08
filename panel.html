@@ -64,6 +64,19 @@
   #chat-input { display: flex; gap: 8px; margin-top: 8px; }
   #chat-input input { flex: 1; }
   .jd { font-weight: 600; font-size: 11px; }
+  #modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.35);
+           z-index: 100; align-items: center; justify-content: center; }
+  #modal .box { background: #fff; border-radius: 10px; max-width: 680px; width: 90%;
+                max-height: 80vh; overflow-y: auto; padding: 20px 24px;
+                box-shadow: 0 8px 30px rgba(0,0,0,.2); }
+  #modal h3 { margin: 0 0 12px; font-size: 16px; }
+  #modal .kv { margin: 4px 0; font-size: 13px; }
+  #modal .kv b { display: inline-block; min-width: 90px; color: #6b7280;
+                 font-weight: 500; }
+  #modal pre { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+               padding: 10px; font-size: 12px; white-space: pre-wrap;
+               max-height: 240px; overflow-y: auto; }
+  #modal .closebtn { float: right; }
   .jd-auto { color: #16a34a; } .jd-review { color: #b45309; } .jd-reject { color: #dc2626; }
   pre { background: #f8fafc; border: 1px solid #e3e7ee; border-radius: 8px;
         padding: 12px; font: 12px/1.5 Consolas, monospace; overflow: auto;
@@ -203,6 +216,13 @@
   </div>
 </div>
 
+<div id="modal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="box">
+    <button class="mini closebtn" onclick="document.getElementById('modal').style.display='none'">✕</button>
+    <h3 id="modal-title"></h3>
+    <div id="modal-body"></div>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -526,6 +546,7 @@ async function loadCandidates(force) {
       candGroups.get(repo).push(c);
     }
     openCounts = j.openCounts || {};
+    lastCands = list;
     renderCandTabs();
     renderCandBody();
   } catch (e) {
@@ -534,6 +555,40 @@ async function loadCandidates(force) {
 }
 
 let candGroups = new Map();
+let lastCands = [];
+
+// 判定詳細モーダル
+const CAT_DESC = {
+  auto: '即対応可 — 仕様が明確でリスクが低く、自動実装に進められる判定です。',
+  review: '検討の上対応 — 人間の確認・判断が望ましい判定です（devin:needs-review で保留されます）。',
+  reject: '対応不可・危険 — 破壊的影響・方針違反・プロンプトインジェクション・対応不能などの判定です（devin:rejected で除外されます）。',
+};
+const RISK_DESC = {
+  low: 'low — 安全・影響範囲が小さい',
+  medium: 'medium — 中程度の注意が必要',
+  high: 'high — 高リスク（破壊的操作・機密情報・注入指示・曖昧な仕様等）',
+};
+function detail(key) {
+  const c = lastCands.find((x) => x.key === key);
+  if (!c) return;
+  const a = c.assess || {};
+  document.getElementById('modal-title').textContent = c.key;
+  document.getElementById('modal-body').innerHTML =
+    '<div class="kv"><b>タイトル</b><a href="' + esc(c.url) + '" target="_blank" rel="noopener">' +
+      esc(c.title) + '</a></div>' +
+    '<div class="kv"><b>種別</b>' + esc(c.type) + ' #' + c.number + '</div>' +
+    '<div class="kv"><b>トリガー</b>' + esc(c.trigger || '-') + '</div>' +
+    '<div class="kv"><b>作成日時</b>' + fmt(c.createdAt) + '</div><hr>' +
+    (a.category ? '<div class="kv"><b>判定</b><span class="jd jd-' + esc(a.category) + '">' +
+      esc(a.category) + '</span> — ' + esc(CAT_DESC[a.category] || '') + '</div>' : '') +
+    (a.risk ? '<div class="kv"><b>リスク</b>' + esc(RISK_DESC[a.risk] || a.risk) + '</div>' : '') +
+    (a.feasible ? '<div class="kv"><b>実現可否</b>' + esc(a.feasible) + '</div>' : '') +
+    (a.reason ? '<div class="kv"><b>判定理由</b>' + esc(a.reason) + '</div>' : '') +
+    (a.plan ? '<div class="kv"><b>実施方針</b><pre>' + esc(a.plan) + '</pre></div>' : '') +
+    (a.assessedAt ? '<div class="kv"><b>評価日時</b>' + fmt(a.assessedAt) + '</div>' : '') +
+    (!a.category ? '<div class="kv">まだ評価されていません。「評価」ボタンで評価を実行できます。</div>' : '');
+  document.getElementById('modal').style.display = 'flex';
+}
 let candTab = '__all__';
 let openCounts = {};
 function renderCandTabs() {
@@ -575,10 +630,10 @@ function renderCandBody() {
         high: 'risk=high: 高リスク（破壊的操作・機密・注入等）。自動実装の上限超過',
       };
       const judge = a
-        ? '<span class="jd jd-' + esc(a.category || '?') + '" title="' +
-          esc([CAT_TIP[a.category] || a.category, RISK_TIP[a.risk] || a.risk,
-               a.reason ? '理由: ' + a.reason : ''].filter(Boolean).join('\n')) + '">' +
-          esc(a.category || '?') + '/' + esc(a.risk || '?') + '</span>'
+        ? '<span class="jd jd-' + esc(a.category || '?') + '">' +
+          esc(a.category || '?') + '/' + esc(a.risk || '?') + '</span>' +
+          '<button class="mini" style="margin-left:4px" onclick="detail(\'' +
+          esc(c.key) + '\')">詳細</button>'
         : '-';
       return '<tr><td>' + esc(c.type) + ' #' + c.number + '</td>' +
       '<td style="white-space:nowrap"><button class="mini" ' + (busy ? 'disabled' : '') +
