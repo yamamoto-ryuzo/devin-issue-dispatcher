@@ -73,7 +73,7 @@
   "maxConcurrentImpl": 1,
   "maxConcurrentPr": 5,
   "implLoopMax": 5,
-  "engine": "copilot",
+  "engine": "devin",
   "bridgeHub": "http://127.0.0.1:8511",
   "apiUrl": "",
   "apiKey": "",
@@ -82,6 +82,13 @@
   "extraPrompt": "",
   "apiModels": {},
   "bridgeModels": {
-    "copilot": "auto"
+    "copilot": "auto",
+    "devin": "auto"
+  },
+  "acpOptions": {
+    "devin": {},
+    "copilot": {
+      "allow_all": "off"
+    }
   }
 }
