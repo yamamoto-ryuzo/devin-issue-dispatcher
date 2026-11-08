@@ -748,25 +748,38 @@ function setCliChip(p, text, color) {
     c.textContent = text; c.style.color = color; c.style.fontWeight = 'bold';
   });
 }
+// hub 未接続時はプロバイダ各行のボタンを無効化する（先に hub 導入を促すため。
+// #bridge-cli-list 内のボタンのみ対象で「bridge-hub インストール」自体は残す）
+function setBridgeCliDisabled(off) {
+  document.querySelectorAll('#bridge-cli-list button').forEach((b) => { b.disabled = off; });
+}
 async function refreshBridgeCli() {
   const base = bridgeHubBase();
+  const checkLogin = (p) => fetch(base + '/models?provider=' + p, { cache: 'no-store' })
+    .then((r2) => r2.json().catch(() => ({})))
+    .then((m) => {
+      const ok = !m?.error && !m?.fallback && Array.isArray(m?.models) && m.models.length;
+      setCliChip(p, ok ? 'ログイン済' : '未ログイン疑い', ok ? '#2e7d32' : '#e65100');
+      return ok;
+    }).catch(() => false);
   try {
     const r = await fetch(base + '/setup', { cache: 'no-store' });
     const d = await r.json();
     const prov = d?.providers || {};
+    setBridgeCliDisabled(false);
     for (const p of BRIDGE_CLI_PROVIDERS) {
       if (!prov[p]?.cli_found) { setCliChip(p, '未導入', '#c62828'); continue; }
-      // ログイン状態は /models の応答で推定（fallback/error = 未ログイン疑い）
+      // ログイン状態は /models の応答で推定（fallback/error = 未ログイン疑い）。
+      // 初回応答はプロバイダ起動中で誤判定しやすいため、NG 時のみ 5 秒後に
+      // 一度だけ再チェックする（定期ポーリングは行わない）
       setCliChip(p, '導入済', '#e65100');
-      fetch(base + '/models?provider=' + p, { cache: 'no-store' })
-        .then((r2) => r2.json().catch(() => ({})))
-        .then((m) => {
-          const ok = !m?.error && !m?.fallback && Array.isArray(m?.models) && m.models.length;
-          setCliChip(p, ok ? 'ログイン済' : '未ログイン疑い', ok ? '#2e7d32' : '#e65100');
-        }).catch(() => {});
+      checkLogin(p).then((ok) => { if (!ok) setTimeout(() => checkLogin(p), 5000); });
     }
   } catch (e) {
     for (const p of BRIDGE_CLI_PROVIDERS) setCliChip(p, 'ハブ未接続', '#777');
+    setBridgeCliDisabled(true);
+    const h = document.getElementById('eng-health');
+    if (h) h.textContent = 'hub 未接続です。先に「bridge-hub インストール」を実行してください';
   }
 }
 async function bridgeCliAction(provider, action) {
