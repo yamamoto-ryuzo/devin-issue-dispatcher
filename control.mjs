@@ -37,6 +37,7 @@ const STATE_PATH = join(ROOT, 'state.json');
 const CANDS_PATH = join(ROOT, 'candidates.json');
 const GOALS_PATH = join(ROOT, 'goals.json');
 const ISSUES_PATH = join(ROOT, 'issues.json');
+const SECRETS_PATH = join(ROOT, 'secrets.json'); // apiKey・MCP トークン等（gitignore 済。config.json へは書かない）
 const LOG_PATH = join(ROOT, 'logs', 'dispatcher.log');
 const PANEL_PATH = join(ROOT, 'panel.html');
 // 判定カテゴリの自動処理しきい値: autoCategory までの判定を自動処理する
@@ -49,6 +50,17 @@ const riskAllowed = (risk) =>
   RISK_ORDER.indexOf(risk) <= RISK_ORDER.indexOf(config.maxAutoRisk ?? 'medium');
 
 let config = loadJson(CONFIG_PATH, {});
+let secrets = loadJson(SECRETS_PATH, {});
+// 旧形式（config.json 内の apiKey）を secrets.json へ自動移行
+if (config.apiKey) {
+  if (!secrets.apiKey) secrets.apiKey = config.apiKey;
+  delete config.apiKey;
+  writeFileSync(SECRETS_PATH, JSON.stringify(secrets, null, 2) + '\n');
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
+  console.log('[control] config.json の apiKey を secrets.json へ移行しました');
+}
+// 手動編集で config.json に apiKey が残る場合も読み取りはする（次回保存時に移行）
+const effectiveApiKey = () => secrets.apiKey ?? config.apiKey ?? '';
 const HOST = '127.0.0.1';
 const PORT = config.controlPort ?? 8585;
 const PANEL_HEADER = ['x-panel', '1'];
@@ -143,7 +155,7 @@ async function engineSend(eng, prompt) {
     const r = await fetch(url + '/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json',
-        ...(config.apiKey ? { Authorization: 'Bearer ' + config.apiKey } : {}) },
+        ...(effectiveApiKey() ? { Authorization: 'Bearer ' + effectiveApiKey() } : {}) },
       body: JSON.stringify({ model: config.apiModel,
         messages: [{ role: 'user', content: prompt }] }),
     });
@@ -482,6 +494,7 @@ function status() {
       engine: config.engine ?? 'devin',
       bridgeHub: config.bridgeHub ?? 'http://127.0.0.1:8511',
       apiUrl: config.apiUrl ?? '', apiModel: config.apiModel ?? '',
+      apiKeySet: !!effectiveApiKey(), // 値自体は返さない（hasValue のみ）
       extraPrompt: config.extraPrompt ?? '',
       repos: (config.repos || []).map((r) => r.github),
       assessMaxAgeHours: config.assessMaxAgeHours ?? 24,
@@ -645,6 +658,7 @@ const server = createServer(async (req, res) => {
       }
       if (url.pathname === '/api/reload') {
         config = loadJson(CONFIG_PATH, config);
+        secrets = loadJson(SECRETS_PATH, secrets);
         return json(200, { ok: true });
       }
       if (url.pathname === '/api/config') {
@@ -654,10 +668,26 @@ const server = createServer(async (req, res) => {
           'autoDiscover', 'autoTrigger', 'autoAssess', 'autoPr', 'autoCategory',
           'maxAutoRisk',
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax',
-          'engine', 'bridgeHub', 'apiUrl', 'apiKey', 'apiModel', 'extraPrompt'];
+          'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
         const applied = {};
+        // シークレット類は secrets.json（Git 管理外）へ保存。config.json には書かない
+        if (patch.apiKey !== undefined) {
+          const sec = loadJson(SECRETS_PATH, {});
+          if (patch.apiKey) sec.apiKey = String(patch.apiKey); else delete sec.apiKey;
+          writeFileSync(SECRETS_PATH, JSON.stringify(sec, null, 2) + '\n');
+          secrets = sec;
+          applied.apiKey = patch.apiKey ? 'saved to secrets.json' : 'cleared';
+        }
+        // config.json に残存する apiKey（旧形式・手動編集分）も secrets へ移して除去
+        if (fresh.apiKey) {
+          const sec = loadJson(SECRETS_PATH, secrets);
+          if (!sec.apiKey) sec.apiKey = fresh.apiKey;
+          delete fresh.apiKey;
+          writeFileSync(SECRETS_PATH, JSON.stringify(sec, null, 2) + '\n');
+          secrets = sec;
+        }
         for (const k of allowed) {
           if (patch[k] !== undefined) { fresh[k] = patch[k]; applied[k] = patch[k]; }
         }
@@ -744,7 +774,7 @@ const server = createServer(async (req, res) => {
         const u = (config.apiUrl || '').replace(/\/+$/, '');
         if (!u) return json(400, { ok: false, error: 'apiUrl 未設定' });
         const r = await fetch(u + '/models',
-          { headers: config.apiKey ? { Authorization: 'Bearer ' + config.apiKey } : {} });
+          { headers: effectiveApiKey() ? { Authorization: 'Bearer ' + effectiveApiKey() } : {} });
         const j = await r.json().catch(() => null);
         if (!r.ok || !j?.data) return json(502, { ok: false, error: 'models ' + r.status });
         return json(200, { ok: true, models: j.data.map((m) => m.id).filter(Boolean) });

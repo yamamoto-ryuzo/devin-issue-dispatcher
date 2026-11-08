@@ -129,7 +129,7 @@ curl.exe -X POST -H "X-Panel: 1" -d "{\"key\":\"yamamoto-ryuzo/portal issue#21\"
 
 1. **HTTP API（`127.0.0.1:8585`）** — 直接叩ける最も簡単な経路。POST は `X-Panel: 1` ヘッダ必須
 2. **MCP（stdio・`mcp-server.mjs`＝`issue-queue`）** — Devin IDE エージェント向け pull 型（`queue_list`/`queue_claim`/`queue_done`）
-3. **KASUGAI Canvas AI チャットの dispatcher ツール** — Canvas 側（`web/shared/dispatcher.js`）が宣言する `dispatcher*` ツール経由。bridge-hub(8511) の `/agent`・`/mcp` パイプラインに乗ってブラウザから本 API が呼ばれる（ハブ側の改造は不要）
+3. **KASUGAI Canvas AI チャットの REST コネクタ** — Canvas 側の汎用コネクタ基盤（`web/shared/rest-connectors.js`）に内蔵コネクタとして `dispatcher*` ツールが宣言されている。bridge-hub(8511) の `/agent`・`/mcp` パイプラインに乗ってブラウザから本 API が呼ばれる（ハブ側の改造は不要）。他サービスも同基盤のコネクタ定義追加でツール化できる
 
 HTTP API 一覧（POST は `X-Panel: 1` 必須）:
 
@@ -226,13 +226,27 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 - API: `POST /api/chat/task`・`/api/dispatch`・`/api/assess` のボディに `engine` を渡すとその実行だけエンジンを上書きできる
 - 実際に使われたエンジンは `state.tasks[key].engineUsed` に記録され、処理履歴タブの「エンジン」列に表示される
 
+### シークレットの取り扱い（統一ルール）
+
+- APIキー等のシークレットは **`secrets.json`（Git 管理外）にのみ保存**する。
+  `POST /api/config` で `apiKey` を送ると自動で secrets.json 側へ書き込まれ、
+  `config.json`（Git 追跡対象）には書き込まれない。config.json に残存する旧形式の
+  `apiKey` は起動時・設定保存時に secrets.json へ自動移行される
+- パネルの password 入力欄は**「設定済みかどうか（hasValue）」のみ表示し、値自体は
+  読み戻さない**（`/api/status` は `apiKeySet` の真偽値のみ返す）
+- キーを config.json・共有ファイル・ログ・プロンプト注入へ書き込まない
+- `config.example.json` に追跡対象へキーが入らない構成の例を置いてある
+- 将来追加するシークレット（MCP トークン等）も同じく secrets.json に保存する
+
 ## ファイル
 
 - `control.mjs` — 管理サーバー＋スーパーバイザー（依存なし、Node 標準のみ）
 - `panel.html` — 管理パネル UI
 - `discover.mjs` — 課題発見ロジック（dispatcher/control 共用の共通モジュール）
 - `dispatcher.mjs` — 本体（依存なし、Node 標準のみ）
-- `config.json` — 設定
+- `config.json` — 設定（Git 追跡対象。シークレットは入れない）
+- `config.example.json` — config.json の構成例（追跡対象へキーが入らない形）
+- `secrets.json` — APIキー等のシークレット（自動生成・gitignore 済）
 - `state.json` — 処理済み課題の状態（自動生成）
 - `candidates.json` — 対応候補のキャッシュ（自動生成。`fetchedAt` + 軽量化した課題一覧）
 - `issues.json` — open 課題のローカルストア（自動生成。title/body/labels/日時を保持。

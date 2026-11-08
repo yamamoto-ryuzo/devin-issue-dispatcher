@@ -338,11 +338,13 @@
         <label style="display:block;margin-bottom:6px">エンドポイント<br>
           <input id="set-apiurl" type="text" placeholder="https://…/v1（/chat/completions は自動付与）" style="width:320px"></label>
         <div style="color:#6b7280;margin:6px 0;max-width:560px">
-          セキュリティについて：キーは config.json にのみ保存され、送信先は上のエンドポイントのみです。
+          セキュリティについて：キーは <b>secrets.json（Git 管理外）</b>にのみ保存され、config.json・
+          コード・プロンプト・ログには書き込まれません。送信先は上のエンドポイントのみです。
+          この欄は「設定済みかどうか」だけを表示し、値自体は読み戻しません。
           http（非HTTPS）のエンドポイントを指定するとキーが平文で送信されるため、localhost/127.0.0.1
-          以外では https を使ってください。キー自体を共有ファイルやコードに書き込まないでください。</div>
+          以外では https を使ってください。</div>
         <label style="display:block;margin-bottom:6px">APIキー / トークン<br>
-          <input id="set-apikey" type="password" placeholder="（必要時）" style="width:320px" title="config.json に保存されます（公開リポジトリへはコミットしないよう注意）"></label>
+          <input id="set-apikey" type="password" placeholder="（必要時）" style="width:320px" title="secrets.json（Git 管理外）に保存されます。値は読み戻されません"></label>
         <label style="display:inline-block">モデル<br>
           <input id="set-apimodel" type="text" list="apimodels" placeholder="モデル名" style="width:240px"></label>
         <datalist id="apimodels"></datalist>
@@ -400,7 +402,7 @@
     </div>
     <div class="row" style="margin-top:10px">
       <button class="mini primary" onclick="saveCfg()">保存</button>
-      <span style="color:#9ca3af;font-size:12px">※ config.json を直接書き換えます。permissionMode・repos は編集不可</span>
+      <span style="color:#9ca3af;font-size:12px">※ config.json を直接書き換えます（APIキーは secrets.json へ）。permissionMode・repos は編集不可</span>
     </div>
   </div>
 
@@ -620,6 +622,7 @@ function fillCfgForm() {
   document.getElementById('set-bridgehub').value = c.bridgeHub ?? '';
   document.getElementById('set-apiurl').value = c.apiUrl ?? '';
   document.getElementById('set-apimodel').value = c.apiModel ?? '';
+  document.getElementById('set-apikey').placeholder = c.apiKeySet ? '（設定済み・secrets.json）' : '（必要時）';
   document.getElementById('set-extraprompt').value = c.extraPrompt ?? '';
   const rd = document.getElementById('eng-data-repos');
   if (rd) rd.innerHTML = (c.repos || []).map((r) => '<div>' + esc(r) + '</div>').join('');
