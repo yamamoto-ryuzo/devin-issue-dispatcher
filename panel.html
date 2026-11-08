@@ -797,6 +797,8 @@ function renderCandBody() {
       const chatQueued = (status.chatWaiting || []).includes(c.key + ' assess') ||
         (status.chatWaiting || []).includes(c.key + ' impl');
       const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key) || !!chatPh || !!localPh;
+      const rowBg = (chatPh || localPh) ? ' style="background:#fef3e2"' :
+        chatQueued ? ' style="background:#eef1f5;color:#94a3b8"' : '';
       const phaseBadge = (chatPh || localPh)
         ? '<span class="badge" style="background:#b45309;color:#fff;margin-right:4px">' +
           ((chatPh || localPh).endsWith(' assess') ? '評価中' :
@@ -819,7 +821,7 @@ function renderCandBody() {
           '<button class="mini" style="margin-left:4px" onclick="detail(\'' +
           esc(c.key) + '\')">詳細</button>'
         : '-';
-      return '<tr><td>' + esc(c.type) + ' #' + c.number + '</td>' +
+      return '<tr' + rowBg + '><td>' + esc(c.type) + ' #' + c.number + '</td>' +
       '<td style="white-space:nowrap"><button class="mini" ' + (busy ? 'disabled' : '') +
         ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? '再評価' : '評価') + '</button>' +
       '<button class="mini primary" ' + (busy ? 'disabled' : '') +
