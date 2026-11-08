@@ -186,7 +186,8 @@
       <label>ポーリング周期 (秒)<br><input id="set-poll" type="number" min="10" style="width:80px"></label>
       <label>候補キャッシュ有効 (秒)<br><input id="set-cache" type="number" min="0" style="width:80px"></label>
       <label>新規候補の上限/回<br><input id="set-maxnew" type="number" min="1" style="width:70px"></label>
-      <label>同時起動数<br><input id="set-maxc" type="number" min="1" style="width:60px"></label>
+      <label>評価 同時起動数<br><input id="set-maxc-assess" type="number" min="1" style="width:60px"></label>
+      <label>対応 同時起動数<br><input id="set-maxc-impl" type="number" min="1" style="width:60px"></label>
       <label>判定の鮮度 (時間)<br><input id="set-assess-age" type="number" min="1" style="width:60px"></label>
       <label>autoTriggerSince<br><input id="set-since" type="text" placeholder="all / ISO時刻 / 空=初回起動" style="width:150px"></label>
     </div>
@@ -324,7 +325,8 @@ function fillCfgForm() {
   document.getElementById('set-poll').value = c.pollIntervalSec;
   document.getElementById('set-cache').value = c.candidateCacheSec ?? c.pollIntervalSec;
   document.getElementById('set-maxnew').value = c.maxNewPerPoll;
-  document.getElementById('set-maxc').value = c.maxConcurrent;
+  document.getElementById('set-maxc-assess').value = c.maxConcurrentAssess ?? c.maxConcurrent;
+  document.getElementById('set-maxc-impl').value = c.maxConcurrentImpl ?? c.maxConcurrent;
   document.getElementById('set-since').value = c.autoTriggerSince ?? '';
   document.getElementById('set-assess-age').value = c.assessMaxAgeHours ?? 24;
 }
@@ -335,7 +337,8 @@ async function saveCfg() {
     pollIntervalSec: +document.getElementById('set-poll').value || undefined,
     candidateCacheSec: +document.getElementById('set-cache').value,
     maxNewPerPoll: +document.getElementById('set-maxnew').value || undefined,
-    maxConcurrent: +document.getElementById('set-maxc').value || undefined,
+    maxConcurrentAssess: +document.getElementById('set-maxc-assess').value || undefined,
+    maxConcurrentImpl: +document.getElementById('set-maxc-impl').value || undefined,
     autoTriggerSince: since === '' ? null : since,
     assessMaxAgeHours: +document.getElementById('set-assess-age').value || undefined,
   };
@@ -490,7 +493,8 @@ async function refresh() {
     '<dt>autoTrigger</dt><dd>' + c.autoTrigger +
       (c.autoTrigger ? '（起点: ' + (c.autoTriggerSince || status.deployedAt || '-') + '）' : '') + '</dd>' +
     '<dt>permissionMode</dt><dd>' + c.permissionMode + '</dd>' +
-    '<dt>同時起動</dt><dd>' + c.maxConcurrent + '</dd>' +
+    '<dt>同時起動(評価/対応)</dt><dd>' + (c.maxConcurrentAssess ?? c.maxConcurrent) +
+      ' / ' + (c.maxConcurrentImpl ?? c.maxConcurrent) + '</dd>' +
     '<dt>監視リポジトリ</dt><dd>' + c.repos.map(r =>
       '<a href="https://github.com/' + esc(r) + '" target="_blank" rel="noopener">' +
       esc(r) + '</a>').join('<br>') + '</dd>';

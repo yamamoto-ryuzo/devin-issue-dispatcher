@@ -33,7 +33,9 @@ const config = JSON.parse(readFileSync(configPath, 'utf8'));
 const AUTO_ASSESS = config.autoAssess ?? false;
 const ASSESS_MAX_AGE_MS = (config.assessMaxAgeHours ?? 24) * 3600 * 1000;
 const POLL_MS = (config.pollIntervalSec ?? 120) * 1000;
-const MAX_CONCURRENT = config.maxConcurrent ?? 1;
+// 並行数はフェーズ別に分離: 評価=軽量なので多め、実装=衝突回避で少なめ
+const MAX_ASSESS = config.maxConcurrentAssess ?? config.maxConcurrent ?? 1;
+const MAX_IMPL = config.maxConcurrentImpl ?? config.maxConcurrent ?? 1;
 const STALE_MS = (config.staleRunningMinutes ?? 180) * 60 * 1000;
 const LABEL = {
   trigger: config.triggerLabel ?? 'devin',
@@ -224,7 +226,7 @@ const readKillRequests = () => {
   catch { return { keys: [] }; }
 };
 
-function spawnDevin(prompt, task, logPath, key) {
+function spawnDevin(prompt, task, logPath, key, phase = 'impl') {
   // ACP ランナー経由: devin.exe acp に authenticate(windsurf_api_key) →
   // session/new → session/prompt で実セッションを実行する。
   // （devin.exe -p は CLI ログインが必要だが、ACP は IDE 認証を共有できる）
@@ -238,7 +240,7 @@ function spawnDevin(prompt, task, logPath, key) {
       windowsHide: true,
       env: { ...process.env },
     });
-    running.set(key, { proc, logPath, startedAt: Date.now() });
+    running.set(key, { proc, logPath, startedAt: Date.now(), phase });
     // パネルの「停止」→ kill-requests.json を2秒ごと監視してプロセスを kill
     const iv = setInterval(() => {
       const ks = readKillRequests().keys ?? [];
@@ -306,7 +308,7 @@ async function runTask(task, state, { skipAssess = false } = {}) {
       } else {
         ap = base + '_assess.log';
         log(`ASSESS ${key} -> ${ap}`);
-        code = await spawnDevin(ASSESS_PROMPT(task, loadPolicy(task.repo.github).text), task, ap, key);
+        code = await spawnDevin(ASSESS_PROMPT(task, loadPolicy(task.repo.github).text), task, ap, key, 'assess');
         verdict = code === 0 ? parseVerdict(ap) : null;
         state.tasks[key] = { ...state.tasks[key], assessLog: ap,
           assess: verdict ?? { error: `exit ${code} or unparsed` },
@@ -387,8 +389,14 @@ function drainQueue(state) {
   if (draining) return;
   draining = true;
   (async () => {
-    while (queue.length && running.size < MAX_CONCURRENT) {
-      const task = queue.shift();
+    while (queue.length) {
+      const idx = queue.findIndex((t) => {
+        const phase = t.assessOnly ? 'assess' : 'impl';
+        const max = phase === 'assess' ? MAX_ASSESS : MAX_IMPL;
+        return [...running.values()].filter((v) => v.phase === phase).length < max;
+      });
+      if (idx < 0) break;
+      const task = queue.splice(idx, 1)[0];
       const key = keyOf(task.repo.github, task.type, task.number);
       try {
         if (task.assessOnly) await doAssess(task, state);
@@ -567,7 +575,7 @@ async function cycle(state) {
 }
 
 async function main() {
-  log(`dispatcher start (poll ${POLL_MS / 1000}s, maxConcurrent ${MAX_CONCURRENT}, mode=${config.permissionMode ?? 'dangerous'}, autoTrigger=${AUTO_TRIGGER})`);
+  log(`dispatcher start (poll ${POLL_MS / 1000}s, maxAssess ${MAX_ASSESS}, maxImpl ${MAX_IMPL}, mode=${config.permissionMode ?? 'dangerous'}, autoTrigger=${AUTO_TRIGGER})`);
   if (!existsSync(config.devinExe)) {
     log(`FATAL: devin exe not found: ${config.devinExe}`);
     process.exit(1);

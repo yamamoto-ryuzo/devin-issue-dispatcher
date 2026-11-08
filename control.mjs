@@ -225,6 +225,8 @@ function status() {
       autoTriggerSince: config.autoTriggerSince ?? null,
       permissionMode: config.permissionMode ?? 'dangerous',
       maxConcurrent: config.maxConcurrent ?? 1,
+      maxConcurrentAssess: config.maxConcurrentAssess ?? config.maxConcurrent ?? 1,
+      maxConcurrentImpl: config.maxConcurrentImpl ?? config.maxConcurrent ?? 1,
       maxNewPerPoll: config.maxNewPerPoll ?? 50,
       repos: (config.repos ?? []).map((r) => r.github),
     },
@@ -340,7 +342,8 @@ const server = createServer(async (req, res) => {
       if (url.pathname === '/api/config') {
         // config.json の一部キーを更新（ファイル + メモリ両方）
         const allowed = ['pollIntervalSec', 'candidateCacheSec', 'maxNewPerPoll',
-          'maxConcurrent', 'autoDiscover', 'autoTrigger', 'autoAssess',
+          'maxConcurrent', 'maxConcurrentAssess', 'maxConcurrentImpl',
+          'autoDiscover', 'autoTrigger', 'autoAssess',
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
