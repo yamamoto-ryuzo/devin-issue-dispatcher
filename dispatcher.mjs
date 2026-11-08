@@ -292,13 +292,17 @@ function parseVerdict(logPath) {
 }
 
 // ---- 課題単位のエンジン解決（control.mjs resolveEngine と同等の縮約版）----
-// 優先順位: issue ラベル/本文の engine 指定 > パネル保存の engineReq > config.engine > devin
+// 優先順位: issue ラベル/本文の engine 指定 > パネル保存の engineReq
+//          > モード別既定(config.engineModes) > config.engine > devin
 const ENGINES = ['devin', 'copilot', 'antigravity', 'api'];
 const normEngine = (v) => {
   const e = String(v ?? '').trim().toLowerCase();
   return ENGINES.includes(e) ? e : null;
 };
-function resolveTaskEngine(key, state) {
+// config.json は呼出ごとに読み直す（パネルからのエンジン変更を
+// dispatcher 再起動なしで反映するため。liveConfig と同じ方針）
+const liveJson = (p) => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; } };
+function resolveTaskEngine(key, mode, state) {
   const it = readIssueStore(ISSUES_PATH).issues?.[key];
   if (it) {
     for (const l of it.labels ?? []) {
@@ -310,26 +314,40 @@ function resolveTaskEngine(key, state) {
     const e = m && normEngine(m[1]);
     if (e) return e;
   }
+  const cfg = liveJson(configPath) ?? config;
   return normEngine(state.tasks[key]?.engineReq)
-    ?? normEngine(config.engine)
+    ?? normEngine(cfg.engineModes?.[mode])
+    ?? normEngine(cfg.engine)
     ?? 'devin';
+}
+
+// 非 devin 解決の課題は devin -p を起動せず control のチャット経路
+// （/api/chat/task → dispatchChatTask）へ委譲する。
+// verdict 記録・評価→対応の連鎖は control 側の watchAssess が担う
+async function dispatchViaChat(key, mode, eng) {
+  const cfg = liveJson(configPath) ?? config;
+  const r = await fetch(`http://127.0.0.1:${cfg.controlPort ?? 8585}/api/chat/task`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+    body: JSON.stringify({ key, mode, engine: eng }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`chat dispatch failed (engine=${eng}): ${j.error || r.status}`);
+  log(`CHAT-ROUTE ${key}: engine=${eng} mode=${mode} -> ${JSON.stringify(j)}`);
 }
 
 async function runTask(task, state, { skipAssess = false } = {}) {
   const key = keyOf(task.repo.github, task.type, task.number);
-  // 非 devin 解決時は devin -p を起動せずチャット経路（control の /api/chat/task）
-  // へ委譲する（評価→対応の連鎖は watchAssess/autoTrigger 側が担う）
-  const eng = resolveTaskEngine(key, state);
+  // 非 devin 解決時はチャット経路へ委譲（評価→対応の連鎖は watchAssess/autoTrigger 側が担う）
+  const mode = skipAssess ? 'impl' : 'assess';
+  const eng = resolveTaskEngine(key, mode, state);
   if (eng !== 'devin') {
-    const mode = skipAssess ? 'impl' : 'assess';
-    const r = await fetch(`http://127.0.0.1:${config.controlPort ?? 8585}/api/chat/task`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
-      body: JSON.stringify({ key, mode, engine: eng }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(`chat dispatch failed (engine=${eng}): ${j.error || r.status}`);
-    log(`CHAT-ROUTE ${key}: engine=${eng} mode=${mode} -> ${JSON.stringify(j)}`);
+    // 委譲済みの自動評価が飛行中なら評価→impl 連鎖は control 側に任せる（二重送信防止）
+    if (!skipAssess && state.tasks[key]?.inflight === 'assess') {
+      log(`CHAT-ROUTE-SKIP ${key}: delegated assess already in flight`);
+      return;
+    }
+    await dispatchViaChat(key, mode, eng);
     state.tasks[key] = { ...(state.tasks[key] ?? {}),
       status: 'running', engineUsed: eng,
       note: `エンジン ${eng} のためチャット経路へ委譲`,
@@ -545,6 +563,17 @@ async function runSingleTask(spec, state) {
 // task = { repo, type, number, title, body, url, labels }
 async function doAssess(task, state) {
   const key = keyOf(task.repo.github, task.type, task.number);
+  // 非 devin 解決時はチャット経路へ委譲。verdict は control 側 watchAssess が
+  // state.tasks[key].assess へ記録する（委譲中は inflight で多重キューを抑止）
+  const eng = resolveTaskEngine(key, 'assess', state);
+  if (eng !== 'devin') {
+    await dispatchViaChat(key, 'assess', eng);
+    state.tasks[key] = { ...(state.tasks[key] ?? {}),
+      inflight: 'assess', engineUsed: eng,
+      note: `エンジン ${eng} のためチャット経路へ委譲` };
+    saveState(state);
+    return;
+  }
   const ap = join(LOG_DIR,
     `${task.repo.github.replace('/', '_')}_${task.type}${task.number}_assess_${Date.now()}.log`);
   log(`ASSESS-ONLY ${key} -> ${ap}`);
@@ -625,7 +654,8 @@ async function cycle(state) {
       const stale = !assessedAt
         || Date.now() - new Date(assessedAt).getTime() > ASSESS_MAX_AGE_MS;
       if (!stale) continue;
-      if (running.has(key) || queue.some((q) => keyOf(q.repo.github, q.type, q.number) === key)) continue;
+      if (running.has(key) || queue.some((q) => keyOf(q.repo.github, q.type, q.number) === key)
+        || state.tasks[key]?.inflight) continue;
       queue.push({ ...t, assessOnly: true });
       log(`queued assess ${key} "${t.title}"`);
     }
@@ -638,7 +668,8 @@ async function cycle(state) {
   }
   for (const t of found) {
     const key = keyOf(t.repo.github, t.type, t.number);
-    if (running.has(key) || queue.some((q) => keyOf(q.repo.github, q.type, q.number) === key)) continue;
+    if (running.has(key) || queue.some((q) => keyOf(q.repo.github, q.type, q.number) === key)
+      || state.tasks[key]?.inflight) continue;
     if (t.labels.includes(LABEL.running) && !running.has(key)) continue; // reclaimStale が処理
     queue.push(t);
     log(`queued ${key} "${t.title}"`);
@@ -649,8 +680,12 @@ async function cycle(state) {
 async function main() {
   log(`dispatcher start (poll ${POLL_MS / 1000}s, maxAssess ${MAX_ASSESS}, maxImpl ${MAX_IMPL}, mode=${config.permissionMode ?? 'dangerous'}, autoTrigger=${AUTO_TRIGGER})`);
   if (!existsSync(config.devinExe)) {
-    log(`FATAL: devin exe not found: ${config.devinExe}`);
-    process.exit(1);
+    // 既定エンジンが非 devin なら起動は継続（devin 解決の課題のみ起動失敗する）
+    if ((normEngine(config.engine) ?? 'devin') === 'devin') {
+      log(`FATAL: devin exe not found: ${config.devinExe}`);
+      process.exit(1);
+    }
+    log(`WARN: devin exe not found: ${config.devinExe}（devin 解決の課題は起動失敗します）`);
   }
   const state = loadState();
   state.deployedAt ??= new Date().toISOString();

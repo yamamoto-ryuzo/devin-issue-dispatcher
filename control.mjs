@@ -389,6 +389,8 @@ function watchAssess(key, ch) {
             const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
             st.tasks[key] = { ...(st.tasks[key] ?? {}),
               assess: v, assessedAt: new Date().toISOString(), engine: 'chat' };
+            // dispatcher 委譲の自動評価が立てた inflight マーカーを解除（多重キュー抑止の解除）
+            delete st.tasks[key].inflight;
             writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
             // 自動連鎖: issue課題は autoTrigger、pr課題は autoPr が ON のとき
             // 判定・リスクが自動処理範囲内なら対応（impl）へ投入
@@ -424,8 +426,16 @@ function watchAssess(key, ch) {
       if (verdictDone && splitDone) break;
     }
   }, 3000);
-  // 30分で強制終了
-  setTimeout(() => { clearInterval(iv); assessWatchers.delete(key); }, 30 * 60 * 1000).unref?.();
+  // 30分で強制終了。委譲評価の inflight マーカーが残っていればここで解除
+  // （verdict 未出力で滞留した場合に課題が永久スキップされないようにする）
+  setTimeout(() => {
+    clearInterval(iv); assessWatchers.delete(key);
+    const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+    if (st.tasks[key]?.inflight) {
+      delete st.tasks[key].inflight;
+      writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+    }
+  }, 30 * 60 * 1000).unref?.();
 }
 
 // 切り分け完了を監視: <!--split {"newKey":...}--> を検出したら新 issue を自動再評価
