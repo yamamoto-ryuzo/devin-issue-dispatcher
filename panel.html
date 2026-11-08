@@ -714,7 +714,14 @@ function renderCandBody() {
       '<span class="cnt' + (items.length ? '' : ' zero') + '">' + items.length + '</span></div>';
     if (!items.length) return head + '<div class="repo-empty">候補なし</div>';
     const rows = items.map(c => {
-      const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key);
+      const chatPh = (status.chatBusy || []).find((l) => l.startsWith(c.key + ' '));
+      const chatQueued = (status.chatWaiting || []).includes(c.key + ' assess') ||
+        (status.chatWaiting || []).includes(c.key + ' impl');
+      const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key) || !!chatPh;
+      const phaseBadge = chatPh
+        ? '<span class="badge" style="background:#b45309">' +
+          (chatPh.endsWith(' assess') ? '評価中' : chatPh.endsWith(' impl') ? '対応中' : '実行中') + '</span>'
+        : chatQueued ? '<span class="badge" style="background:#6b7280">待機中</span>' : '';
       const a = c.assess;
       const CAT_TIP = {
         auto: 'auto（即対応可）: 仕様が明確・リスク低で自動実装に進める判定',
@@ -741,7 +748,7 @@ function renderCandBody() {
         '" target="_blank" rel="noopener">' + esc(c.title) + '</a></td>' +
       '<td class="' + (c.trigger === 'auto-new' ? 'trig-auto' : 'trig-label') + '">' +
         (c.trigger === 'auto-new' ? '自動(新規)' : 'devin ラベル') + '</td>' +
-      '<td>' + judge + '</td>' +
+      '<td>' + phaseBadge + judge + '</td>' +
       '<td>' + fmt(c.createdAt) + '</td>' +
       '<td>' + (c.runningLabel ? 'running ラベル付き(起動中/取残し)' :
                 c.state ? 'state: ' + c.state : '') + '</td></tr>';

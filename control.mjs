@@ -85,6 +85,35 @@ function pickChatId(label) {
   });
   return id;
 }
+// フェーズ別の上限（maxConcurrentAssess/Impl）を超えた送信は待機キューへ
+const chatWait = []; // {key, mode}
+function busyCount(mode) {
+  let n = 0;
+  for (const s of chats.values()) if (s.chat.busy && s.label.endsWith(' ' + mode)) n++;
+  return n;
+}
+function chatCapacity(mode) {
+  const max = mode === 'assess'
+    ? (config.maxConcurrentAssess ?? config.maxConcurrent ?? 1)
+    : (config.maxConcurrentImpl ?? config.maxConcurrent ?? 1);
+  return busyCount(mode) < max;
+}
+async function dispatchChatTask(key, mode) {
+  const p = taskPrompt(key, mode);
+  const id = pickChatId(key + ' ' + mode);
+  await chats.get(id).chat.send(p.text);
+  if (mode === 'assess') watchAssess(key, chats.get(id).chat);
+  if (mode === 'split') watchSplit(key, chats.get(id).chat);
+  return id;
+}
+setInterval(() => {
+  for (let i = chatWait.length - 1; i >= 0; i--) {
+    if (chatCapacity(chatWait[i].mode)) {
+      const { key, mode } = chatWait.splice(i, 1)[0];
+      dispatchChatTask(key, mode).catch(() => { /* noop */ });
+    }
+  }
+}, 3000).unref?.();
 
 function taskPrompt(key, mode) {
   const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
@@ -247,6 +276,9 @@ function status() {
       repos: (config.repos ?? []).map((r) => r.github),
     },
     tasks,
+    // チャット実行中の課題（key 起点のラベル）— パネルの「評価中/対応中」表示用
+    chatBusy: sessionsList().filter((s) => s.busy).map((s) => s.label),
+    chatWaiting: chatWait.map((w) => w.key + ' ' + w.mode),
   };
 }
 
@@ -413,11 +445,12 @@ const server = createServer(async (req, res) => {
         const p = taskPrompt(key, mode);
         if (!p) return json(400, { ok: false, error: 'bad key: ' + key });
         if (p.error) return json(400, { ok: false, error: p.error });
-        const id = pickChatId(key + ' ' + mode);
         try {
-          await chats.get(id).chat.send(p.text);
-          if (mode === 'assess') watchAssess(key, chats.get(id).chat);
-          if (mode === 'split') watchSplit(key, chats.get(id).chat);
+          if (!chatCapacity(mode)) {
+            chatWait.push({ key, mode });
+            return json(202, { ok: true, queued: true });
+          }
+          const id = await dispatchChatTask(key, mode);
           return json(200, { ok: true, id });
         }
         catch (e) { return json(500, { ok: false, error: e.message }); }
