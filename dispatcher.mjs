@@ -49,6 +49,9 @@ const LABEL = {
 // `devin` トリガーラベルは廃止（autoTrigger が全課題を対象にするため）。
 // 作成するのは状態表示用ラベルのみ
 const ALL_LABELS = [LABEL.running, LABEL.done, LABEL.failed, LABEL.needsReview, LABEL.rejected];
+// ツール実行往復の上限を指示文として全プロンプトへ注入（config.toolMaxSteps, 1-20, 既定10）
+const TMS = Math.min(Math.max(+(config.toolMaxSteps ?? 10), 1), 20);
+const withTms = (s) => s + `\n\n【ツール往復上限】ツール実行（コマンド・ファイル編集・外部呼び出しの往復）は最大 ${TMS} 回まで。上限に達したらその時点の作業内容と未完了事項をまとめて報告し、処理を終了すること`;
 const AUTO_TRIGGER = config.autoTrigger ?? false;
 const MAX_NEW_PER_POLL = config.maxNewPerPoll ?? 5;
 
@@ -319,7 +322,7 @@ async function runTask(task, state, { skipAssess = false } = {}) {
       } else {
         ap = base + '_assess.log';
         log(`ASSESS ${key} -> ${ap}`);
-        code = await spawnDevin(ASSESS_PROMPT(task, loadPolicy(task.repo.github).text), task, ap, key, 'assess');
+        code = await spawnDevin(withTms(ASSESS_PROMPT(task, loadPolicy(task.repo.github).text)), task, ap, key, 'assess');
         verdict = code === 0 ? parseVerdict(ap) : null;
         state.tasks[key] = { ...state.tasks[key], assessLog: ap,
           assess: verdict ?? { error: `exit ${code} or unparsed` },
@@ -383,7 +386,7 @@ async function runTask(task, state, { skipAssess = false } = {}) {
       `上限に達しても完了しない場合は「対応困難」として理由と現状を ` +
       `${task.type === 'pr' ? 'PR' : 'issue'} コメントで報告し、ユーザーへ対応を依頼する。`;
     log(`IMPL ${key} -> ${ip}`);
-    const code = await spawnDevin(prompt, task, ip, key);
+    const code = await spawnDevin(withTms(prompt), task, ip, key);
     const ok = code === 0;
     state.tasks[key] = { ...state.tasks[key], implLog: ip, phase: null,
       status: ok ? 'done' : 'failed', finishedAt: new Date().toISOString(), exitCode: code };
@@ -506,7 +509,7 @@ async function doAssess(task, state) {
   saveState(state);
   try {
     const code = await spawnDevin(
-      ASSESS_PROMPT(task, loadPolicy(task.repo.github).text), task, ap, key, 'assess');
+      withTms(ASSESS_PROMPT(task, loadPolicy(task.repo.github).text)), task, ap, key, 'assess');
     const verdict = code === 0 ? parseVerdict(ap) : null;
     state.tasks[key] = {
       ...(state.tasks[key] ?? {}),

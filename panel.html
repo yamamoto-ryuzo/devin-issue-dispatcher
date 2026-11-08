@@ -36,9 +36,10 @@
   button.danger:hover { background: #b91c1c; }
 
   .tabs { display: flex; gap: 4px; border-bottom: 2px solid #e3e7ee;
-          margin-bottom: 0; padding: 0 8px; }
+          margin-bottom: 0; padding: 0 8px; flex-wrap: wrap; }
   .tabs button { border: none; border-radius: 8px 8px 0 0; background: transparent;
-           color: #6b7280; font-size: 17px; padding: 10px 20px; position: relative; top: 2px; }
+           color: #6b7280; font-size: 17px; padding: 10px 20px; position: relative; top: 2px;
+           white-space: nowrap; }
   .tabs button:hover { color: #1f2937; background: #f1f4f9; }
   .tabs button.active { color: #2563eb; font-weight: 600; background: #fff;
            border: 1px solid #e3e7ee; border-bottom: 2px solid #fff; }
@@ -158,13 +159,13 @@
 </style>
 </head>
 <body>
-<div class="row" style="align-items:flex-start;gap:24px;flex-wrap:nowrap;margin-bottom:14px">
+<div class="row" style="align-items:flex-start;gap:24px;flex-wrap:wrap;margin-bottom:14px">
   <div>
     <h1>Devin Agent Dispatcher</h1>
     <div class="sub" style="margin-bottom:0">GitHub Issue/PR → devin -p 自動対応エージェントの管理パネル</div>
   </div>
   <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:8px">
-    <div style="display:flex;gap:10px;align-items:flex-start">
+    <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end">
     <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
       <button id="btn-disc" class="toggle off" onclick="toggleFlag('autoDiscover')">…</button>
       <span id="disc-desc" style="display:none"></span>
@@ -211,6 +212,7 @@
       <label style="font-size:12px">対象リポジトリ
         <select id="sv-repo" style="font-size:12px;min-width:240px" onchange="document.getElementById('sv-goal-sel').value='';loadGoal();loadGoals();svReset()"></select></label>
       <button id="sv-extract" class="primary" style="font-size:14px;padding:10px 22px" onclick="surveyExtract()">課題抽出</button>
+      <button id="sv-cancel" class="danger" style="display:none;font-size:14px;padding:10px 16px" onclick="surveyCancel()">中断</button>
       <span style="font-size:12px;color:#6b7280">抽出はチャットセッションで実行（結果はチャットタブに表示）</span>
     </div>
     <div class="row" style="margin-bottom:6px">
@@ -377,6 +379,26 @@
       <button class="mini" style="margin-left:8px" onclick="act('bridge-install')" title="bridge-hub.exe を CDN から取得し自己インストール（127.0.0.1:8511 常駐）">bridge-hub インストール</button>
       <button class="mini" style="margin-left:8px" onclick="engHealth()" title="bridge-hub の /health へ疎通確認">疎通確認</button>
       <span id="eng-health" style="margin-left:8px;color:#6b7280"></span>
+      <div id="bridge-cli-list" style="margin-top:8px">
+        <div data-for="copilot" style="margin-top:6px">
+          <strong>GitHub Copilot</strong> <span class="cli-state" data-provider="copilot"></span><br>
+          <button class="mini" onclick="bridgeCliAction('copilot','install')" title="copilot CLI をハブ経由で自動インストール">CLI を自動インストール</button>
+          <button class="mini" onclick="bridgeCliAction('copilot','login')" title="copilot /login を別コンソールで起動">CLI ログイン</button>
+          <span class="bridge-cli-note" style="color:#6b7280"></span>
+        </div>
+        <div data-for="devin" style="margin-top:6px">
+          <strong>Devin</strong> <span class="cli-state" data-provider="devin"></span><br>
+          <button class="mini" onclick="bridgeCliAction('devin','install')" title="devin CLI をハブ経由で自動インストール">CLI を自動インストール</button>
+          <button class="mini" onclick="bridgeCliAction('devin','login')" title="devin login を別コンソールで起動">CLI ログイン</button>
+          <span class="bridge-cli-note" style="color:#6b7280"></span>
+        </div>
+        <div data-for="antigravity" style="margin-top:6px">
+          <strong>Antigravity</strong> <span class="cli-state" data-provider="antigravity"></span><br>
+          <button class="mini" onclick="bridgeCliAction('antigravity','install')" title="agy CLI の導入状況確認（自動インストール非対応）">CLI を自動インストール</button>
+          <button class="mini" onclick="bridgeCliAction('antigravity','login')" title="agy のログイン案内">CLI ログイン</button>
+          <span class="bridge-cli-note" style="color:#6b7280"></span>
+        </div>
+      </div>
       <div style="margin-top:8px;color:#6b7280">
         ブリッジ経由プロバイダ: GitHub Copilot（copilot CLI）/ Antigravity（agy CLI）/ Devin<br>
         CANVAS 共通のハブが provider で振り分けます。未導入時は「bridge-hub インストール」で自己インストール。
@@ -408,6 +430,7 @@
         <label>対応 同時起動数<br><input id="set-maxc-impl" type="number" min="1" style="width:60px"></label>
         <label>PR対応 同時起動数<br><input id="set-maxc-pr" type="number" min="1" style="width:60px" title="pr# 課題の対応セッションの同時起動上限（issue課題とは別枠）"></label>
         <label>検証ループ上限 (回)<br><input id="set-impl-loop" type="number" min="1" style="width:60px" title="対応→完了確認→NG→修正のループをこの回数まで実施。到達後はユーザーへ対応依頼"></label>
+        <label>ツール往復上限 (回)<br><input id="set-toolsteps" type="number" min="1" max="20" style="width:60px" title="エージェントのツール実行（コマンド・編集の往復）の上限としてプロンプトへ注入される指示（1-20）。到達時は作業をまとめて報告し終了。api エンジンは単発応答のため実効なし"></label>
         <label>自動処理の判定範囲<br><select id="set-autocat" style="font-size:12px" title="選択した判定まで自動で対応へ進めます&#10;auto のみ / review まで / human まで / reject まで(全て)">
           <option value="auto">auto のみ</option>
           <option value="review">review まで</option>
@@ -427,7 +450,7 @@
   </div>
 
   <div id="tab-chat" class="tabpanel">
-    <div class="h3">AI チャット（Devin ACP セッション）
+    <div class="h3">AI チャット（設定の AIプロバイダで実行 / devin・copilot=ACPセッション、その他=単発応答）
       <span id="chat-status" style="font-weight:400;color:#6b7280"></span>
       <button class="mini" onclick="chatCancel()">中断</button>
       <button class="mini" onclick="chatClear()">クリア</button>
@@ -536,6 +559,88 @@ function showEngTab(name) {
     if (el && typeof skills !== 'undefined' && skills.length)
       el.innerHTML = skills.map((s) => '<div>' + esc(s.name) + '</div>').join('');
   }
+  if (name === 'bridge') refreshBridgeCli();
+}
+// ---- ブリッジCLI導入状況（bridge-hub /setup。CANVAS AI設定の install パネル相当）----
+const BRIDGE_CLI_PROVIDERS = ['copilot', 'devin', 'antigravity'];
+function bridgeHubBase() {
+  return (document.getElementById('set-bridgehub').value || 'http://127.0.0.1:8511').replace(/\/+$/, '');
+}
+function setCliChip(p, text, color) {
+  document.querySelectorAll('.cli-state[data-provider="' + p + '"]').forEach((c) => {
+    c.textContent = text; c.style.color = color; c.style.fontWeight = 'bold';
+  });
+}
+async function refreshBridgeCli() {
+  const base = bridgeHubBase();
+  try {
+    const r = await fetch(base + '/setup', { cache: 'no-store' });
+    const d = await r.json();
+    const prov = d?.providers || {};
+    for (const p of BRIDGE_CLI_PROVIDERS) {
+      if (!prov[p]?.cli_found) { setCliChip(p, '未導入', '#c62828'); continue; }
+      // ログイン状態は /models の応答で推定（fallback/error = 未ログイン疑い）
+      setCliChip(p, '導入済', '#e65100');
+      fetch(base + '/models?provider=' + p, { cache: 'no-store' })
+        .then((r2) => r2.json().catch(() => ({})))
+        .then((m) => {
+          const ok = !m?.error && !m?.fallback && Array.isArray(m?.models) && m.models.length;
+          setCliChip(p, ok ? 'ログイン済' : '未ログイン疑い', ok ? '#2e7d32' : '#e65100');
+        }).catch(() => {});
+    }
+  } catch (e) {
+    for (const p of BRIDGE_CLI_PROVIDERS) setCliChip(p, 'ハブ未接続', '#777');
+  }
+}
+async function bridgeCliAction(provider, action) {
+  const holder = document.querySelector('#bridge-cli-list [data-for="' + provider + '"]');
+  const note = holder ? holder.querySelector('.bridge-cli-note') : null;
+  const base = bridgeHubBase();
+  try {
+    if (action === 'login') {
+      const r = await fetch(base + '/setup', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, action: 'login' }) });
+      const d = await r.json().catch(() => ({}));
+      if (note) note.textContent = r.ok
+        ? (d?.already ? 'ログイン済みです' : 'ログイン用コンソール/ブラウザを開きました。完了後に状態を再確認してください')
+        : 'ログイン失敗: ' + (d?.error || 'HTTP ' + r.status);
+      refreshBridgeCli();
+      return;
+    }
+    // install: 状況確認 → 確認ダイアログ → ジョブ起動＋ポーリング
+    const r = await fetch(base + '/setup', { cache: 'no-store' });
+    const d = await r.json().catch(() => ({}));
+    const st = d?.providers?.[provider];
+    if (st?.cli_found) { if (note) note.textContent = '検出済: ' + (st.cli_path || ''); return; }
+    if (st && !st.auto_install) { if (note) note.textContent = st.note || '自動インストール非対応'; return; }
+    if (!window.confirm(provider + ' の CLI を自動インストールしますか？')) return;
+    if (note) note.textContent = 'インストール中…';
+    const r2 = await fetch(base + '/setup', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, action: 'install', confirm: true }) });
+    const d2 = await r2.json().catch(() => ({}));
+    if (!r2.ok) {
+      if (note) note.textContent = '失敗: ' + (d2?.error || 'HTTP ' + r2.status) + (d2?.guide ? ' / ' + d2.guide : '');
+      return;
+    }
+    const deadline = Date.now() + 480000;
+    let last = null;
+    while (Date.now() < deadline) {
+      await new Promise((res) => setTimeout(res, 2000));
+      try {
+        const jr = await fetch(base + '/setup/job/' + d2.job, { cache: 'no-store' });
+        last = await jr.json().catch(() => null);
+      } catch (e) { /* ポーリング継続 */ }
+      if (last?.status && last.status !== 'running') break;
+    }
+    if (note) note.textContent = last?.status === 'done'
+      ? '完了: ' + (last?.result?.cli_path || '')
+      : '失敗/タイムアウト: ' + ((last?.result?.error) || last?.status || 'timeout');
+  } catch (e) {
+    if (note) note.textContent = 'エラー: ' + e.message;
+  }
+  refreshBridgeCli();
 }
 async function engHealth() {
   const el = document.getElementById('eng-health');
@@ -678,6 +783,7 @@ function fillCfgForm() {
   document.getElementById('set-maxc-impl').value = c.maxConcurrentImpl ?? c.maxConcurrent;
   document.getElementById('set-maxc-pr').value = c.maxConcurrentPr ?? c.maxConcurrentImpl ?? c.maxConcurrent;
   document.getElementById('set-impl-loop').value = c.implLoopMax ?? 5;
+  document.getElementById('set-toolsteps').value = c.toolMaxSteps ?? 10;
   document.getElementById('set-since').value = c.autoTriggerSince ?? '';
   document.getElementById('set-autocat').value = c.autoCategory ?? 'review';
   document.getElementById('set-autorisk').value = c.maxAutoRisk ?? 'medium';
@@ -705,6 +811,7 @@ async function saveCfg() {
     maxConcurrentImpl: +document.getElementById('set-maxc-impl').value || undefined,
     maxConcurrentPr: +document.getElementById('set-maxc-pr').value || undefined,
     implLoopMax: +document.getElementById('set-impl-loop').value || undefined,
+    toolMaxSteps: +document.getElementById('set-toolsteps').value || undefined,
     autoTriggerSince: since === '' ? null : since,
     autoCategory: document.getElementById('set-autocat').value,
     maxAutoRisk: document.getElementById('set-autorisk').value,
@@ -864,6 +971,7 @@ async function loadSessions() {
     document.getElementById('chat-sessions').innerHTML =
       list.map((s) => '<span class="csess' + (s.id === chatSel ? ' active' : '') +
         (s.busy ? ' busy' : '') + '" onclick="chatSelect(' + s.id + ')">' +
+        ((s.engine && s.engine !== 'devin') ? '[' + esc(s.engine) + '] ' : '') +
         esc(s.label || 'session ' + s.id) + (s.busy ? ' ●' : '') +
         '<span class="x" onclick="event.stopPropagation();chatClose(' + s.id + ')">✕</span></span>'
       ).join('') +
@@ -885,6 +993,7 @@ async function chatSend() {
     method: 'POST', headers: H, body: JSON.stringify({ id: chatSel, text }),
   });
   const j = await r.json();
+  if (j.error) toast('送信失敗: ' + j.error);
   if (j.id) { chatSel = j.id; loadSessions(); }
   loadChat();
 }
@@ -1389,9 +1498,11 @@ async function surveyExtract() {
     const j = await r.json();
     if (j.id) {
       surveyRepo = repo;
+      surveyChatId = j.id;
       chatSel = j.id; loadSessions(); pollIssues(j.id);
       const b = document.getElementById('sv-extract');
       if (b) { b.disabled = true; b.textContent = '課題抽出中…'; }
+      svExtracting(true);
     }
     toast(j.ok ? '課題抽出を送信しました（チャットタブに出力されます）' : '失敗: ' + (j.error || ''));
   } catch (e) { toast('survey: ' + e.message); }
@@ -1411,6 +1522,28 @@ function parseIssuesTxt(txt) {
 let surveyProps = [];
 let surveyRepo = ''; // 抽出時の対象リポジトリ（起票先を誤登録しないよう固定）
 let issuePollIv = null; // 実行中の抽出ポーリング
+let surveyChatId = null; // 抽出実行中のチャットセッション id（中断ボタンの対象）
+// 抽出中 UI: 抽出ボタンを無効化し中断ボタンを表示。完了/中断/リセットで元に戻す
+function svExtracting(on) {
+  const c = document.getElementById('sv-cancel');
+  if (c) c.style.display = on ? '' : 'none';
+  if (!on) surveyChatId = null;
+}
+// 中断ボタン: 実行中のチャットセッションへ session/cancel を送りポーリングを止める
+async function surveyCancel() {
+  const id = surveyChatId;
+  if (id == null) return;
+  try {
+    await fetch(API + '/api/chat/cancel', {
+      method: 'POST', headers: H, body: JSON.stringify({ id }),
+    });
+  } catch { /* noop */ }
+  if (issuePollIv) { clearInterval(issuePollIv); issuePollIv = null; }
+  const b = document.getElementById('sv-extract');
+  if (b) { b.textContent = '課題抽出'; b.disabled = false; }
+  svExtracting(false);
+  toast('課題抽出を中断しました');
+}
 // 目的・リポジトリ変更時: 抽出結果とボタン状態・進行中ポーリングをリセット
 function svReset() {
   surveyProps = []; surveyRepo = '';
@@ -1419,6 +1552,7 @@ function svReset() {
   const b = document.getElementById('sv-extract');
   if (b) { b.textContent = '課題抽出'; b.disabled = false; }
   if (issuePollIv) { clearInterval(issuePollIv); issuePollIv = null; }
+  svExtracting(false);
 }
 function pollIssues(id) {
   const seen = new Set();
@@ -1453,6 +1587,7 @@ function pollIssues(id) {
           b.textContent = all.length ? '抽出完了 ' + all.length + ' 件' : '課題抽出';
           b.disabled = false;
         }
+        svExtracting(false);
       }
     } catch { /* noop */ }
   }, 3000);
@@ -1460,6 +1595,7 @@ function pollIssues(id) {
     clearInterval(iv);
     const b = document.getElementById('sv-extract');
     if (b) { b.textContent = '課題抽出'; b.disabled = false; }
+    svExtracting(false);
   }, 5 * 60 * 1000);
 }
 function renderProps(list) {
@@ -1649,8 +1785,16 @@ function renderCandBody() {
         : quedAssess ? badge('#6b7280', '待機中')
         : '<button class="mini" ' + (busy ? 'disabled' : '') +
           ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? '再評価' : '評価') + '</button>';
+      const prM = c.openPr ? String(c.openPr).match(/^(\S+)\s+pr#(\d+)$/) : null;
+      const crM = c.createdPr ? String(c.createdPr).match(/^(\S+)\s+pr#(\d+)$/) : null;
+      const remPr = prM || crM;
       const implCell = ph?.endsWith(' impl') ? badge('#b45309', '対応中')
         : quedImpl ? badge('#6b7280', '待機中')
+        : prM
+          ? '<a class="badge" style="background:#6b7280;color:#fff;text-decoration:none" ' +
+            'href="https://github.com/' + esc(prM[1]) + '/pull/' + prM[2] +
+            '" target="_blank" rel="noopener" title="対応は PR #' + prM[2] +
+            ' へ移行しました（PR一覧で継続中）">PR中#' + prM[2] + '</a>'
         : c.engine === 'api'
           ? '<span style="font-size:11px;color:#9ca3af" title="api エンジンは評価専用のため対応を起動できません">評価専用(api)</span>'
           : '<button class="mini primary" ' + (busy ? 'disabled' : '') +
@@ -1664,9 +1808,11 @@ function renderCandBody() {
           '</option>').join('') + '</select>' +
         (c.engineIssue ? '<div style="font-size:10px;color:#6b7280" title="GitHub の engine: ラベル/本文行で指定済み（優先）">GH指定: ' +
           esc(c.engineIssue) + '</div>' : '');
-      return '<tr' + rowBg + '><td>' + (c.type === 'pr'
-        ? '<span class="badge-pr">pr #' + c.number + '</span>'
-        : esc(c.type) + ' #' + c.number) + '</td>' +
+      return '<tr' + rowBg + '><td><a href="' + esc(c.url) +
+        '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">' +
+        (c.type === 'pr'
+          ? '<span class="badge-pr">pr #' + c.number + '</span>'
+          : esc(c.type) + ' #' + c.number) + '</a></td>' +
       '<td style="white-space:nowrap">' + assessCell + '</td>' +
       '<td style="white-space:normal;min-width:220px;max-width:560px;word-break:break-all"><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener">' + esc(c.title) + '</a></td>' +
@@ -1678,7 +1824,10 @@ function renderCandBody() {
       '<td>' + fmt(c.createdAt) + '</td>' +
       '<td>' + (c.runningLabel ? 'running ラベル付き(起動中/取残し)' :
                 c.state ? 'state: ' + c.state : '') +
-        (c.createdPr ? ' → ' + esc(String(c.createdPr).split(' ').pop()) : '') + '</td></tr>';
+        (remPr ? ' → <a href="https://github.com/' + esc(remPr[1]) + '/pull/' + remPr[2] +
+          '" target="_blank" rel="noopener">pr#' + remPr[2] + '</a>'
+          : c.createdPr ? ' → ' + esc(String(c.createdPr).split(' ').pop()) : '') +
+        '</td></tr>';
     }).join('');
     const skillSel = (id, opts, cur) =>
       '<select style="font-size:12px;width:78px" title="使用する skills/*.md" ' +
@@ -1691,7 +1840,7 @@ function renderCandBody() {
         '<br>' + skillSel('a', skillOpts.assess, pickAssess) + '</th>' +
       '<th title="GitHub の課題タイトル（クリックで GitHub を開く）">タイトル</th>' +
       '<th title="候補になった経路&#10;自動(新規): 起点以降に作成された未処理課題&#10;devin ラベル: 明示的にラベル指定">トリガー</th>' +
-      '<th title="対応: 実装の実行指示を送信">対応' +
+      '<th title="対応: 実装の実行指示を送信&#10;PR中#N: 対応が PR へ移行し PR 側で継続中（クリックで PR を開く）">対応' +
         '<br>' + skillSel(selId, selId === 'p' ? skillOpts.pr : skillOpts.impl,
           selId === 'p' ? pickPr : pickImpl) + '</th>' +
       '<th title="課題単位の実行エンジン&#10;自動=GitHub の engine: 指定 → 全体設定の順に解決&#10;GH指定=issue/PR のラベルまたは本文行で指定済み">エンジン</th>' +

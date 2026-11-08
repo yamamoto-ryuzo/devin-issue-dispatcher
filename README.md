@@ -127,9 +127,9 @@ curl.exe -X POST -H "X-Panel: 1" -d "{\"key\":\"yamamoto-ryuzo/portal issue#21\"
 
 外部 AI・ツールから dispatcher を操作する受け口は3系統ある:
 
-1. **HTTP API（`127.0.0.1:8585`）** — 直接叩ける最も簡単な経路。POST は `X-Panel: 1` ヘッダ必須
-2. **MCP（stdio・`mcp-server.mjs`＝`issue-queue`）** — Devin IDE エージェント向け pull 型（`queue_list`/`queue_claim`/`queue_done`）
-3. **KASUGAI Canvas AI チャットの REST コネクタ** — Canvas 側の汎用コネクタ基盤（`web/shared/rest-connectors.js`）に内蔵コネクタとして `dispatcher*` ツールが宣言されている。bridge-hub(8511) の `/agent`・`/mcp` パイプラインに乗ってブラウザから本 API が呼ばれる（ハブ側の改造は不要）。他サービスも同基盤のコネクタ定義追加でツール化できる
+1. **HTTP MCP（`POST http://127.0.0.1:8585/mcp`・Streamable HTTP）— 推奨**。`initialize`/`tools/list`/`tools/call` を実装し、管理系ツール（`status`/`candidates`/`dispatch`/`chat_task`/`chat_send`/`kill`/`issue_create` 等26種）を公開。`tools/call` は `/api/*` への内部プロキシで検証ロジックは API と共通。書き込み系は MCP annotations（`readOnlyHint:false`・`destructiveHint`）でマーキング済み。**X-Panel は不要**（application/json POST は preflight 必須のため CORS で外部オリジンを遮断済み）。KASUGAI Canvas は mcp.js の内蔵サーバー `agent` として自動登録・自動接続される。任意の MCP クライアントから `{url: "http://127.0.0.1:8585/mcp"}` で接続可能
+2. **HTTP API（`127.0.0.1:8585`）** — 直接叩ける経路。POST は `X-Panel: 1` ヘッダ必須
+3. **MCP（stdio・`mcp-server.mjs`＝`issue-queue`）** — Devin IDE エージェント向け pull 型（`queue_list`/`queue_claim`/`queue_done`）。課題の引受専用で管理系は含まない
 
 HTTP API 一覧（POST は `X-Panel: 1` 必須）:
 

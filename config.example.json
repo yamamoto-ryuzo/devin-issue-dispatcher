@@ -23,7 +23,10 @@
   "controlPort": 8585,
   "devinExtraArgs": [],
   "repos": [
-    { "path": "C:\\devin\\repo1", "github": "owner/repo1" }
+    {
+      "path": "C:\\devin\\repo1",
+      "github": "owner/repo1"
+    }
   ],
   "candidateCacheSec": 120,
   "maxConcurrentAssess": 5,
@@ -36,5 +39,6 @@
   "apiUrl": "",
   "apiModel": "",
   "apiKey": "secrets.json に保存すること（このファイルには書かない）",
-  "extraPrompt": ""
+  "extraPrompt": "",
+  "toolMaxSteps": 10
 }
