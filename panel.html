@@ -194,13 +194,13 @@
     <div class="h3">課題整理（目的 → Issue 化）</div>
     <div class="row" style="margin-bottom:10px">
       <label style="font-size:12px">対象リポジトリ
-        <select id="sv-repo" style="font-size:12px;min-width:240px" onchange="document.getElementById('sv-goal-sel').value='';loadGoal();loadGoals()"></select></label>
-      <button class="primary" style="font-size:14px;padding:10px 22px" onclick="surveyExtract()">課題抽出</button>
+        <select id="sv-repo" style="font-size:12px;min-width:240px" onchange="document.getElementById('sv-goal-sel').value='';loadGoal();loadGoals();svReset()"></select></label>
+      <button id="sv-extract" class="primary" style="font-size:14px;padding:10px 22px" onclick="surveyExtract()">課題抽出</button>
       <span style="font-size:12px;color:#6b7280">抽出はチャットセッションで実行（結果はチャットタブに表示）</span>
     </div>
     <div class="row" style="margin-bottom:6px">
       <label style="display:block;font-size:12px;flex:1">保存済みの目的
-        <select id="sv-goal-sel" style="font-size:12px;width:100%" onchange="loadGoal()"></select></label>
+        <select id="sv-goal-sel" style="font-size:12px;width:100%" onchange="loadGoal();svReset()"></select></label>
     </div>
     <div class="row" style="margin-bottom:6px">
       <button class="mini" onclick="saveGoal()">保存</button>
@@ -208,14 +208,14 @@
       <span style="font-size:12px;color:#6b7280">リポジトリごとに保存し、選択して再編集できます</span>
     </div>
     <label style="display:block;font-size:12px;font-weight:600;color:#4b5563;margin-bottom:10px">どのようなことをしたいか（目的・要望）
-      <textarea id="sv-goal" placeholder="例: ◯◯機能を追加したい、△△のエラーを直したい、□□を改善したい（空欄なら現状から課題候補を抽出）" onpaste="onGoalPaste(event)" style="display:block;width:100%;max-width:960px;height:180px;margin-top:4px;font-size:14px;font-family:inherit;padding:10px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false"></textarea>
+      <textarea id="sv-goal" placeholder="例: ◯◯機能を追加したい、△△のエラーを直したい、□□を改善したい（空欄なら現状から課題候補を抽出）" onpaste="onGoalPaste(event)" oninput="svReset()" style="display:block;width:100%;max-width:960px;height:180px;margin-top:4px;font-size:14px;font-family:inherit;padding:10px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false"></textarea>
       <div id="sv-goal-imgs" style="margin-top:4px"></div>
       <span style="font-size:12px;color:#6b7280">スクリーンショットを貼り付けできます（Ctrl+V）。課題抽出時に画像パスをプロンプトへ添付します</span></label>
     <div id="iss-proposals" style="margin-bottom:10px"></div>
     <div style="display:flex;flex-direction:column;gap:6px;max-width:720px">
       <input id="iss-title" placeholder="Issue タイトル" style="font-size:13px;padding:6px 8px;border:1px solid #d1d7e0;border-radius:6px">
       <textarea id="iss-body" placeholder="本文（機能追加・エラー修正の内容）" style="height:140px;font-size:12px;font-family:inherit;padding:8px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false"></textarea>
-      <div class="row"><button class="mini primary" onclick="issueCreate()">Issue作成</button>
+      <div class="row"><button class="mini primary" onclick="issueCreate()">ISSUE登録</button>
         <span id="iss-result" style="font-size:12px"></span></div>
     </div>
   </div>
@@ -257,7 +257,7 @@
   <div id="tab-tasks" class="tabpanel">
     <div class="h3">処理履歴（state.json）</div>
     <table>
-      <thead><tr><th>課題</th><th>状態</th><th>評価</th><th>開始</th><th>終了</th><th>exit</th><th></th></tr></thead>
+      <thead><tr><th>課題</th><th>状態</th><th>評価</th><th>開始</th><th>終了</th><th>exit</th><th>エンジン</th><th></th></tr></thead>
       <tbody id="tasks"></tbody>
     </table>
   </div>
@@ -275,10 +275,19 @@
   </div>
 
   <div id="tab-cfg" class="tabpanel">
-    <div class="h3">設定（config.json の有効値）</div>
-    <dl class="kv" id="cfg"></dl>
-    <div class="h3" style="margin-top:16px">更新タイミングの変更</div>
+    <div class="tabs" id="cfgtabs" style="margin-bottom:10px">
+      <button data-ctab="view" class="active" onclick="showCfgTab('view')">概要</button>
+      <button data-ctab="watch" onclick="showCfgTab('watch')">監視・共通</button>
+      <button data-ctab="assess" onclick="showCfgTab('assess')">評価</button>
+      <button data-ctab="impl" onclick="showCfgTab('impl')">対応</button>
+      <button data-ctab="engine" onclick="showCfgTab('engine')">AI</button>
+    </div>
+    <div id="cfg-view" class="cfgpanel">
+      <div class="h3">設定（config.json の有効値）</div>
+      <dl class="kv" id="cfg"></dl>
+    </div>
 
+    <div id="cfg-watch" class="cfgpanel" style="display:none">
     <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
       <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px">監視・共通</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px;align-items:end">
@@ -288,7 +297,9 @@
         <label>autoTriggerSince<br><input id="set-since" type="text" placeholder="all / ISO時刻 / 空=初回起動" style="width:150px"></label>
       </div>
     </div>
+    </div>
 
+    <div id="cfg-assess" class="cfgpanel" style="display:none">
     <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
       <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px">評価</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px;align-items:end">
@@ -296,7 +307,79 @@
         <label>判定の鮮度 (時間)<br><input id="set-assess-age" type="number" min="1" style="width:60px"></label>
       </div>
     </div>
+    </div>
 
+    <div id="cfg-engine" class="cfgpanel" style="display:none">
+    <div class="tabs" id="engtabs" style="margin-bottom:8px">
+      <button data-etab="chat" class="active" onclick="showEngTab('chat')">チャット (AI)</button>
+      <button data-etab="bridge" onclick="showEngTab('bridge')">ブリッジ設定</button>
+      <button data-etab="extra" onclick="showEngTab('extra')">追加指示</button>
+      <button data-etab="data" onclick="showEngTab('data')">データソース</button>
+      <button data-etab="plugin" onclick="showEngTab('plugin')">プラグイン</button>
+    </div>
+
+    <div id="engt-chat" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
+      <label style="display:block;margin-bottom:6px">AI プロバイダ<br>
+        <select id="set-engine" style="width:320px" onchange="engFields()">
+          <option value="devin">【CLI】Devin</option>
+          <option value="copilot">【ブリッジ】GitHub Copilot</option>
+          <option value="antigravity">【ブリッジ】Antigravity</option>
+          <option value="api">【API】汎用（OpenAI互換）</option></select></label>
+      <div id="eng-desc" style="color:#6b7280;margin:6px 0;max-width:560px"></div>
+      <div id="eng-api" style="display:none">
+        <label style="display:block;margin-bottom:6px">プリセット<br>
+          <select id="set-apipreset" style="width:320px" onchange="engPreset()">
+            <option value="">（カスタム）</option>
+            <option value="https://api.ai.sakura.ad.jp/v1">【API】さくらAIEngine</option>
+            <option value="https://api.openai.com/v1">【API】OpenAI</option>
+            <option value="https://models.github.ai/inference/v1">【API】GitHub Models</option>
+            <option value="https://generativelanguage.googleapis.com/v1beta/openai">【API】Gemini（OpenAI互換）</option>
+          </select></label>
+        <label style="display:block;margin-bottom:6px">エンドポイント<br>
+          <input id="set-apiurl" type="text" placeholder="https://…/v1（/chat/completions は自動付与）" style="width:320px"></label>
+        <div style="color:#6b7280;margin:6px 0;max-width:560px">
+          セキュリティについて：キーは config.json にのみ保存され、送信先は上のエンドポイントのみです。
+          http（非HTTPS）のエンドポイントを指定するとキーが平文で送信されるため、localhost/127.0.0.1
+          以外では https を使ってください。キー自体を共有ファイルやコードに書き込まないでください。</div>
+        <label style="display:block;margin-bottom:6px">APIキー / トークン<br>
+          <input id="set-apikey" type="password" placeholder="（必要時）" style="width:320px" title="config.json に保存されます（公開リポジトリへはコミットしないよう注意）"></label>
+        <label style="display:inline-block">モデル<br>
+          <input id="set-apimodel" type="text" list="apimodels" placeholder="モデル名" style="width:240px"></label>
+        <datalist id="apimodels"></datalist>
+        <button class="mini" style="margin-left:8px" onclick="fetchModels()" title="エンドポイントからモデル一覧を取得（apiUrl/APIキーは先に保存してください）">モデル一覧を取得</button>
+      </div>
+    </div>
+
+    <div id="engt-bridge" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
+      <label>bridge-hub URL<br><input id="set-bridgehub" type="text" placeholder="http://127.0.0.1:8511" style="width:240px"></label>
+      <button class="mini" style="margin-left:8px" onclick="act('bridge-install')" title="bridge-hub.exe を CDN から取得し自己インストール（127.0.0.1:8511 常駐）">bridge-hub インストール</button>
+      <button class="mini" style="margin-left:8px" onclick="engHealth()" title="bridge-hub の /health へ疎通確認">疎通確認</button>
+      <span id="eng-health" style="margin-left:8px;color:#6b7280"></span>
+      <div style="margin-top:8px;color:#6b7280">
+        ブリッジ経由プロバイダ: GitHub Copilot（copilot CLI）/ Antigravity（agy CLI）/ Devin<br>
+        CANVAS 共通のハブが provider で振り分けます。未導入時は「bridge-hub インストール」で自己インストール。
+      </div>
+    </div>
+
+    <div id="engt-extra" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
+      <label style="display:block">全タスク共通の追加指示<br>
+        <textarea id="set-extraprompt" style="width:100%;height:120px" placeholder="例: コミットメッセージは日本語で / テストが無い場合は最小限の検証に留める 等"></textarea></label>
+      <div style="color:#6b7280">評価・対応・PR・完了確認のすべてのプロンプト末尾に【追加指示】として付与します。スキル自体の編集は「スキル」タブへ。</div>
+    </div>
+
+    <div id="engt-data" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
+      <div style="font-weight:600;margin-bottom:4px">監視リポジトリ</div>
+      <div id="eng-data-repos"></div>
+      <div style="margin-top:8px;color:#6b7280">MCP サーバー: mcp-server.mjs（エンジンへツール提供）</div>
+    </div>
+
+    <div id="engt-plugin" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
+      <div style="font-weight:600;margin-bottom:4px">プラグイン（スキル）</div>
+      <div id="eng-plugin-list"></div>
+      <button class="mini" style="margin-top:6px" onclick="showTab('skills')">スキルタブで編集</button>
+    </div>
+    </div>
+    <div id="cfg-impl" class="cfgpanel" style="display:none">
     <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
       <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px">対応</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px;align-items:end">
@@ -313,6 +396,7 @@
           <option value="medium">medium まで</option>
           <option value="high">high まで(全て)</option></select></label>
       </div>
+    </div>
     </div>
     <div class="row" style="margin-top:10px">
       <button class="mini primary" onclick="saveCfg()">保存</button>
@@ -372,6 +456,59 @@ const API = location.protocol === 'file:' ? 'http://127.0.0.1:8585' : '';
 const H = { 'X-Panel': '1', 'Content-Type': 'text/plain' };
 let status = null;
 
+const ENG_DESC = {
+  devin: 'Devin ACP（devin.exe acp）セッションを使用します。対話・ツール実行・セッション継続に対応した本体エンジンです。',
+  copilot: 'GitHub Copilot を bridge-hub 経由で使用します。bridge-hub.exe（127.0.0.1:8511 常駐）が必要です。',
+  antigravity: 'Antigravity（agy CLI）を bridge-hub 経由で使用します。bridge-hub.exe（127.0.0.1:8511 常駐）が必要です。',
+  api: 'OpenAI 互換 API（/v1/chat/completions）を使用します。単発のテキスト応答のため評価用途向けで、実装（impl）には devin/ブリッジ系を推奨します。',
+};
+function engFields() {
+  const v = document.getElementById('set-engine').value;
+  document.getElementById('eng-desc').textContent = ENG_DESC[v] || '';
+  document.getElementById('eng-api').style.display = v === 'api' ? 'block' : 'none';
+}
+function showEngTab(name) {
+  document.querySelectorAll('#engtabs button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.etab === name));
+  ['chat', 'bridge', 'extra', 'data', 'plugin'].forEach((t) => {
+    const el = document.getElementById('engt-' + t);
+    if (el) el.style.display = t === name ? 'block' : 'none';
+  });
+  if (name === 'plugin') {
+    const el = document.getElementById('eng-plugin-list');
+    if (el && typeof skills !== 'undefined' && skills.length)
+      el.innerHTML = skills.map((s) => '<div>' + esc(s.name) + '</div>').join('');
+  }
+}
+async function engHealth() {
+  const el = document.getElementById('eng-health');
+  el.textContent = '確認中…';
+  try {
+    const u = (document.getElementById('set-bridgehub').value || 'http://127.0.0.1:8511').replace(/\/+$/, '');
+    const r = await fetch(u + '/health');
+    el.textContent = r.ok ? '接続 OK' : 'HTTP ' + r.status;
+  } catch (e) { el.textContent = '未接続'; }
+}
+function engPreset() {
+  const v = document.getElementById('set-apipreset').value;
+  if (v) document.getElementById('set-apiurl').value = v;
+}
+async function fetchModels() {
+  try {
+    const r = await fetch(API + '/api/models', { method: 'POST', headers: H });
+    const j = await r.json();
+    if (!j.ok) return toast('models: ' + (j.error || 'failed'));
+    document.getElementById('apimodels').innerHTML =
+      j.models.map((m) => '<option value="' + esc(m) + '">').join('');
+    toast('モデル一覧: ' + j.models.length + ' 件取得');
+  } catch (e) { toast('models: ' + e.message); }
+}
+function showCfgTab(name) {
+  document.querySelectorAll('#cfgtabs button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.ctab === name));
+  document.querySelectorAll('.cfgpanel').forEach((p) =>
+    p.style.display = p.id === 'cfg-' + name ? '' : 'none');
+}
 function showTab(name) {
   document.querySelectorAll('#tabs button').forEach(b =>
     b.classList.toggle('active', b.dataset.tab === name));
@@ -479,6 +616,14 @@ function fillCfgForm() {
   document.getElementById('set-since').value = c.autoTriggerSince ?? '';
   document.getElementById('set-autocat').value = c.autoCategory ?? 'review';
   document.getElementById('set-autorisk').value = c.maxAutoRisk ?? 'medium';
+  document.getElementById('set-engine').value = c.engine ?? 'devin';
+  document.getElementById('set-bridgehub').value = c.bridgeHub ?? '';
+  document.getElementById('set-apiurl').value = c.apiUrl ?? '';
+  document.getElementById('set-apimodel').value = c.apiModel ?? '';
+  document.getElementById('set-extraprompt').value = c.extraPrompt ?? '';
+  const rd = document.getElementById('eng-data-repos');
+  if (rd) rd.innerHTML = (c.repos || []).map((r) => '<div>' + esc(r) + '</div>').join('');
+  engFields();
   document.getElementById('set-assess-age').value = c.assessMaxAgeHours ?? 24;
 }
 
@@ -495,6 +640,12 @@ async function saveCfg() {
     autoTriggerSince: since === '' ? null : since,
     autoCategory: document.getElementById('set-autocat').value,
     maxAutoRisk: document.getElementById('set-autorisk').value,
+    engine: document.getElementById('set-engine').value,
+    bridgeHub: document.getElementById('set-bridgehub').value.trim(),
+    apiUrl: document.getElementById('set-apiurl').value.trim(),
+    apiModel: document.getElementById('set-apimodel').value.trim(),
+    extraPrompt: document.getElementById('set-extraprompt').value,
+    ...(document.getElementById('set-apikey').value ? { apiKey: document.getElementById('set-apikey').value } : {}),
     assessMaxAgeHours: +document.getElementById('set-assess-age').value || undefined,
   };
   try {
@@ -711,6 +862,16 @@ const awaitAssess = new Map(); // key -> since: 評価完了を待っている�
 const localBusy = new Map(); // 押下直後から即反映するローカルの実行中キー ("key assess"形式) -> 追加時刻
 const localWait = new Set(); // 待機キューへ入れた直後から即反映するローカルの待機キー ("key impl"形式)
 
+async function setTaskEngine(key, v) {
+  const r = await fetch(API + '/api/task-engine', {
+    method: 'POST', headers: H, body: JSON.stringify({ key, engine: v || null }),
+  });
+  const j = await r.json();
+  if (!j.ok) return toast('エンジン設定失敗: ' + (j.error || ''));
+  toast('エンジン指定 ' + (v || '自動（→' + (j.resolved || '?') + '）') + ': ' + key.split(' ').pop());
+  loadCandidates(false);
+}
+
 async function assess(key) {
   try {
     const r = await fetch(API + '/api/chat/task', {
@@ -840,11 +1001,12 @@ async function refresh() {
         '/' + esc(t.assess.risk || '?') : '-') + '</td>' +
     '<td>' + fmt(t.startedAt) + '</td><td>' +
     fmt(t.finishedAt) + '</td><td>' + (t.exitCode ?? '') + '</td>' +
+    '<td>' + esc(t.engineUsed || t.engine || '') + '</td>' +
     '<td>' + ((t.status === 'failed' || t.status === 'needs-review' || t.status === 'rejected')
       && !manualSet.has(t.key)
       ? '<button class="mini" onclick="dispatch(\'' + esc(t.key) + '\')">再実行</button>' : '') +
     '</td></tr>').join('') ||
-    '<tr><td colspan="7" style="color:#6b7280">履歴なし</td></tr>';
+    '<tr><td colspan="8" style="color:#6b7280">履歴なし</td></tr>';
 
   const lg = await (await fetch(API + (logKey
     ? '/api/tasklog?key=' + encodeURIComponent(logKey) + '&n=150'
@@ -1048,6 +1210,8 @@ async function delGoal() {
 async function surveyExtract() {
   const repo = document.getElementById('sv-repo').value;
   if (!repo) return toast('リポジトリを選択してください');
+  // 旧抽出結果をリセット（前回の候補・起票先を残さない）
+  svReset();
   const goal = document.getElementById('sv-goal').value.trim();
   // 貼り付け画像はファイルへ保存し、パスをプロンプトへ添付
   const shotPaths = [];
@@ -1077,18 +1241,44 @@ async function surveyExtract() {
       method: 'POST', headers: H, body: JSON.stringify({ id: null, text }),
     });
     const j = await r.json();
-    if (j.id) { chatSel = j.id; loadSessions(); pollIssues(j.id); }
+    if (j.id) {
+      surveyRepo = repo;
+      chatSel = j.id; loadSessions(); pollIssues(j.id);
+      const b = document.getElementById('sv-extract');
+      if (b) { b.disabled = true; b.textContent = '課題抽出中…'; }
+    }
     toast(j.ok ? '課題抽出を送信しました（チャットタブに出力されます）' : '失敗: ' + (j.error || ''));
   } catch (e) { toast('survey: ' + e.message); }
 }
 
+// 多少崩れた JSON（配列の閉じ忘れ・末尾の未完成要素）も救済するパース
+function parseIssuesTxt(txt) {
+  const t = (txt || '').trim();
+  const cands = [t, t + ']', t + '}]',
+    t.replace(/,\s*[^,{[]*$/, '') + ']'];
+  for (const c of cands) {
+    try { const a = JSON.parse(c); if (Array.isArray(a)) return a; } catch { /* next */ }
+  }
+  return null;
+}
 // 抽出結果をチャット履歴から検出し、Issue 候補としてフォームに反映
 let surveyProps = [];
+let surveyRepo = ''; // 抽出時の対象リポジトリ（起票先を誤登録しないよう固定）
+let issuePollIv = null; // 実行中の抽出ポーリング
+// 目的・リポジトリ変更時: 抽出結果とボタン状態・進行中ポーリングをリセット
+function svReset() {
+  surveyProps = []; surveyRepo = '';
+  const pl = document.getElementById('iss-proposals');
+  if (pl) pl.innerHTML = '';
+  const b = document.getElementById('sv-extract');
+  if (b) { b.textContent = '課題抽出'; b.disabled = false; }
+  if (issuePollIv) { clearInterval(issuePollIv); issuePollIv = null; }
+}
 function pollIssues(id) {
   const seen = new Set();
   const all = [];
   let quiet = 0;
-  const iv = setInterval(async () => {
+  const iv = issuePollIv = setInterval(async () => {
     try {
       const j = await (await fetch(API + '/api/chat?id=' + id)).json();
       const before = all.length;
@@ -1096,38 +1286,56 @@ function pollIssues(id) {
       for (const msg of j.messages || []) {
         if (msg.role !== 'agent') continue;
         for (const m of msg.text.matchAll(/<!--issues\s*([\s\S]*?)issues-->/g)) {
-          try {
-            for (const item of JSON.parse(m[1].trim())) {
+          const arr = parseIssuesTxt(m[1]);
+          if (arr) {
+            for (const item of arr) {
               const k = (item.title || '') + '|' + (item.body || '');
               if (!seen.has(k)) { seen.add(k); all.push(item); }
             }
-          } catch { /* malformed */ }
+          }
         }
       }
       if (all.length) renderProps(all);
       quiet = all.length > before ? 0 : quiet + 1;
-      if (all.length && quiet >= 2) clearInterval(iv);
+      const b = document.getElementById('sv-extract');
+      if (b) b.textContent = all.length
+        ? '抽出中… ' + all.length + ' 件検出'
+        : '課題抽出中…（候補待ち）';
+      if ((all.length && quiet >= 2) || j.busy === false) {
+        clearInterval(iv);
+        if (b) {
+          b.textContent = all.length ? '抽出完了 ' + all.length + ' 件' : '課題抽出';
+          b.disabled = false;
+        }
+      }
     } catch { /* noop */ }
   }, 3000);
-  setTimeout(() => clearInterval(iv), 5 * 60 * 1000);
+  setTimeout(() => {
+    clearInterval(iv);
+    const b = document.getElementById('sv-extract');
+    if (b) { b.textContent = '課題抽出'; b.disabled = false; }
+  }, 5 * 60 * 1000);
 }
 function renderProps(list) {
   surveyProps = list;
   document.getElementById('iss-proposals').innerHTML =
     '<div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px">抽出された Issue 候補（' +
-    list.length + '件）</div>' +
+    list.length + '件）' +
+    (surveyRepo ? ' <span style="color:#b45309">起票先: ' + esc(surveyRepo) + '</span>' : '') +
+    ' <button class="mini primary" style="margin-left:8px" onclick="issueCreateAll()">すべてISSUE登録</button></div>' +
     list.map((p, i) =>
       '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin-bottom:6px;background:#f8fafc">' +
       '<input id="prop-t' + i + '" value="' + esc(p.title || '') + '" ' +
       'style="width:100%;font-size:13px;padding:5px 8px;border:1px solid #d1d7e0;border-radius:6px;margin-bottom:4px">' +
       '<textarea id="prop-b' + i + '" style="width:100%;height:80px;font-size:12px;font-family:inherit;' +
       'padding:6px 8px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false">' + esc(p.body || '') + '</textarea>' +
-      '<button id="prop-btn-' + i + '" class="mini primary" style="margin-top:4px" onclick="issueCreateProp(' + i + ')">この内容でIssue作成</button>' +
+      '<button id="prop-btn-' + i + '" class="mini primary" style="margin-top:4px" onclick="issueCreateProp(' + i + ')">ISSUE登録</button>' +
       '<span id="prop-res-' + i + '" style="font-size:12px;margin-left:8px"></span>' +
       '</div>').join('');
 }
 async function issueCreateProp(i) {
-  const repo = document.getElementById('sv-repo').value;
+  // 起票先は抽出時のリポジトリに固定（セレクト変更による誤登録を防止）
+  const repo = surveyRepo || document.getElementById('sv-repo').value;
   const title = document.getElementById('prop-t' + i).value.trim();
   const body = document.getElementById('prop-b' + i).value;
   if (!repo || !title) return toast('リポジトリとタイトルは必須です');
@@ -1145,6 +1353,23 @@ async function issueCreateProp(i) {
       loadCandidates(true);
     }
   } catch (e) { toast('issue: ' + e.message); }
+}
+
+// 全候補を順次登録（作成済みはスキップ）
+async function issueCreateAll() {
+  const n = surveyProps.length;
+  if (!n) return toast('候補がありません');
+  const b = document.getElementById('sv-extract');
+  let done = 0;
+  if (b) b.disabled = true;
+  for (let i = 0; i < n; i++) {
+    const btn = document.getElementById('prop-btn-' + i);
+    if (btn && btn.disabled) { done++; continue; }
+    if (b) b.textContent = 'Issue登録中… ' + (done + 1) + '/' + n;
+    await issueCreateProp(i);
+    if (btn && btn.disabled) done++;
+  }
+  if (b) { b.textContent = '登録完了 ' + done + '/' + n; b.disabled = false; }
 }
 
 // Issue 起票
@@ -1282,6 +1507,15 @@ function renderCandBody() {
         : quedImpl ? badge('#6b7280', '待機中')
         : '<button class="mini primary" ' + (busy ? 'disabled' : '') +
           ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button>';
+      const engCell =
+        '<select style="font-size:11px" title="この課題で使う実行エンジン。自動=GitHub指定→課題指定→全体設定の順に解決" ' +
+        'onchange="setTaskEngine(\'' + esc(c.key) + '\',this.value)">' +
+        '<option value="">自動' + (c.engine ? '（' + esc(c.engine) + '）' : '') + '</option>' +
+        ['devin', 'copilot', 'antigravity', 'api'].map((e) =>
+          '<option value="' + e + '"' + (c.engineReq === e ? ' selected' : '') + '>' + e +
+          '</option>').join('') + '</select>' +
+        (c.engineIssue ? '<div style="font-size:10px;color:#6b7280" title="GitHub の engine: ラベル/本文行で指定済み（優先）">GH指定: ' +
+          esc(c.engineIssue) + '</div>' : '');
       return '<tr' + rowBg + '><td>' + (c.type === 'pr'
         ? '<span class="badge-pr">pr #' + c.number + '</span>'
         : esc(c.type) + ' #' + c.number) + '</td>' +
@@ -1291,6 +1525,7 @@ function renderCandBody() {
       '<td class="' + (c.trigger === 'auto-new' ? 'trig-auto' : 'trig-label') + '">' +
         (c.trigger === 'auto-new' ? '自動(新規)' : 'devin ラベル') + '</td>' +
       '<td>' + implCell + '</td>' +
+      '<td style="white-space:nowrap">' + engCell + '</td>' +
       '<td>' + judge + '</td>' +
       '<td>' + fmt(c.createdAt) + '</td>' +
       '<td>' + (c.runningLabel ? 'running ラベル付き(起動中/取残し)' :
@@ -1311,6 +1546,7 @@ function renderCandBody() {
       '<th title="対応: 実装の実行指示を送信">対応' +
         '<br>' + skillSel(selId, selId === 'p' ? skillOpts.pr : skillOpts.impl,
           selId === 'p' ? pickPr : pickImpl) + '</th>' +
+      '<th title="課題単位の実行エンジン&#10;自動=GitHub の engine: 指定 → 全体設定の順に解決&#10;GH指定=issue/PR のラベルまたは本文行で指定済み">エンジン</th>' +
       '<th title="評価セッションの判定結果&#10;auto: 即対応可 / review: 検討の上対応 / human: 人的判断必須（ユーザー選択）/ reject: 不可・危険&#10;risk: low/medium/high&#10;ホバーで理由も表示">判定</th>' +
       '<th title="課題が作成された日時">作成日時</th>' +
       '<th title="実行中ラベル・過去の処理状態などの補足">備考</th>' +

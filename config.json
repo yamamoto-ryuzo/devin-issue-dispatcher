@@ -72,5 +72,10 @@
   "maxConcurrentAssess": 5,
   "maxConcurrentImpl": 1,
   "maxConcurrentPr": 5,
-  "implLoopMax": 5
+  "implLoopMax": 5,
+  "engine": "devin",
+  "bridgeHub": "http://127.0.0.1:8511",
+  "apiUrl": "",
+  "apiKey": "",
+  "apiModel": ""
 }

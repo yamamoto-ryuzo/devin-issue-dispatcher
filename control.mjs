@@ -54,11 +54,23 @@ const PORT = config.controlPort ?? 8585;
 const PANEL_HEADER = ['x-panel', '1'];
 const SELF_ORIGIN = `http://${HOST}:${PORT}`;
 
-// CORS: 同一オリジンと file://(Origin: null) のみ許可。
-// https://evil.example 等の外部サイトからの読み書きは preflight/レスポンス読取でブロックされる
+// CORS: 同一オリジン・file://(Origin: null)・ループバックの任意ポート
+// （KASUGAI Canvas アプリ 8511/8510 等のローカルツール）・CDN ホスト版
+// (GitHub Pages) を許可。https://evil.example 等の外部サイトからの読み書きは
+// preflight/レスポンス読取でブロックされる。POST は別途 X-Panel ヘッダ必須
+const EXTRA_ORIGINS = new Set(['https://yamamoto-ryuzo.github.io']);
 function corsOrigin(req) {
   const o = req.headers.origin;
-  if (o === 'null' || o === SELF_ORIGIN) return o;
+  if (!o) return null;
+  if (o === 'null' || o === SELF_ORIGIN || EXTRA_ORIGINS.has(o)) return o;
+  try {
+    const u = new URL(o);
+    const h = u.hostname.toLowerCase();
+    if ((u.protocol === 'http:' || u.protocol === 'https:') &&
+        (h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '[::1]')) {
+      return o;
+    }
+  } catch { /* invalid origin */ }
   return null;
 }
 
@@ -123,8 +135,86 @@ function chatCapacity(mode, key) {
     : (config.maxConcurrentImpl ?? config.maxConcurrent ?? 1);
   return busyCount(mode, isPr) < max;
 }
-async function dispatchChatTask(key, mode, skill) {
+// エンジン抽象層: devin=ACPチャット / copilot・antigravity=bridge-hub / api=汎用LLM(OpenAI互換)
+async function engineSend(eng, prompt) {
+  if (eng === 'api') {
+    const url = (config.apiUrl || '').replace(/\/+$/, '');
+    if (!url || !config.apiModel) throw new Error('apiUrl/apiModel 未設定');
+    const r = await fetch(url + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json',
+        ...(config.apiKey ? { Authorization: 'Bearer ' + config.apiKey } : {}) },
+      body: JSON.stringify({ model: config.apiModel,
+        messages: [{ role: 'user', content: prompt }] }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error?.message || 'api ' + r.status);
+    return j.choices?.[0]?.message?.content || '';
+  }
+  // bridge-hub（CANVAS 方式: copilot/devin/antigravity を共通プロトコルで呼ぶ）
+  const hub = (config.bridgeHub || 'http://127.0.0.1:8511').replace(/\/+$/, '');
+  const r = await fetch(hub + '/agent', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: eng, prompt }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'bridge-hub ' + r.status);
+  return j.reply || j.text || '';
+}
+// ---- エンジン解決（課題単位指定 → 全体設定）----
+const ENGINES = ['devin', 'copilot', 'antigravity', 'api'];
+const normEngine = (v) => {
+  const e = String(v ?? '').trim().toLowerCase();
+  return ENGINES.includes(e) ? e : null;
+};
+// issue/PR 側からの指定: ラベル "engine:<name>" → 本文行 "engine: <name>" の順に解釈
+function issueEngine(key, issuesStore) {
+  const it = (issuesStore ?? readIssueStore(ISSUES_PATH).issues)?.[key];
+  if (!it) return null;
+  for (const l of it.labels ?? []) {
+    const m = String(l).match(/^engine\s*[:：]\s*(\S+)$/i);
+    const e = m && normEngine(m[1]);
+    if (e) return e;
+  }
+  const m = String(it.body ?? '').match(/^[ \t>]*engine\s*[:：]\s*([a-zA-Z]+)\s*$/im);
+  return m ? normEngine(m[1]) : null;
+}
+// 解決優先順位: 呼出時の明示指定 > GitHub 側指定(ラベル/本文) > 課題保存指定(engineReq)
+//             > モード別既定(config.engineModes) > config.engine > devin
+function resolveEngine(key, mode, requested, tasksMap, issuesStore) {
+  const tasks = tasksMap ?? loadJson(STATE_PATH, { tasks: {} }).tasks;
+  return normEngine(requested)
+    ?? issueEngine(key, issuesStore)
+    ?? normEngine(tasks?.[key]?.engineReq)
+    ?? normEngine(config.engineModes?.[mode])
+    ?? normEngine(config.engine)
+    ?? 'devin';
+}
+async function dispatchChatTask(key, mode, skill, engine) {
   const p = taskPrompt(key, mode, skill);
+  if (p.text && config.extraPrompt) p.text += '\n\n【追加指示】\n' + config.extraPrompt;
+  const eng = resolveEngine(key, mode, engine);
+  // 実際に使われたエンジンを記録（パネル/ログで追跡）
+  {
+    const st = loadJson(STATE_PATH, { tasks: {} });
+    st.tasks[key] = { ...(st.tasks[key] ?? {}),
+      engineUsed: eng, engineUsedAt: new Date().toISOString() };
+    writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+  }
+  if (eng !== 'devin') {
+    // 非 devin エンジン: エンジン API に送信し、応答を疑似チャットとして watcher に渡す
+    const id = 'eng' + (++chatSeq);
+    const shim = { busy: true, ready: true, proc: true, sessionId: eng,
+      messages: [], label: key + ' ' + mode };
+    chats.set(id, { chat: shim, label: shim.label });
+    engineSend(eng, p.text)
+      .then((t) => { shim.messages.push({ role: 'agent', text: t || '' }); shim.busy = false; })
+      .catch((e) => { shim.messages.push({ role: 'agent', text: '[engine error] ' + e.message }); shim.busy = false; });
+    if (mode === 'assess') watchAssess(key, shim);
+    if (mode === 'split') watchSplit(key, shim);
+    if (mode === 'impl') watchImpl(key, shim);
+    return id;
+  }
   const id = pickChatId(key + ' ' + mode);
   await chats.get(id).chat.send(p.text);
   if (mode === 'assess') watchAssess(key, chats.get(id).chat);
@@ -137,9 +227,9 @@ setInterval(() => {
   (async () => {
     for (let i = chatWait.length - 1; i >= 0; i--) {
       if (!chatCapacity(chatWait[i].mode, chatWait[i].key)) continue;
-      const { key, mode, skill } = chatWait.splice(i, 1)[0];
-      try { await dispatchChatTask(key, mode, skill); }
-      catch { chatWait.push({ key, mode, skill }); }
+      const { key, mode, skill, engine } = chatWait.splice(i, 1)[0];
+      try { await dispatchChatTask(key, mode, skill, engine); }
+      catch { chatWait.push({ key, mode, skill, engine }); }
     }
   })();
 }, 3000).unref?.();
@@ -389,6 +479,11 @@ function status() {
       autoPr: config.autoPr ?? false,
       autoCategory: config.autoCategory ?? 'review',
       maxAutoRisk: config.maxAutoRisk ?? 'medium',
+      engine: config.engine ?? 'devin',
+      bridgeHub: config.bridgeHub ?? 'http://127.0.0.1:8511',
+      apiUrl: config.apiUrl ?? '', apiModel: config.apiModel ?? '',
+      extraPrompt: config.extraPrompt ?? '',
+      repos: (config.repos || []).map((r) => r.github),
       assessMaxAgeHours: config.assessMaxAgeHours ?? 24,
       autoTriggerSince: config.autoTriggerSince ?? null,
       permissionMode: config.permissionMode ?? 'dangerous',
@@ -452,9 +547,10 @@ async function candidates(force) {
 
   // state は常に最新で付与（キャッシュは課題の「存在」のみ保存）
   const state = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+  const issuesAll = readIssueStore(ISSUES_PATH).issues ?? {};
   // 全 open 課題数（issues.json ストア由来。repo 別の総件数表示用）
   const openCounts = {};
-  for (const [key, v] of Object.entries(readIssueStore(ISSUES_PATH).issues ?? {})) {
+  for (const [key, v] of Object.entries(issuesAll)) {
     openCounts[v.repo] = (openCounts[v.repo] ?? 0) + 1;
   }
   return {
@@ -466,7 +562,11 @@ async function candidates(force) {
       const key = keyOf(c.repo, c.type, c.number);
       const t = state.tasks?.[key];
       return { key, ...c, state: t?.status ?? null, assess: t?.assess ?? null,
-        createdPr: t?.createdPr ?? null };
+        createdPr: t?.createdPr ?? null,
+        engineReq: t?.engineReq ?? null,
+        engineIssue: issueEngine(key, issuesAll),
+        engine: resolveEngine(key, null, null, state.tasks, issuesAll),
+        engineUsed: t?.engineUsed ?? null };
     }),
   };
 }
@@ -488,6 +588,8 @@ const server = createServer(async (req, res) => {
       'Access-Control-Allow-Headers': 'X-Panel',
       'Access-Control-Allow-Methods': 'GET, POST',
       'Access-Control-Max-Age': '600',
+      // public→private 通信（CDN ホスト版から localhost API 利用）に必要
+      'Access-Control-Allow-Private-Network': 'true',
     });
     return res.end();
   }
@@ -551,7 +653,8 @@ const server = createServer(async (req, res) => {
           'maxConcurrent', 'maxConcurrentAssess', 'maxConcurrentImpl', 'maxConcurrentPr',
           'autoDiscover', 'autoTrigger', 'autoAssess', 'autoPr', 'autoCategory',
           'maxAutoRisk',
-          'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax'];
+          'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax',
+          'engine', 'bridgeHub', 'apiUrl', 'apiKey', 'apiModel', 'extraPrompt'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
         const applied = {};
@@ -636,6 +739,26 @@ const server = createServer(async (req, res) => {
           return json(200, { ok: true });
         } catch (e) { return json(500, { ok: false, error: e.message }); }
       }
+      if (url.pathname === '/api/models') {
+        // 汎用 API エンドポイントのモデル一覧を取得（OpenAI互換 GET /v1/models）
+        const u = (config.apiUrl || '').replace(/\/+$/, '');
+        if (!u) return json(400, { ok: false, error: 'apiUrl 未設定' });
+        const r = await fetch(u + '/models',
+          { headers: config.apiKey ? { Authorization: 'Bearer ' + config.apiKey } : {} });
+        const j = await r.json().catch(() => null);
+        if (!r.ok || !j?.data) return json(502, { ok: false, error: 'models ' + r.status });
+        return json(200, { ok: true, models: j.data.map((m) => m.id).filter(Boolean) });
+      }
+      if (url.pathname === '/api/bridge-install') {
+        // bridge-hub.exe を CDN から取得して自己インストール（8511 常駐）を起動
+        const url0 = 'https://yamamoto-ryuzo.github.io/kasugai-canvas-web/stable/download/bridge-hub.exe';
+        const dst = join(ROOT, 'bridge-hub.exe');
+        const r = await fetch(url0);
+        if (!r.ok) return json(500, { ok: false, error: 'download ' + r.status });
+        writeFileSync(dst, Buffer.from(await r.arrayBuffer()));
+        spawn(dst, [], { detached: true, stdio: 'ignore' }).unref();
+        return json(200, { ok: true, path: dst });
+      }
       if (url.pathname === '/api/verdict') {
         // パネルから判定を手動上書き（相反するが価値ある課題のユーザー判断の委ね先）
         const { key, category } = JSON.parse((await readBody(req)) || '{}');
@@ -697,29 +820,50 @@ const server = createServer(async (req, res) => {
       }
       if (url.pathname === '/api/chat/task') {
         // パネルの「評価」「対応」ボタン → 空き/新規セッションへ自動送信
-        const { key, mode, skill } = JSON.parse((await readBody(req)) || '{}');
+        // engine 指定時はそのエンジンで実行（未指定は課題指定→config.engine の順に解決）
+        const { key, mode, skill, engine } = JSON.parse((await readBody(req)) || '{}');
         const p = taskPrompt(key, mode, skill);
         if (!p) return json(400, { ok: false, error: 'bad key: ' + key });
         if (p.error) return json(400, { ok: false, error: p.error });
         try {
           if (!chatCapacity(mode, key)) {
-            chatWait.push({ key, mode, skill });
+            chatWait.push({ key, mode, skill, engine });
             return json(202, { ok: true, queued: true });
           }
-          const id = await dispatchChatTask(key, mode, skill);
+          const id = await dispatchChatTask(key, mode, skill, engine);
           return json(200, { ok: true, id });
         }
         catch (e) { return json(500, { ok: false, error: e.message }); }
+      }
+      if (url.pathname === '/api/task-engine') {
+        // 課題単位のエンジン指定（engineReq）を設定/解除。空欄で解除=全体設定に従う
+        const { key, engine } = JSON.parse((await readBody(req)) || '{}');
+        if (!/^(\S+)\s+(issue|pr)#(\d+)$/.test(String(key ?? ''))) {
+          return json(400, { ok: false, error: 'bad key: ' + key });
+        }
+        const e = engine == null || engine === '' ? null : normEngine(engine);
+        if (engine != null && engine !== '' && !e) {
+          return json(400, { ok: false, error: 'unknown engine: ' + engine });
+        }
+        const st = loadJson(STATE_PATH, { tasks: {} });
+        st.tasks[key] = { ...(st.tasks[key] ?? {}) };
+        if (e) st.tasks[key].engineReq = e; else delete st.tasks[key].engineReq;
+        writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+        return json(200, { ok: true, engineReq: e, resolved: resolveEngine(key, null, null) });
       }
       if (url.pathname === '/api/dispatch' || url.pathname === '/api/assess') {
         // 実行キュー登録: 実実行は Devin IDE のチャットエージェントが
         // MCP (issue-queue) 経由で queue_claim → 実行 → queue_done する
         const isAssess = url.pathname === '/api/assess';
-        const { key } = JSON.parse((await readBody(req)) || '{}');
+        const { key, engine } = JSON.parse((await readBody(req)) || '{}');
         const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
         if (!m) return json(400, { ok: false, error: 'bad key: ' + key });
         const repo = config.repos?.find((r) => r.github === m[1]);
         if (!repo) return json(400, { ok: false, error: 'repo not monitored: ' + m[1] });
+        const eng = engine == null ? null : normEngine(engine);
+        if (engine != null && !eng) {
+          return json(400, { ok: false, error: 'unknown engine: ' + engine });
+        }
         const q = loadJson(join(ROOT, 'work-queue.json'), { items: [] });
         if (q.items.some((i) => i.key === key && i.mode === (isAssess ? 'assess' : 'impl'))) {
           return json(409, { ok: false, error: 'already queued: ' + key });
@@ -729,6 +873,7 @@ const server = createServer(async (req, res) => {
           key, mode: isAssess ? 'assess' : 'impl',
           repo, type: m[2], number: +m[3],
           title: it.title ?? '', url: it.url ?? '', body: it.body ?? '',
+          ...(eng ? { engine: eng } : {}),
           status: 'pending', queuedAt: new Date().toISOString(),
         });
         writeFileSync(join(ROOT, 'work-queue.json'), JSON.stringify(q, null, 2));
@@ -786,8 +931,9 @@ const server = createServer(async (req, res) => {
         ? 'index.html' : url.pathname.slice('/docs/'.length);
       if (!/^[\w-]+\.html$/.test(name)) return json(403, { ok: false });
       try {
+        const html = readFileSync(join(ROOT, 'docs', name));
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        return res.end(readFileSync(join(ROOT, 'docs', name)));
+        return res.end(html);
       } catch { return json(404, { ok: false, error: 'docs not found' }); }
     }
     if (url.pathname === '/api/status') return json(200, status());
