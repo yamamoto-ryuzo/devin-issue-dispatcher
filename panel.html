@@ -70,6 +70,20 @@
   .csess .x { margin-left: 6px; opacity: .55; }
   #chat-input { display: flex; gap: 8px; margin-top: 8px; }
   #chat-input input { flex: 1; }
+  #ai-box { height: 480px; overflow-y: auto; border: 1px solid #dfe3ea; border-radius: 8px;
+    padding: 10px; background: #f8fafc; }
+  #ai-input { display: flex; gap: 8px; margin-top: 8px; }
+  #ai-input input { flex: 1; }
+  .ai-msg { margin: 6px 0; padding: 8px 10px; border-radius: 8px; max-width: 85%;
+    white-space: pre-wrap; word-break: break-word; font-size: 13px; }
+  .ai-msg.user { margin-left: auto; background: #dbeafe; }
+  .ai-msg.bot { background: #fff; border: 1px solid #e2e8f0; }
+  .ai-msg.sys { background: transparent; color: #6b7280; font-size: 12px;
+    max-width: 100%; padding: 2px 4px; }
+  .ai-tool { font-size: 12px; margin: 4px 0; padding: 6px 8px; background: #f1f5f9;
+    border-left: 3px solid #94a3b8; border-radius: 4px; max-width: 85%; }
+  .ai-tool summary { cursor: pointer; color: #475569; }
+  .ai-tool pre { margin: 4px 0 0; max-height: 160px; overflow: auto; font-size: 11px; }
   .jd { font-weight: 600; font-size: 11px; }
   .swseg { display: inline-flex; border: 1px solid #d1d7e0; border-radius: 8px; overflow: hidden; }
   .swseg button { border: 0; border-radius: 0; padding: 8px 14px; }
@@ -183,6 +197,7 @@
   <button data-tab="tasks" onclick="showTab('tasks')">処理履歴</button>
   <button data-tab="cfg" onclick="showTab('cfg')">設定</button>
   <button data-tab="chat" onclick="showTab('chat')">チャット</button>
+  <button data-tab="ai" onclick="showTab('ai')">AI</button>
   <button data-tab="skills" onclick="showTab('skills')">スキル</button>
   <button data-tab="log" onclick="showTab('log')">ログ</button>
   <button data-tab="docs" onclick="showTab('docs')">ドキュメント</button>
@@ -426,6 +441,19 @@
       <button class="primary" onclick="chatSend()">送信</button>
     </div>
   </div>
+  <div id="tab-ai" class="tabpanel">
+    <div class="h3">AI アシスタント（管理ツール対応・OpenAI 互換 API）
+      <span id="ai-meta" style="font-weight:400;color:#6b7280"></span>
+      <button class="mini" onclick="aiClear()">クリア</button></div>
+    <div id="ai-box">
+      <div class="ai-msg sys">apiUrl/apiModel/キーは設定タブ「AI」で指定。課題一覧・評価/対応のディスパッチ・ログ参照などをツール経由で実行できます</div>
+    </div>
+    <div id="ai-input">
+      <input id="ai-text" placeholder="指示を入力（Enter で送信）"
+             onkeydown="if(event.key==='Enter')aiSend()">
+      <button class="primary" id="ai-send" onclick="aiSend()">送信</button>
+    </div>
+  </div>
   <div id="tab-skills" class="tabpanel">
     <div class="h3">スキル（skills/*.md — プロンプト末尾に注入される追加指示）</div>
     <div id="skill-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
@@ -554,6 +582,7 @@ function showTab(name) {
     const pre = document.getElementById('log');
     pre.scrollTop = pre.scrollHeight;
   }
+  if (name === 'ai') aiMeta();
 }
 
 function toast(msg) {
@@ -901,6 +930,77 @@ async function loadChat() {
       '<div class="msg sys">「評価」「対応」ボタンでプロンプトを自動送信できます</div>';
     if (atBottom) box.scrollTop = box.scrollHeight;
   } catch { /* noop */ }
+}
+
+// ---- AI アシスタント（CANVAS AI タブ相当: LLM + 管理ツール呼出ループ）----
+// サーバー側 /api/ai/chat が MCP_TOOLS と同一のツール面で OpenAI 互換 LLM を回す。
+// フロントは会話履歴（user/assistant の本文のみ）を保持し、ツール実行結果は
+// 表示専用（サーバーがそのターン内で完結して処理する）
+let aiHist = [];
+function aiScroll() {
+  const b = document.getElementById('ai-box');
+  b.scrollTop = b.scrollHeight;
+}
+function aiBubble(role, text) {
+  const d = document.createElement('div');
+  d.className = 'ai-msg ' + role;
+  d.textContent = text;
+  document.getElementById('ai-box').appendChild(d);
+  aiScroll();
+}
+function aiTool(c) {
+  const d = document.createElement('details');
+  d.className = 'ai-tool';
+  const sum = document.createElement('summary');
+  sum.textContent = 'ツール: ' + c.name + '(' + JSON.stringify(c.args ?? {}) + ')';
+  const pre = document.createElement('pre');
+  pre.textContent = JSON.stringify(c.result, null, 2);
+  d.appendChild(sum); d.appendChild(pre);
+  document.getElementById('ai-box').appendChild(d);
+  aiScroll();
+}
+async function aiMeta() {
+  try {
+    const j = await (await fetch(API + '/api/status')).json();
+    const m = j.config?.apiModel || '';
+    const k = j.config?.apiKeySet === false ? '・キー未設定' : '';
+    document.getElementById('ai-meta').textContent =
+      m ? '（' + m + k + '）' : '（apiUrl/apiModel 未設定）';
+  } catch { /* noop */ }
+}
+async function aiSend() {
+  const el = document.getElementById('ai-text');
+  const text = el.value.trim();
+  if (!text) return;
+  el.value = '';
+  aiHist.push({ role: 'user', content: text });
+  aiBubble('user', text);
+  const thinking = document.createElement('div');
+  thinking.className = 'ai-msg bot';
+  thinking.textContent = '…';
+  document.getElementById('ai-box').appendChild(thinking); aiScroll();
+  document.getElementById('ai-send').disabled = true;
+  try {
+    const r = await fetch(API + '/api/ai/chat', { method: 'POST', headers: H,
+      body: JSON.stringify({ messages: aiHist }) });
+    const j = await r.json();
+    thinking.remove();
+    if (!j.ok) { aiBubble('sys', 'エラー: ' + (j.error || r.status)); return; }
+    for (const c of j.calls || []) aiTool(c);
+    aiHist.push({ role: 'assistant', content: j.reply || '' });
+    aiBubble('bot', j.reply || '（応答なし）');
+    if (j.truncated) aiBubble('sys', 'ツール往復上限に達しました');
+  } catch (e) {
+    thinking.remove();
+    aiBubble('sys', '通信エラー: ' + e.message);
+  } finally {
+    document.getElementById('ai-send').disabled = false;
+  }
+}
+function aiClear() {
+  aiHist = [];
+  document.getElementById('ai-box').innerHTML =
+    '<div class="ai-msg sys">履歴をクリアしました</div>';
 }
 
 // 評価/対応ボタン → チャットへプロンプト自動送信（タブ移動はしない）
