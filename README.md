@@ -249,6 +249,11 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 - キーを config.json・共有ファイル・ログ・プロンプト注入へ書き込まない
 - `config.example.json` に追跡対象へキーが入らない構成の例を置いてある
 - 将来追加するシークレット（MCP トークン等）も同じく secrets.json に保存する
+- bridge-hub がプロバイダ別 Bearer（`COPILOT_BRIDGE_TOKEN` 等）を要求する場合は、
+  `secrets.json` の `bridgeTokens`（`{"copilot":"...","devin":"...","antigravity":"..."}`。
+  全プロバイダ共通なら `bridgeToken`）へ同じ値を保存する。未設定時は同名環境変数
+  （`<PROVIDER>_BRIDGE_TOKEN`）を参照し、両方無ければ無認証で送信する
+  （ハブ側もトークン未設定なら無認証を許可する loopback 前提構成）
 
 ## ファイル
 

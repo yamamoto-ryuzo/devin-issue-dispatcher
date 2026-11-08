@@ -26,7 +26,9 @@ export function assertApiUrlSafe(raw) {
 }
 
 // cfg: {apiUrl, apiModel, bridgeHub, bridgeModels}
-export async function engineSendCore(cfg, apiKey, eng, prompt) {
+// bridgeToken: ハブ側がプロバイダ別 Bearer（COPILOT_BRIDGE_TOKEN 等）を
+// 設定している場合の Authorization: Bearer 値（未設定なら無認証で送信）
+export async function engineSendCore(cfg, apiKey, eng, prompt, bridgeToken = '') {
   if (eng === 'api') {
     const url = (cfg.apiUrl || '').replace(/\/+$/, '');
     if (!url || !cfg.apiModel) throw new Error('apiUrl/apiModel 未設定');
@@ -43,13 +45,21 @@ export async function engineSendCore(cfg, apiKey, eng, prompt) {
     return j.choices?.[0]?.message?.content || '';
   }
   const hub = (cfg.bridgeHub || 'http://127.0.0.1:8511').replace(/\/+$/, '');
+  // bridge-hub POST /agent 仕様: 本文は {provider, message, project, model,
+  // history, ...}。プロンプトは message キーで送る（prompt は読まれない）。
+  // 応答は {reply, actions}。actions はブラウザ実行用の地図操作ツールキューで
+  // dispatcher は実行主体を持たないため無視し、reply のみを使う。
   const r = await fetch(hub + '/agent', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider: eng, prompt,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json',
+      ...(bridgeToken ? { Authorization: 'Bearer ' + bridgeToken } : {}) },
+    body: JSON.stringify({ provider: eng, message: prompt,
+      project: 'agent-dispatcher',
       ...(cfg.bridgeModels?.[eng] ? { model: cfg.bridgeModels[eng] } : {}) }),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || 'bridge-hub ' + r.status);
+  if (!r.ok) throw new Error((j.error || 'bridge-hub ' + r.status) +
+    (r.status === 401 ? '（ハブ側で *_BRIDGE_TOKEN が設定済み。secrets.json の bridgeTokens.<provider> へ同じ値を設定してください）' : ''));
   return j.reply || j.text || '';
 }
 

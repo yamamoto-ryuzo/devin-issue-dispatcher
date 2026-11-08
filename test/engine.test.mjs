@@ -32,10 +32,19 @@ test('engineSend copilot: bridge-hub /agent 仕様とエラー解釈', async () 
   assert.equal(out, 'RE');
   assert.equal(got.url, 'http://127.0.0.1:9999/agent');
   const body = JSON.parse(got.init.body);
-  assert.deepEqual(body, { provider: 'copilot', prompt: 'p', model: 'gpt-x' });
+  assert.deepEqual(body, { provider: 'copilot', message: 'p', project: 'agent-dispatcher', model: 'gpt-x' });
   const un2 = mockFetch(async () => res({ error: 'denied' }, false, 403));
   await assert.rejects(() => engineSendCore({}, '', 'copilot', 'p'), /denied/);
   un2();
+  // bridgeToken 指定時は Authorization: Bearer を送る（ハブの *_BRIDGE_TOKEN 対応）
+  const un3 = mockFetch(async (url, init) => { got = { url, init }; return res({ reply: 'OK' }); });
+  await engineSendCore({}, '', 'copilot', 'p', 'TOK');
+  un3();
+  assert.equal(got.init.headers.Authorization, 'Bearer TOK');
+  // 401 時はトークン設定のヒントを含む
+  const un4 = mockFetch(async () => res({ error: 'unauthorized' }, false, 401));
+  await assert.rejects(() => engineSendCore({}, '', 'copilot', 'p'), /bridgeTokens/);
+  un4();
 });
 
 test('injectExtraPrompt: 付与の有無', () => {

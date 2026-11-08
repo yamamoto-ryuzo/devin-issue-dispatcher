@@ -237,8 +237,15 @@ function assertApiUrlSafe(raw) {
   throw new Error('apiUrl は外部ホストへ https のみ許可（http は loopback/LAN 限定）: ' + raw);
 }
 
+// ハブ側のプロバイダ別 Bearer トークン（COPILOT_BRIDGE_TOKEN 等）に対応する
+// 送信側トークン。secrets.json の bridgeTokens.<eng>（または共通の
+// bridgeToken）優先、なければ同名環境変数をフォールバック参照する
+function bridgeTokenOf(eng) {
+  return secrets.bridgeTokens?.[eng] ?? secrets.bridgeToken
+    ?? process.env[String(eng).toUpperCase() + '_BRIDGE_TOKEN'] ?? '';
+}
 async function engineSend(eng, prompt) {
-  return engineSendCore(config, effectiveApiKey(), eng, prompt);
+  return engineSendCore(config, effectiveApiKey(), eng, prompt, bridgeTokenOf(eng));
 }
 // ---- エンジン解決（課題単位指定 → 全体設定）----
 const ENGINES = ['devin', 'copilot', 'antigravity', 'api'];
