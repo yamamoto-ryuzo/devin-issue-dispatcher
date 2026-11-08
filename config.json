@@ -58,5 +58,7 @@
       "github": "yamamoto-ryuzo/ReEarth_GeoSuite"
     }
   ],
-  "candidateCacheSec": 120
+  "candidateCacheSec": 120,
+  "maxConcurrentAssess": 5,
+  "maxConcurrentImpl": 1
 }
