@@ -463,8 +463,9 @@ async function assess(key) {
       method: 'POST', headers: H, body: JSON.stringify({ key, mode: 'assess' }),
     });
     const j = await r.json();
-    toast(j.ok ? '評価を送信: ' + key : '失敗: ' + (j.error || ''));
-    if (j.ok) {
+    toast(j.queued ? '同時起動上限のため待機キューに登録しました（空き次第自動実行）: ' + key
+          : j.ok ? '評価を送信: ' + key : '失敗: ' + (j.error || ''));
+    if (j.ok && !j.queued) {
       awaitAssess = { key, since: new Date().toISOString() };
       chatSel = j.id;
       showTab('chat'); loadSessions(); loadChat();
@@ -478,8 +479,9 @@ async function dispatch(key) {
       method: 'POST', headers: H, body: JSON.stringify({ key, mode: 'impl' }),
     });
     const j = await r.json();
-    toast(j.ok ? '対応を送信: ' + key : '失敗: ' + (j.error || ''));
-    if (j.ok) { chatSel = j.id; showTab('chat'); loadSessions(); loadChat(); }
+    toast(j.queued ? '同時起動上限のため待機キューに登録しました（空き次第自動実行）: ' + key
+          : j.ok ? '対応を送信: ' + key : '失敗: ' + (j.error || ''));
+    if (j.ok && !j.queued) { chatSel = j.id; showTab('chat'); loadSessions(); loadChat(); }
   } catch (e) { toast('dispatch: ' + e.message); }
   setTimeout(loadCandidates, 1000);
 }
