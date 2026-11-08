@@ -400,10 +400,19 @@ async function loadSkills() {
     if (!pickImpl) pickImpl = skillOpts.impl[0] || '_impl.md';
     const names = (j.files || []).map((f) => { skillFiles[f.name] = f.content; return f.name; });
     if (!skillSel || !skillFiles[skillSel]) skillSel = names[0] || '_all.md';
-    document.getElementById('skill-tabs').innerHTML = names.map((n) =>
-      '<span class="csess' + (n === skillSel ? ' active' : '') + '" ' +
-      'onclick="skillSel=\'' + esc(n) + '\';loadSkills()">' + esc(n) +
-      (skillFiles[n] ? '' : ' <span style="opacity:.5">(空)</span>') + '</span>').join('');
+    const skillPurpose = (n) =>
+      n.startsWith('_all') ? '全モード' :
+      n.startsWith('_done') ? '完了時' :
+      n.startsWith('_assess') ? '評価' :
+      n.startsWith('_impl') ? '対応' :
+      n.startsWith('_split') ? '切り分け' : '';
+    document.getElementById('skill-tabs').innerHTML = names.map((n) => {
+      const purp = skillPurpose(n);
+      return '<span class="csess' + (n === skillSel ? ' active' : '') + '" title="' + esc(n) + '" ' +
+        'onclick="skillSel=\'' + esc(n) + '\';loadSkills()">' +
+        (purp ? '<b>' + purp + '</b> ' : '') + esc(n) +
+        (skillFiles[n] ? '' : ' <span style="opacity:.5">(空)</span>') + '</span>';
+    }).join('');
     loadSkill();
   } catch { /* noop */ }
 }
