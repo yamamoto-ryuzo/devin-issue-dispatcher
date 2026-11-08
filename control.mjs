@@ -70,12 +70,25 @@ const SELF_ORIGIN = `http://${HOST}:${PORT}`;
 // CORS: 同一オリジン・file://(Origin: null)・ループバックの任意ポート
 // （KASUGAI Canvas アプリ 8511/8510 等のローカルツール）・CDN ホスト版
 // (GitHub Pages) を許可。https://evil.example 等の外部サイトからの読み書きは
-// preflight/レスポンス読取でブロックされる。POST は別途 X-Panel ヘッダ必須
-const EXTRA_ORIGINS = new Set(['https://yamamoto-ryuzo.github.io']);
+// preflight/レスポンス読取でブロックされる。POST は別途 X-Panel ヘッダ必須。
+// 非 loopback の許可オリジンは同一ホスト上の任意ページからもアクセス可能なため
+// 読み取り専用とし、管理 POST は loopback/self/'null' に限定する。
+// config.extraOrigins（配列）で許可オリジンを上書き可能（既定は GitHub Pages）
+const EXTRA_ORIGINS = () => new Set(config.extraOrigins ?? ['https://yamamoto-ryuzo.github.io']);
+// 非 loopback の許可オリジンからの要求か（管理 POST 拒否の判定用）
+const remoteReadOnly = (req) => {
+  const o = req.headers.origin;
+  if (!o || o === 'null' || o === SELF_ORIGIN || !EXTRA_ORIGINS().has(o)) return false;
+  try {
+    const h = new URL(o).hostname.toLowerCase();
+    if (h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '[::1]') return false;
+  } catch { /* invalid origin */ }
+  return true;
+};
 function corsOrigin(req) {
   const o = req.headers.origin;
   if (!o) return null;
-  if (o === 'null' || o === SELF_ORIGIN || EXTRA_ORIGINS.has(o)) return o;
+  if (o === 'null' || o === SELF_ORIGIN || EXTRA_ORIGINS().has(o)) return o;
   try {
     const u = new URL(o);
     const h = u.hostname.toLowerCase();
@@ -237,8 +250,17 @@ async function dispatchChatTask(key, mode, skill, engine) {
   // 実際に使われたエンジンを記録（パネル/ログで追跡）
   {
     const st = loadJson(STATE_PATH, { tasks: {} });
-    st.tasks[key] = { ...(st.tasks[key] ?? {}),
+    const next = { ...(st.tasks[key] ?? {}),
       engineUsed: eng, engineUsedAt: new Date().toISOString() };
+    // エンジン障害由来の failed は新規試行開始時に解除する（再評価の成功で
+    // 自動連鎖できるように。engineError 未記録＝別経路の失敗は触らない）
+    if (next.status === 'failed' && next.engineError) {
+      delete next.status;
+      delete next.failedAt;
+    }
+    delete next.engineError;
+    delete next.engineErrorAt;
+    st.tasks[key] = next;
     writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
   }
   if (eng === 'api' && mode !== 'assess') {
@@ -264,7 +286,27 @@ async function dispatchChatTask(key, mode, skill, engine) {
     chats.set(id, { chat: shim, label: shim.label });
     engineSend(eng, p.text)
       .then((t) => { shim.messages.push({ role: 'agent', text: t || '' }); shim.busy = false; })
-      .catch((e) => { shim.messages.push({ role: 'agent', text: '[engine error] ' + e.message }); shim.busy = false; });
+      .catch((e) => {
+        shim.messages.push({ role: 'agent', text: '[engine error] ' + e.message });
+        shim.busy = false;
+        // エンジン障害時は判定ブロックが返らず watcher が完了を検出できないため、
+        // 失敗状態をタスクへ記録して未完了のまま残さない。
+        // 評価/切り分けの通信障害は engineError 欄のみに記録し、既存の
+        // done/running を上書きしない。impl のみ status=failed にする
+        // （失敗の発生元を engineError で区別する）
+        const st = loadJson(STATE_PATH, { tasks: {} });
+        const cur = st.tasks[key] ?? {};
+        const now = new Date().toISOString();
+        if (mode === 'impl') {
+          st.tasks[key] = { ...cur, status: 'failed',
+            engineError: 'engine error: ' + e.message, failedAt: now };
+        } else {
+          st.tasks[key] = { ...cur,
+            engineError: 'engine error (' + mode + '): ' + e.message,
+            engineErrorAt: now };
+        }
+        writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+      });
     if (mode === 'assess') watchAssess(key, shim);
     if (mode === 'split') watchSplit(key, shim);
     if (mode === 'impl') watchImpl(key, shim);
@@ -403,6 +445,14 @@ function watchAssess(key, ch) {
             const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
             st.tasks[key] = { ...(st.tasks[key] ?? {}),
               assess: v, assessedAt: new Date().toISOString(), engine: 'chat' };
+            // 正常な判定が得られたら過去のエンジン障害記録を整理し、
+            // failed-by-engine が残っていれば解除して自動連鎖を解放する
+            if (st.tasks[key].status === 'failed' && st.tasks[key].engineError) {
+              delete st.tasks[key].status;
+              delete st.tasks[key].failedAt;
+            }
+            delete st.tasks[key].engineError;
+            delete st.tasks[key].engineErrorAt;
             // dispatcher 委譲の自動評価が立てた inflight マーカーを解除（多重キュー抑止の解除）
             // 解除時刻を残し、dispatcher がメモリ上のマーカーへ新しさで追従できるようにする
             delete st.tasks[key].inflight;
@@ -413,7 +463,7 @@ function watchAssess(key, ch) {
             const autoOk = key.includes(' pr#')
               ? (config.autoPr ?? false) : (config.autoTrigger ?? false);
             if (autoOk && catAllowed(v.category) && riskAllowed(v.risk) &&
-                !['running', 'done', 'needs-review', 'rejected'].includes(st.tasks[key]?.status) &&
+                !['running', 'done', 'failed', 'needs-review', 'rejected'].includes(st.tasks[key]?.status) &&
                 !chatWait.some((w) => w.key === key)) {
               chatWait.push({ key, mode: 'impl' });
             }
@@ -527,6 +577,12 @@ function watchImpl(key, ch) {
     const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
     st.tasks[key] = { ...(st.tasks[key] ?? {}),
       createdPr: prKey, prAt: new Date().toISOString() };
+    // PR 検出＝実装成功。エンジン障害由来の failed が残っていれば done に戻す
+    if (st.tasks[key].status === 'failed' && st.tasks[key].engineError) {
+      st.tasks[key].status = 'done';
+      delete st.tasks[key].engineError;
+      delete st.tasks[key].engineErrorAt;
+    }
     writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
     if (!chatWait.some((w) => w.key === prKey) &&
         ![...chats.values()].some((s) => s.chat.busy && s.label === prKey + ' assess') &&
@@ -663,6 +719,9 @@ async function candidates(force) {
 // Content-Type: application/json の POST はブラウザでは preflight 必須のため、
 // 未許可オリジンは CORS で既に遮断される。127.0.0.1 バインドで外部直叩き不可。
 // tools/call は自前の /api/* へ内部プロキシし、権限・検証ロジックを単一実装に保つ。
+// 非 loopback の許可オリジンからの呼出は readOnlyHint のツールに限定する
+// （内部プロキシに Origin が引き継がれないため /api/* 側の読み取り専用判定を
+// 迂回できる穴を塞ぐ）。
 // queue_*（pull 型の課題引受ツール）は IDE エージェント専用の stdio 版
 // (mcp-server.mjs) に限定し、ここでは管理系のみ公開する。
 const MCP_PROTOCOL = '2025-06-18';
@@ -846,7 +905,7 @@ async function aiChat(messages, maxSteps) {
   return { ok: true, reply: '（ツール往復上限に達しました）', calls, steps: limit, truncated: true };
 }
 
-async function handleMcp(req, res, acao) {
+async function handleMcp(req, res, acao, readOnly = false) {
   const headers = { 'Content-Type': 'application/json; charset=utf-8' };
   if (acao) headers['Access-Control-Allow-Origin'] = acao;
   let msg;
@@ -880,10 +939,12 @@ async function handleMcp(req, res, acao) {
   if (method === 'ping') return result({});
   if (method === 'tools/list') {
     return result({
-      tools: MCP_TOOLS.map((t) => ({
-        name: t.name, description: t.description,
-        inputSchema: t.inputSchema, annotations: t.annotations,
-      })),
+      tools: MCP_TOOLS
+        .filter((t) => !readOnly || t.annotations?.readOnlyHint === true)
+        .map((t) => ({
+          name: t.name, description: t.description,
+          inputSchema: t.inputSchema, annotations: t.annotations,
+        })),
     });
   }
   if (method === 'tools/call') {
@@ -894,6 +955,9 @@ async function handleMcp(req, res, acao) {
       ...(isError ? { isError: true } : {}),
     });
     if (!tool) return text({ error: `unknown tool: ${name}` }, true);
+    if (readOnly && tool.annotations?.readOnlyHint !== true) {
+      return text({ error: 'non-loopback origin is read-only' }, true);
+    }
     try {
       const out = await mcpToolCall(tool, msg.params?.arguments ?? {});
       return text(out, out?.ok === false);
@@ -944,11 +1008,17 @@ const server = createServer(async (req, res) => {
           req.headers.authorization !== `Bearer ${secrets.panelToken}`) {
         return json(403, { ok: false, error: 'invalid panel token' });
       }
-      return await handleMcp(req, res, acao);
+      // 非 loopback の許可オリジンは読み取り専用（/api/* POST と同じ思想）
+      return await handleMcp(req, res, acao, remoteReadOnly(req));
     }
     // CSRF: カスタムヘッダ必須。preflight は行わないので外部サイトからは送信不可
     if (req.headers[PANEL_HEADER[0]] !== PANEL_HEADER[1]) {
       return json(403, { ok: false, error: 'missing X-Panel header' });
+    }
+    // 非 loopback オリジン（CDN ホスト版等）は読み取り専用。同一ホスト上の
+    // 任意ページからの管理操作を防ぐため管理 POST は loopback/self/'null' 限定
+    if (remoteReadOnly(req)) {
+      return json(403, { ok: false, error: 'non-loopback origin is read-only' });
     }
     // ローカル Web ページからのなりすまし対策（任意強化）: secrets.json に
     // panelToken を設定した場合、自サーバ外オリジンからの POST は
@@ -1018,7 +1088,7 @@ const server = createServer(async (req, res) => {
           'autoDiscover', 'autoTrigger', 'autoAssess', 'autoPr', 'autoCategory',
           'maxAutoRisk',
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax',
-          'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt',
+          'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt', 'extraOrigins',
           'apiModels', 'bridgeModels', 'acpOptions'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
