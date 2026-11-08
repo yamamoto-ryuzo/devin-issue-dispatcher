@@ -205,20 +205,38 @@ function watchAssess(key, ch) {
     if (ch.busy) return;
     clearInterval(iv);
     assessWatchers.delete(key);
-    // 直近の agent メッセージから判定ブロックを抽出
+    // 直近の agent メッセージから判定ブロック＋split ブロックを抽出
     for (let i = ch.messages.length - 1; i >= 0; i--) {
       const msg = ch.messages[i];
       if (msg.role !== 'agent') continue;
       const m = msg.text.match(/<!--devin-assess\s*([\s\S]*?)devin-assess-->/);
-      if (!m) continue;
-      try {
-        const v = JSON.parse(m[1].trim());
-        const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
-        st.tasks[key] = { ...(st.tasks[key] ?? {}),
-          assess: v, assessedAt: new Date().toISOString(), engine: 'chat' };
-        writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
-      } catch { /* malformed JSON */ }
-      break;
+      if (m) {
+        try {
+          const v = JSON.parse(m[1].trim());
+          const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+          st.tasks[key] = { ...(st.tasks[key] ?? {}),
+            assess: v, assessedAt: new Date().toISOString(), engine: 'chat' };
+          writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+        } catch { /* malformed JSON */ }
+      }
+      // 評価中に切り分けが実行された場合 → 新規 issue を自動再評価
+      const sp = msg.text.match(/<!--split\s*([\s\S]*?)split-->/);
+      if (sp) {
+        try {
+          const { newKey } = JSON.parse(sp[1].trim());
+          if (newKey) {
+            const st2 = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+            st2.tasks[key] = { ...(st2.tasks[key] ?? {}),
+              splitTo: newKey, splitAt: new Date().toISOString() };
+            writeFileSync(STATE_PATH, JSON.stringify(st2, null, 2));
+            const p = taskPrompt(newKey, 'assess');
+            if (p && !p.error) {
+              ch.send(p.text).then(() => watchAssess(newKey, ch));
+            }
+          }
+        } catch { /* noop */ }
+      }
+      if (m || sp) break;
     }
   }, 3000);
   // 30分で強制終了
