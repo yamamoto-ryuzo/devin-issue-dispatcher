@@ -428,7 +428,17 @@
     <div id="engt-data" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
       <div style="font-weight:600;margin-bottom:4px">監視リポジトリ</div>
       <div id="eng-data-repos"></div>
-      <div style="margin-top:8px;color:#6b7280">MCP サーバー: mcp-server.mjs（エンジンへツール提供）</div>
+      <div style="margin-top:8px;font-weight:600">MCP サーバー（ACP session/new へ接続。新規セッションから適用）</div>
+      <div id="eng-mcp-list"></div>
+      <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+        <input id="mcp-name" placeholder="name" style="width:100px">
+        <select id="mcp-type"><option value="stdio">stdio</option><option value="http">http</option><option value="sse">sse</option></select>
+        <input id="mcp-target" placeholder="command または url" style="width:200px">
+        <input id="mcp-args" placeholder="args（空白区切り・stdioのみ）" style="width:150px">
+        <input id="mcp-kv" placeholder="env/headers KEY=VALUE（空白区切り）" style="width:210px">
+        <button class="mini" onclick="addMcpServer()">追加</button>
+      </div>
+      <div style="margin-top:4px;color:#6b7280">秘密情報は値を ${secrets:キー名}（secrets.json の mcpTokens）または ${env:環境変数} で参照（config.json へ直書きしない）</div>
     </div>
 
     <div id="engt-plugin" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
@@ -569,7 +579,53 @@ function showEngTab(name) {
     if (el) el.style.display = t === name ? 'block' : 'none';
   });
   if (name === 'plugin') renderPlugins();
+  if (name === 'data') renderMcpServers();
   if (name === 'bridge') refreshBridgeCli();
+}
+// ---- MCP サーバー管理（config.mcpServers。内蔵 issue-queue は config 非保存で削除不可）----
+function renderMcpServers() {
+  const el = document.getElementById('eng-mcp-list');
+  if (!el) return;
+  const list = status?.config?.mcpServers || [];
+  el.innerHTML =
+    '<div style="padding:1px 0">issue-queue（内蔵 mcp-server.mjs・既定・削除不可）</div>' +
+    list.map((s, i) =>
+      '<div style="display:flex;gap:6px;align-items:center;padding:1px 0"><span>' +
+      esc(s.name) + ' — ' + esc(s.command || s.url || '') + '</span>' +
+      '<button class="mini" onclick="delMcpServer(' + i + ')">削除</button></div>').join('');
+}
+async function saveMcpServers(list) {
+  const r = await fetch(API + '/api/config', { method: 'POST', headers: H,
+    body: JSON.stringify({ mcpServers: list }) });
+  const j = await r.json();
+  toast(j.ok ? 'MCP サーバー一覧を保存（新規セッションから適用）' : '失敗: ' + (j.error || ''));
+  await refresh();
+  renderMcpServers();
+}
+async function delMcpServer(i) {
+  const list = [...(status?.config?.mcpServers || [])];
+  list.splice(i, 1);
+  await saveMcpServers(list);
+}
+async function addMcpServer() {
+  const name = document.getElementById('mcp-name').value.trim();
+  const type = document.getElementById('mcp-type').value;
+  const target = document.getElementById('mcp-target').value.trim();
+  const argsS = document.getElementById('mcp-args').value.trim();
+  const kvS = document.getElementById('mcp-kv').value.trim();
+  if (!name || !target) return toast('name と command/url は必須です');
+  const kv = Object.fromEntries((kvS ? kvS.split(/\s+/) : [])
+    .filter((p) => p.includes('=')).map((p) => p.split(/=(.*)/s).slice(0, 2)));
+  const e = { name };
+  if (type === 'stdio') {
+    e.command = target;
+    if (argsS) e.args = argsS.split(/\s+/);
+    if (Object.keys(kv).length) e.env = kv;
+  } else {
+    e.type = type; e.url = target;
+    if (Object.keys(kv).length) e.headers = kv;
+  }
+  await saveMcpServers([...(status?.config?.mcpServers || []), e]);
 }
 // ---- プラグイン管理（config.plugins = [{type,name,enabled}] の種別付きレジストリ。
 // skill 以外の type は将来の拡張種別（MCP・フック等）用の登録枠で表示のみ）----

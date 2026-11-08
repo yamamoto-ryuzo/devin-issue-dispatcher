@@ -79,3 +79,31 @@ export function skillEnabled(cfg, name) {
   return (cfg?.plugins ?? [])
     .find((e) => e && e.type === 'skill' && e.name === name)?.enabled !== false;
 }
+
+// config.mcpServers を ACP session/new の mcpServers 形式へ正規化する。
+// stdio 型 {name,command,args?,env?} / http・sse 型 {name,type?,url,headers?} を受理。
+// env/headers の値は "${env:VAR}"（環境変数）・"${secrets:KEY}"
+// （secrets.mcpTokens[KEY] に置く秘密情報の参照）を解決するため、
+// トークンを config.json へ直接書かずに済む（シークレット分離ルール）。
+// 形状不正なエントリは warn() で通知してスキップ（session/new を失敗させない）
+export function mcpServersForSession(cfg, secrets = {}, warn = () => {}) {
+  const kv = (o) => Object.fromEntries(
+    Object.entries(o && typeof o === 'object' ? o : {})
+      .filter(([k, v]) => typeof k === 'string' && typeof v === 'string')
+      .map(([k, v]) => [k, v
+        .replace(/^\$\{env:([\w]+)\}$/, (m, n) => process.env[n] ?? m)
+        .replace(/^\$\{secrets:([\w.-]+)\}$/, (m, n) => secrets?.mcpTokens?.[n] ?? m)]));
+  const out = [];
+  for (const e of cfg?.mcpServers ?? []) {
+    const name = typeof e?.name === 'string' ? e.name.trim() : '';
+    if (!name) { warn('MCP エントリ: name 未設定のためスキップ'); continue; }
+    if (typeof e.command === 'string' && e.command) {
+      out.push({ name, command: e.command,
+        args: Array.isArray(e.args) ? e.args.map(String) : [], env: kv(e.env) });
+    } else if (typeof e.url === 'string' && e.url) {
+      out.push({ name, type: e.type === 'sse' ? 'sse' : 'http',
+        url: e.url, headers: kv(e.headers) });
+    } else warn(`MCP エントリ "${name}": command/url 未設定のためスキップ`);
+  }
+  return out;
+}

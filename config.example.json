@@ -43,5 +43,6 @@
   "apiKey": "secrets.json に保存すること（このファイルには書かない）",
   "extraPrompt": "",
   "toolMaxSteps": 10,
-  "plugins": []
+  "plugins": [],
+  "mcpServers": []
 }

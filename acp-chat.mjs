@@ -42,12 +42,14 @@ function copilotSpawnSpec() {
 }
 
 export class AcpChat {
-  constructor({ engine, devinExe, cwd, getPersistedOptions, saveOption }) {
+  constructor({ engine, devinExe, cwd, getPersistedOptions, saveOption, getMcpServers }) {
     this.engine = engine ?? 'devin';
     this.devinExe = devinExe;
     this.cwd = cwd;
     this.getPersistedOptions = getPersistedOptions ?? (() => ({}));
     this.saveOption = saveOption ?? (() => {});
+    // session/new の mcpServers を都度解決する（config 変更を新セッションへ反映）
+    this.getMcpServers = getMcpServers ?? (() => []);
     this.proc = null;
     this.sessionId = null;
     this.buf = '';
@@ -175,7 +177,8 @@ export class AcpChat {
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     });
     await this.authenticate(init);
-    const s = await this.rpc('session/new', { cwd: this.cwd, mcpServers: [] });
+    const s = await this.rpc('session/new',
+      { cwd: this.cwd, mcpServers: this.getMcpServers() });
     this.sessionId = s.sessionId;
     this.ready = true;
     // Canvas AIチャット風: モデル/モード選択肢を保持（config_option_update で更新）

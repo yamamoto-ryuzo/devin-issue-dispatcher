@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { engineSendCore, injectExtraPrompt, assertApiUrlSafe,
-         skillEnabled, ASSESS_RE, SPLIT_RE } from '../engine.mjs';
+         skillEnabled, mcpServersForSession, ASSESS_RE, SPLIT_RE } from '../engine.mjs';
 
 const mockFetch = (fn) => { const orig = globalThis.fetch; globalThis.fetch = fn; return () => { globalThis.fetch = orig; }; };
 const res = (body, ok = true, status = 200) => ({ ok, status, json: async () => body });
@@ -67,6 +67,26 @@ test('skillEnabled: 未登録=有効・type=skill enabled:false で無効・他t
   assert.equal(skillEnabled(cfg, '_done.md'), false);
   assert.equal(skillEnabled(cfg, '_all.md'), true);
   assert.equal(skillEnabled(cfg, 'extra-server'), true); // type!=skill は対象外
+});
+
+test('mcpServersForSession: stdio/http 正規化・不正スキップ・参照解決', () => {
+  const warns = [];
+  const cfg = { mcpServers: [
+    { name: 'fs', command: 'npx', args: ['-y', 'srv'], env: { KEY: 'plain' } },
+    { name: 'web', type: 'sse', url: 'http://127.0.0.1:9/mcp',
+      headers: { Authorization: '${secrets:mcp-tok}' } },
+    { name: 'bad' },                       // command/url 無し → スキップ
+    { command: 'x' },                      // name 無し → スキップ
+    { name: 'env-ref', command: 'c', env: { V: '${env:__TEST_NONEXISTENT__}' } }] };
+  const out = mcpServersForSession(cfg, { mcpTokens: { 'mcp-tok': 'TOK' } },
+    (w) => warns.push(w));
+  assert.equal(out.length, 3);
+  assert.deepEqual(out[0], { name: 'fs', command: 'npx', args: ['-y', 'srv'], env: { KEY: 'plain' } });
+  assert.deepEqual(out[1], { name: 'web', type: 'sse', url: 'http://127.0.0.1:9/mcp',
+    headers: { Authorization: 'TOK' } });
+  assert.equal(out[2].env.V, '${env:__TEST_NONEXISTENT__}'); // 未解決はリテラル維持
+  assert.equal(warns.length, 2);
+  assert.deepEqual(mcpServersForSession({}, {}), []);
 });
 
 test('判定ブロック抽出: assess/split', () => {

@@ -17,6 +17,7 @@ import { readFileSync, appendFileSync, writeFileSync, existsSync } from 'node:fs
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
+import { mcpServersForSession } from './engine.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(readFileSync(join(ROOT, 'config.json'), 'utf8'));
@@ -132,7 +133,14 @@ proc.on('error', (e) => { out(`[spawn error] ${e.message}`); finish(1); });
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     });
     await rpc('authenticate', { methodId: 'devin-browser', _meta: { api_key: API_KEY } });
-    const s = await rpc('session/new', { cwd: repo?.path ?? ROOT, mcpServers: [] });
+    // 内蔵 issue-queue（mcp-server.mjs）＋ config.mcpServers を渡す。
+    // 不正エントリは警告してスキップし、session/new を失敗させない
+    const mcpServers = (existsSync(join(ROOT, 'mcp-server.mjs'))
+      ? [{ name: 'issue-queue', command: process.execPath,
+          args: [join(ROOT, 'mcp-server.mjs')] }] : [])
+      .concat(mcpServersForSession(config,
+        loadJ(join(ROOT, 'secrets.json'), {}), (w) => out('[mcp] ' + w)));
+    const s = await rpc('session/new', { cwd: repo?.path ?? ROOT, mcpServers });
     sessionId = s.sessionId;
     out(`[session started] ${sessionId} key=${key}`);
     const res = await rpc('session/prompt', {

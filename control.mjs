@@ -21,7 +21,8 @@
  * 127.0.0.1 のみにバインドする。
  */
 import { createServer } from 'node:http';
-import { engineSendCore, injectExtraPrompt, ASSESS_RE, SPLIT_RE, skillEnabled } from './engine.mjs';
+import { engineSendCore, injectExtraPrompt, ASSESS_RE, SPLIT_RE, skillEnabled,
+         mcpServersForSession } from './engine.mjs';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
@@ -169,7 +170,8 @@ function acpOptionsOf(cfg, eng) {
 function makeChat(eng) {
   return ACP_ENGINES.has(eng)
     ? new AcpChat({ engine: eng, devinExe: config.devinExe, cwd: dirname(ROOT),
-        getPersistedOptions: () => acpOptionsOf(config, eng) })
+        getPersistedOptions: () => acpOptionsOf(config, eng),
+        getMcpServers: sessionMcpServers })
     : makeEngineShim(eng);
 }
 // 空きセッションはエンジン一致時のみ再利用（設定切替後に旧エンジンへ
@@ -244,6 +246,16 @@ function bridgeTokenOf(eng) {
   return secrets.bridgeTokens?.[eng] ?? secrets.bridgeToken
     ?? process.env[String(eng).toUpperCase() + '_BRIDGE_TOKEN'] ?? '';
 }
+// ACP session/new へ渡す MCP サーバー一覧。
+// 内蔵 issue-queue（mcp-server.mjs・work-queue ツール提供）は既定エントリとして
+// 常に先頭へ付け、誤削除を防ぐため config.mcpServers には含めない。
+// ユーザー登録分は形状検証し、不正なものは警告してスキップする
+const sessionMcpServers = () =>
+  (existsSync(join(ROOT, 'mcp-server.mjs'))
+    ? [{ name: 'issue-queue', command: process.execPath,
+        args: [join(ROOT, 'mcp-server.mjs')] }] : [])
+    .concat(mcpServersForSession(config, secrets,
+      (w) => console.warn('[mcp]', w)));
 async function engineSend(eng, prompt) {
   return engineSendCore(config, effectiveApiKey(), eng, prompt, bridgeTokenOf(eng));
 }
@@ -650,6 +662,7 @@ function status() {
       apiModels: config.apiModels ?? {},
       bridgeModels: config.bridgeModels ?? {},
       plugins: config.plugins ?? [],
+      mcpServers: config.mcpServers ?? [],
       apiKeySet: !!effectiveApiKey(), // 値自体は返さない（hasValue のみ）
       extraPrompt: config.extraPrompt ?? '',
       repos: (config.repos || []).map((r) => r.github),
@@ -1151,9 +1164,17 @@ const server = createServer(async (req, res) => {
           'maxAutoRisk',
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax',
           'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt', 'extraOrigins',
-          'toolMaxSteps', 'apiModels', 'bridgeModels', 'acpOptions', 'plugins'];
+          'toolMaxSteps', 'apiModels', 'bridgeModels', 'acpOptions', 'plugins',
+          'mcpServers'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
+        // mcpServers は ACP 形式 [{name,command|url,...}] のみ受理
+        if (patch.mcpServers !== undefined && !(Array.isArray(patch.mcpServers) &&
+            patch.mcpServers.every((e) => e && typeof e === 'object' &&
+              typeof e.name === 'string' && e.name.length >= 1 && e.name.length <= 100 &&
+              (typeof e.command === 'string' || typeof e.url === 'string')))) {
+          return json(400, { ok: false, error: 'mcpServers は [{name,command|url,...}] の配列のみ' });
+        }
         // plugins は拡張レジストリ [{type,name,enabled}] のみ受理
         if (patch.plugins !== undefined && !(Array.isArray(patch.plugins) &&
             patch.plugins.every((e) => e && typeof e === 'object' &&
