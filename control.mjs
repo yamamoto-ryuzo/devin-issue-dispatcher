@@ -133,6 +133,36 @@ function tailLines(path, n) {
   return buf.toString('utf8').trimEnd().split('\n').slice(-n).join('\n');
 }
 
+// チャット評価の判定結果を state.tasks[key].assess に反映する監視
+// （チャット内でエージェントが <!--devin-assess-->{JSON} を出力 → パネル判定列へ）
+const assessWatchers = new Set();
+function watchAssess(key) {
+  if (assessWatchers.has(key)) return;
+  assessWatchers.add(key);
+  const iv = setInterval(() => {
+    if (chat.busy) return;
+    clearInterval(iv);
+    assessWatchers.delete(key);
+    // 直近の agent メッセージから判定ブロックを抽出
+    for (let i = chat.messages.length - 1; i >= 0; i--) {
+      const msg = chat.messages[i];
+      if (msg.role !== 'agent') continue;
+      const m = msg.text.match(/<!--devin-assess\s*([\s\S]*?)devin-assess-->/);
+      if (!m) continue;
+      try {
+        const v = JSON.parse(m[1].trim());
+        const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+        st.tasks[key] = { ...(st.tasks[key] ?? {}),
+          assess: v, assessedAt: new Date().toISOString(), engine: 'chat' };
+        writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+      } catch { /* malformed JSON */ }
+      break;
+    }
+  }, 3000);
+  // 30分で強制終了
+  setTimeout(() => { clearInterval(iv); assessWatchers.delete(key); }, 30 * 60 * 1000).unref?.();
+}
+
 function status() {
   const state = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
   const tasks = Object.entries(state.tasks ?? {})
@@ -308,7 +338,11 @@ const server = createServer(async (req, res) => {
         const p = taskPrompt(key, mode);
         if (!p) return json(400, { ok: false, error: 'bad key: ' + key });
         if (p.error) return json(400, { ok: false, error: p.error });
-        try { await chat.send(p.text); return json(200, { ok: true }); }
+        try {
+          await chat.send(p.text);
+          if (mode === 'assess') watchAssess(key);
+          return json(200, { ok: true });
+        }
         catch (e) { return json(500, { ok: false, error: e.message }); }
       }
       if (url.pathname === '/api/dispatch' || url.pathname === '/api/assess') {
