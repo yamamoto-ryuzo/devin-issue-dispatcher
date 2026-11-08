@@ -98,7 +98,9 @@ export class AcpChat {
     if (!this.apiKey) throw new Error('windsurf_api_key not found');
     await this.rpc('initialize', {
       protocolVersion: 1,
-      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
+      // terminal/fs を true にすると実行がホスト（=このクライアント）に委任され
+      // 未実装のまま応答が返らずターンが停止する。エージェント側のツールに任せる。
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     });
     await this.rpc('authenticate', { methodId: 'devin-browser', _meta: { api_key: this.apiKey } });
     const s = await this.rpc('session/new', { cwd: this.cwd, mcpServers: [] });

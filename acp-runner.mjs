@@ -129,7 +129,7 @@ proc.on('error', (e) => { out(`[spawn error] ${e.message}`); finish(1); });
   try {
     await rpc('initialize', {
       protocolVersion: 1,
-      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     });
     await rpc('authenticate', { methodId: 'devin-browser', _meta: { api_key: API_KEY } });
     const s = await rpc('session/new', { cwd: repo?.path ?? ROOT, mcpServers: [] });
