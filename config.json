@@ -60,5 +60,7 @@
   ],
   "candidateCacheSec": 120,
   "maxConcurrentAssess": 5,
-  "maxConcurrentImpl": 1
+  "maxConcurrentImpl": 1,
+  "maxConcurrentPr": 1,
+  "implLoopMax": 5
 }

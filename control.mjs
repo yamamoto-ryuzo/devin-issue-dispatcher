@@ -87,16 +87,22 @@ function pickChatId(label) {
 }
 // フェーズ別の上限（maxConcurrentAssess/Impl）を超えた送信は待機キューへ
 const chatWait = []; // {key, mode, skill}
-function busyCount(mode) {
+function busyCount(mode, isPr) {
   let n = 0;
-  for (const s of chats.values()) if (s.chat.busy && s.label.endsWith(' ' + mode)) n++;
+  for (const s of chats.values()) {
+    if (!s.chat.busy || !s.label.endsWith(' ' + mode)) continue;
+    if (isPr === undefined || s.label.includes(' pr#') === isPr) n++;
+  }
   return n;
 }
-function chatCapacity(mode) {
+function chatCapacity(mode, key) {
+  const isPr = mode === 'impl' && key ? key.includes(' pr#') : undefined;
   const max = mode === 'assess'
     ? (config.maxConcurrentAssess ?? config.maxConcurrent ?? 1)
+    : isPr === true
+    ? (config.maxConcurrentPr ?? config.maxConcurrentImpl ?? config.maxConcurrent ?? 1)
     : (config.maxConcurrentImpl ?? config.maxConcurrent ?? 1);
-  return busyCount(mode) < max;
+  return busyCount(mode, isPr) < max;
 }
 async function dispatchChatTask(key, mode, skill) {
   const p = taskPrompt(key, mode, skill);
@@ -108,7 +114,7 @@ async function dispatchChatTask(key, mode, skill) {
 }
 setInterval(() => {
   for (let i = chatWait.length - 1; i >= 0; i--) {
-    if (chatCapacity(chatWait[i].mode)) {
+    if (chatCapacity(chatWait[i].mode, chatWait[i].key)) {
       const { key, mode, skill } = chatWait.splice(i, 1)[0];
       dispatchChatTask(key, mode, skill).catch(() => { /* noop */ });
     }
@@ -128,7 +134,8 @@ function taskPrompt(key, mode, skillFile) {
   }
   // skills/: モード別・完了時のカスタム指示を注入（_all/_assess/_impl/_split/_done.md）
   // skillFile 指定時はモード既定ではなくそのファイルを使う（パス走査防止の検証付き）
-  const modeSkill = (skillFile && /^[\w-]+\.md$/.test(skillFile)) ? skillFile : `_${mode}.md`;
+  const modeSkill = (skillFile && /^[\w-]+\.md$/.test(skillFile)) ? skillFile
+    : (mode !== 'assess' && mode !== 'split' && m[2] === 'pr') ? '_pr.md' : `_${mode}.md`;
   const skillFiles = ['_all.md', modeSkill, '_done.md'];
   const skills = skillFiles
     .map((f) => { try { return readFileSync(join(ROOT, 'skills', f), 'utf8').trim(); } catch { return ''; } })
@@ -151,8 +158,14 @@ function taskPrompt(key, mode, skillFile) {
       `3. 未実装の残り作業をまとめた新規 issue を gh issue create -R ${m[1]} で作成\n` +
       `   （タイトル先頭に [残課題]、本文に元 issue #${m[3]} への参照と残作業の箇条書き）\n` +
       `4. 最後に <!--split\\n{"newKey":"${m[1]} issue#<新issue番号>"}\\nsplit--> ブロックを出力`
-    : head + `ブランチ devin/${m[2]}-${m[3]} を切り、実装→検証→push→` +
-      `gh pr create（本文に Closes #${m[3]}）。main直push・force push禁止。` };
+    : head + (m[2] === 'pr'
+        ? `gh pr checkout ${m[3]} -R ${m[1]} で対象 PR のブランチへ移り、レビュー指摘・CI 失敗等へ対応→検証→push。\n` +
+          `新規ブランチ・新規 PR の作成は禁止。main直push・force push禁止。\n`
+        : `ブランチ devin/${m[2]}-${m[3]} を切り、実装→検証→push→` +
+          `gh pr create（本文に Closes #${m[3]}）。main直push・force push禁止。\n`) +
+      `検証が NG の場合は修正→再検証のループを最大 ${config.implLoopMax ?? 5} 回まで行う。\n` +
+      `上限に達しても完了しない場合は「対応困難」として理由と現状を ` +
+      `${m[2] === 'pr' ? 'PR' : 'issue'} コメントで報告し、ユーザーへ対応を依頼する。` };
 }
 
 const readBody = (req, limit = 64 * 1024) => new Promise((resolve, reject) => {
@@ -305,6 +318,8 @@ function status() {
       maxConcurrent: config.maxConcurrent ?? 1,
       maxConcurrentAssess: config.maxConcurrentAssess ?? config.maxConcurrent ?? 1,
       maxConcurrentImpl: config.maxConcurrentImpl ?? config.maxConcurrent ?? 1,
+      implLoopMax: config.implLoopMax ?? 5,
+      maxConcurrentPr: config.maxConcurrentPr ?? config.maxConcurrentImpl ?? config.maxConcurrent ?? 1,
       maxNewPerPoll: config.maxNewPerPoll ?? 50,
       repos: (config.repos ?? []).map((r) => r.github),
     },
@@ -437,9 +452,9 @@ const server = createServer(async (req, res) => {
       if (url.pathname === '/api/config') {
         // config.json の一部キーを更新（ファイル + メモリ両方）
         const allowed = ['pollIntervalSec', 'candidateCacheSec', 'maxNewPerPoll',
-          'maxConcurrent', 'maxConcurrentAssess', 'maxConcurrentImpl',
+          'maxConcurrent', 'maxConcurrentAssess', 'maxConcurrentImpl', 'maxConcurrentPr',
           'autoDiscover', 'autoTrigger', 'autoAssess',
-          'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode'];
+          'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
         const applied = {};
@@ -519,7 +534,7 @@ const server = createServer(async (req, res) => {
         if (!p) return json(400, { ok: false, error: 'bad key: ' + key });
         if (p.error) return json(400, { ok: false, error: p.error });
         try {
-          if (!chatCapacity(mode)) {
+          if (!chatCapacity(mode, key)) {
             chatWait.push({ key, mode, skill });
             return json(202, { ok: true, queued: true });
           }
@@ -622,7 +637,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/api/skills') {
       // skills/ の *.md を一覧（既知名＋存在するファイル）
       const dir = join(ROOT, 'skills');
-      const names = new Set(['_all.md', '_assess.md', '_impl.md', '_split.md', '_done.md']);
+      const names = new Set(['_all.md', '_assess.md', '_impl.md', '_pr.md', '_split.md', '_done.md']);
       try { for (const f of readdirSync(dir)) if (f.endsWith('.md')) names.add(f); } catch { /* noop */ }
       const files = [...names].sort().map((f) => ({
         name: f,
