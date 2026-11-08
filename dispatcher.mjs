@@ -291,8 +291,52 @@ function parseVerdict(logPath) {
   } catch { return null; }
 }
 
+// ---- 課題単位のエンジン解決（control.mjs resolveEngine と同等の縮約版）----
+// 優先順位: issue ラベル/本文の engine 指定 > パネル保存の engineReq > config.engine > devin
+const ENGINES = ['devin', 'copilot', 'antigravity', 'api'];
+const normEngine = (v) => {
+  const e = String(v ?? '').trim().toLowerCase();
+  return ENGINES.includes(e) ? e : null;
+};
+function resolveTaskEngine(key, state) {
+  const it = readIssueStore(ISSUES_PATH).issues?.[key];
+  if (it) {
+    for (const l of it.labels ?? []) {
+      const m = String(l).match(/^engine\s*[:：]\s*(\S+)$/i);
+      const e = m && normEngine(m[1]);
+      if (e) return e;
+    }
+    const m = String(it.body ?? '').match(/^[ 	>]*engine\s*[:：]\s*([a-zA-Z]+)\s*$/im);
+    const e = m && normEngine(m[1]);
+    if (e) return e;
+  }
+  return normEngine(state.tasks[key]?.engineReq)
+    ?? normEngine(config.engine)
+    ?? 'devin';
+}
+
 async function runTask(task, state, { skipAssess = false } = {}) {
   const key = keyOf(task.repo.github, task.type, task.number);
+  // 非 devin 解決時は devin -p を起動せずチャット経路（control の /api/chat/task）
+  // へ委譲する（評価→対応の連鎖は watchAssess/autoTrigger 側が担う）
+  const eng = resolveTaskEngine(key, state);
+  if (eng !== 'devin') {
+    const mode = skipAssess ? 'impl' : 'assess';
+    const r = await fetch(`http://127.0.0.1:${config.controlPort ?? 8585}/api/chat/task`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+      body: JSON.stringify({ key, mode, engine: eng }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`chat dispatch failed (engine=${eng}): ${j.error || r.status}`);
+    log(`CHAT-ROUTE ${key}: engine=${eng} mode=${mode} -> ${JSON.stringify(j)}`);
+    state.tasks[key] = { ...(state.tasks[key] ?? {}),
+      status: 'running', engineUsed: eng,
+      note: `エンジン ${eng} のためチャット経路へ委譲`,
+      startedAt: new Date().toISOString() };
+    saveState(state);
+    return;
+  }
   const base = join(LOG_DIR,
     `${task.repo.github.replace('/', '_')}_${task.type}${task.number}_${Date.now()}`);
   log(`START ${key}`);
@@ -302,7 +346,9 @@ async function runTask(task, state, { skipAssess = false } = {}) {
     `Devin エージェントが起動しました。完了時に結果を報告します。`);
 
   running.set(key, { proc: null, logPath: base, startedAt: Date.now(), phase: 'assess' });
-  state.tasks[key] = { status: 'running', phase: 'assess', startedAt: new Date().toISOString() };
+  // スプレッド保持: パネル保存の engineReq 等を消さない
+  state.tasks[key] = { ...(state.tasks[key] ?? {}),
+    status: 'running', phase: 'assess', startedAt: new Date().toISOString() };
   saveState(state);
 
   try {
@@ -457,7 +503,8 @@ async function reclaimStale(state) {
         await setLabel(r.github, it.number, type, [LABEL.failed], [LABEL.running]);
         await comment(r.github, it.number, type,
           `前回の Devin セッションが中断しました（dispatcher 停止またはタイムアウト）。再試行はパネルの「再実行」ボタンまたは \`POST /api/dispatch\` から行えます。`);
-        state.tasks[key] = { status: 'failed', note: 'stale running label reclaimed', finishedAt: new Date().toISOString() };
+        state.tasks[key] = { ...(state.tasks[key] ?? {}),
+          status: 'failed', note: 'stale running label reclaimed', finishedAt: new Date().toISOString() };
       }
     }
   }

@@ -150,10 +150,21 @@ function chatCapacity(mode, key) {
   return busyCount(mode, isPr) < max;
 }
 // エンジン抽象層: devin=ACPチャット / copilot・antigravity=bridge-hub / api=汎用LLM(OpenAI互換)
+// apiUrl は Bearer キーを送信するため、外部ホストは https 限定。
+// http は loopback/LAN（プライベートアドレス）のみ許可する
+const PRIVATE_HOST = /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?)/i;
+function assertApiUrlSafe(raw) {
+  const u = new URL(raw);
+  if (u.protocol === 'https:') return;
+  if (u.protocol === 'http:' && PRIVATE_HOST.test(u.hostname)) return;
+  throw new Error('apiUrl は外部ホストへ https のみ許可（http は loopback/LAN 限定）: ' + raw);
+}
+
 async function engineSend(eng, prompt) {
   if (eng === 'api') {
     const url = (config.apiUrl || '').replace(/\/+$/, '');
     if (!url || !config.apiModel) throw new Error('apiUrl/apiModel 未設定');
+    assertApiUrlSafe(url);
     const r = await fetch(url + '/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json',
@@ -748,6 +759,7 @@ async function aiChat(messages, maxSteps) {
   const url = (config.apiUrl || '').replace(/\/+$/, '');
   if (!url || !config.apiModel)
     throw new Error('apiUrl/apiModel 未設定（設定タブ「AI」で指定）');
+  assertApiUrlSafe(url);
   const limit = Math.min(Math.max(+maxSteps || +(config.toolMaxSteps ?? 10), 1), 20);
   const tools = MCP_TOOLS.map((t) => ({ type: 'function',
     function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
@@ -883,6 +895,18 @@ const server = createServer(async (req, res) => {
     if (req.headers[PANEL_HEADER[0]] !== PANEL_HEADER[1]) {
       return json(403, { ok: false, error: 'missing X-Panel header' });
     }
+    // ローカル Web ページからのなりすまし対策（任意強化）: secrets.json に
+    // panelToken を設定した場合、自サーバ外オリジンからの POST は
+    // X-Panel-Token 一致を要求（ブラウザのページは secrets.json を読めない。
+    // file:// の 'null' オリジンも対象 — 設定時はパネルを http://127.0.0.1:<port>
+    // 経由で利用し、連携ローカルツールへも同トークンを設定する）
+    {
+      const o = req.headers.origin;
+      if (secrets.panelToken && o && o !== SELF_ORIGIN &&
+          req.headers['x-panel-token'] !== secrets.panelToken) {
+        return json(403, { ok: false, error: 'invalid X-Panel-Token' });
+      }
+    }
     try {
       if (url.pathname === '/api/start') {
         saveDesired({ enabled: true });
@@ -943,6 +967,11 @@ const server = createServer(async (req, res) => {
           'apiModels', 'bridgeModels', 'acpOptions'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
+        // apiUrl は Bearer 送信先: 外部ホストの http 平文送信を保存時に拒否
+        if (patch.apiUrl !== undefined && patch.apiUrl) {
+          try { assertApiUrlSafe(String(patch.apiUrl)); }
+          catch (e) { return json(400, { ok: false, error: e.message }); }
+        }
         const applied = {};
         // シークレット類は secrets.json（Git 管理外）へ保存。config.json には書かない
         if (patch.apiKey !== undefined) {
