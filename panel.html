@@ -61,6 +61,12 @@
   .msg.tool { align-self: flex-start; background: #f1f5f9; color: #64748b; font-size: 11px;
               font-family: monospace; }
   .msg.sys { align-self: center; background: none; color: #94a3b8; font-size: 11px; }
+  #chat-sessions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  .csess { padding: 3px 10px; border: 1px solid #dfe3ea; border-radius: 999px;
+           font-size: 11px; cursor: pointer; background: #f8fafc; user-select: none; }
+  .csess.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .csess.busy { border-color: #b45309; }
+  .csess .x { margin-left: 6px; opacity: .55; }
   #chat-input { display: flex; gap: 8px; margin-top: 8px; }
   #chat-input input { flex: 1; }
   .jd { font-weight: 600; font-size: 11px; }
@@ -219,6 +225,7 @@
       <button class="mini" onclick="chatCancel()">中断</button>
       <button class="mini" onclick="chatClear()">クリア</button>
       <button class="mini" onclick="chatReset()">リセット</button></div>
+    <div id="chat-sessions"></div>
     <div id="chat-opts" style="display:flex;gap:8px;margin:4px 0 8px;flex-wrap:wrap"></div>
     <div id="chat-box"><div class="msg sys">「評価」「対応」ボタンを押すとプロンプトが自動送信されます</div></div>
     <div id="chat-input">
@@ -369,36 +376,62 @@ async function saveCfg() {
   refresh();
 }
 
+let chatSel = null;
+
+async function loadSessions() {
+  try {
+    const j = await (await fetch(API + '/api/chat/sessions')).json();
+    const list = j.sessions || [];
+    if (chatSel == null && list.length) chatSel = list[0].id;
+    document.getElementById('chat-sessions').innerHTML =
+      list.map((s) => '<span class="csess' + (s.id === chatSel ? ' active' : '') +
+        (s.busy ? ' busy' : '') + '" onclick="chatSelect(' + s.id + ')">' +
+        esc(s.label || 'session ' + s.id) + (s.busy ? ' ●' : '') +
+        '<span class="x" onclick="event.stopPropagation();chatClose(' + s.id + ')">✕</span></span>'
+      ).join('') +
+      '<span class="csess" onclick="chatSelect(null)">＋新規</span>';
+  } catch { /* noop */ }
+}
+function chatSelect(id) { chatSel = id; loadSessions(); loadChat(); }
+async function chatClose(id) {
+  await fetch(API + '/api/chat/close', { method: 'POST', headers: H, body: JSON.stringify({ id }) });
+  if (chatSel === id) chatSel = null;
+  loadSessions(); loadChat();
+}
 async function chatSend() {
   const el = document.getElementById('chat-text');
   const text = el.value.trim();
   if (!text) return;
   el.value = '';
-  await fetch(API + '/api/chat/send', { method: 'POST', headers: H, body: JSON.stringify({ text }) });
+  const r = await fetch(API + '/api/chat/send', {
+    method: 'POST', headers: H, body: JSON.stringify({ id: chatSel, text }),
+  });
+  const j = await r.json();
+  if (j.id) { chatSel = j.id; loadSessions(); }
   loadChat();
 }
 async function chatOption(id, value) {
   const r = await fetch(API + '/api/chat/option', {
-    method: 'POST', headers: H, body: JSON.stringify({ id, value }),
+    method: 'POST', headers: H, body: JSON.stringify({ sid: chatSel, id, value }),
   });
   const j = await r.json();
   if (!j.ok) toast('設定変更失敗: ' + (j.error || ''));
 }
 async function chatClear() {
-  await fetch(API + '/api/chat/clear', { method: 'POST', headers: H });
+  await fetch(API + '/api/chat/clear', { method: 'POST', headers: H, body: JSON.stringify({ id: chatSel }) });
   loadChat();
 }
 async function chatCancel() {
-  await fetch(API + '/api/chat/cancel', { method: 'POST', headers: H });
+  await fetch(API + '/api/chat/cancel', { method: 'POST', headers: H, body: JSON.stringify({ id: chatSel }) });
   loadChat();
 }
 async function chatReset() {
-  await fetch(API + '/api/chat/reset', { method: 'POST', headers: H });
+  await fetch(API + '/api/chat/reset', { method: 'POST', headers: H, body: JSON.stringify({ id: chatSel }) });
   loadChat();
 }
 async function loadChat() {
   try {
-    const j = await (await fetch(API + '/api/chat')).json();
+    const j = await (await fetch(API + '/api/chat?id=' + (chatSel || 0))).json();
     document.getElementById('chat-status').textContent =
       j.busy ? '（実行中…）' :
       j.sessionId ? (j.live ? '（接続中）' : '（切断・次の送信で再接続）') : '（未起動）';
@@ -433,7 +466,8 @@ async function assess(key) {
     toast(j.ok ? '評価を送信: ' + key : '失敗: ' + (j.error || ''));
     if (j.ok) {
       awaitAssess = { key, since: new Date().toISOString() };
-      showTab('chat'); loadChat();
+      chatSel = j.id;
+      showTab('chat'); loadSessions(); loadChat();
     }
   } catch (e) { toast('assess: ' + e.message); }
 }
@@ -445,7 +479,7 @@ async function dispatch(key) {
     });
     const j = await r.json();
     toast(j.ok ? '対応を送信: ' + key : '失敗: ' + (j.error || ''));
-    if (j.ok) { showTab('chat'); loadChat(); }
+    if (j.ok) { chatSel = j.id; showTab('chat'); loadSessions(); loadChat(); }
   } catch (e) { toast('dispatch: ' + e.message); }
   setTimeout(loadCandidates, 1000);
 }
@@ -736,8 +770,9 @@ function setCandInt() {
 })();
 
 refresh();
+loadSessions();
 loadChat();
-setInterval(() => { refresh(); if (document.getElementById('tab-chat').classList.contains('active')) loadChat(); }, 3000);
+setInterval(() => { refresh(); if (document.getElementById('tab-chat').classList.contains('active')) { loadSessions(); loadChat(); } }, 3000);
 loadCandidates(false);
 </script>
 </body>

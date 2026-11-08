@@ -67,8 +67,24 @@ function saveDesired(d) { writeFileSync(DESIRED_PATH, JSON.stringify(d, null, 2)
 
 let child = null; // { proc, pid, startedAt, mode: 'loop'|'once' }
 const manualRuns = new Map(); // task key -> pid（--task で起動した個別セッション）
-// パネル内蔵チャット: devin.exe acp の常駐セッション（初回送信時に起動）
-const chat = new AcpChat({ devinExe: config.devinExe, cwd: ROOT });
+// パネル内蔵チャット: devin.exe acp セッションを複数管理（並行評価/対応対応）
+const chats = new Map(); // id -> {chat: AcpChat, label}
+let chatSeq = 0;
+function sessionsList() {
+  return [...chats.entries()].map(([id, s]) => ({
+    id, label: s.label, busy: s.chat.busy, ready: s.chat.ready,
+    live: !!s.chat.proc, sessionId: s.chat.sessionId,
+  }));
+}
+function pickChatId(label) {
+  for (const [id, s] of chats) if (!s.chat.busy) { if (label) s.label = label; return id; }
+  const id = ++chatSeq;
+  chats.set(id, {
+    chat: new AcpChat({ devinExe: config.devinExe, cwd: ROOT }),
+    label: label ?? `session ${id}`,
+  });
+  return id;
+}
 
 function taskPrompt(key, mode) {
   const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
@@ -145,16 +161,16 @@ function tailLines(path, n) {
 // チャット評価の判定結果を state.tasks[key].assess に反映する監視
 // （チャット内でエージェントが <!--devin-assess-->{JSON} を出力 → パネル判定列へ）
 const assessWatchers = new Set();
-function watchAssess(key) {
+function watchAssess(key, ch) {
   if (assessWatchers.has(key)) return;
   assessWatchers.add(key);
   const iv = setInterval(() => {
-    if (chat.busy) return;
+    if (ch.busy) return;
     clearInterval(iv);
     assessWatchers.delete(key);
     // 直近の agent メッセージから判定ブロックを抽出
-    for (let i = chat.messages.length - 1; i >= 0; i--) {
-      const msg = chat.messages[i];
+    for (let i = ch.messages.length - 1; i >= 0; i--) {
+      const msg = ch.messages[i];
       if (msg.role !== 'agent') continue;
       const m = msg.text.match(/<!--devin-assess\s*([\s\S]*?)devin-assess-->/);
       if (!m) continue;
@@ -173,12 +189,12 @@ function watchAssess(key) {
 }
 
 // 切り分け完了を監視: <!--split {"newKey":...}--> を検出したら新 issue を自動再評価
-function watchSplit(key) {
+function watchSplit(key, ch) {
   const iv = setInterval(() => {
-    if (chat.busy) return;
+    if (ch.busy) return;
     clearInterval(iv);
-    for (let i = chat.messages.length - 1; i >= 0; i--) {
-      const msg = chat.messages[i];
+    for (let i = ch.messages.length - 1; i >= 0; i--) {
+      const msg = ch.messages[i];
       if (msg.role !== 'agent') continue;
       const m = msg.text.match(/<!--split\s*([\s\S]*?)split-->/);
       if (!m) continue;
@@ -191,7 +207,7 @@ function watchSplit(key) {
           writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
           const p = taskPrompt(newKey, 'assess');
           if (p && !p.error) {
-            chat.send(p.text).then(() => watchAssess(newKey));
+            ch.send(p.text).then(() => watchAssess(newKey, ch));
           }
         }
       } catch { /* noop */ }
@@ -359,39 +375,50 @@ const server = createServer(async (req, res) => {
         return json(200, { ok: true, applied });
       }
       if (url.pathname === '/api/chat/send') {
-        const { text } = JSON.parse((await readBody(req)) || '{}');
+        const { id, text } = JSON.parse((await readBody(req)) || '{}');
         if (!text) return json(400, { ok: false, error: 'empty text' });
-        try { await chat.send(String(text)); return json(200, { ok: true }); }
+        const sid = id && chats.has(id) ? id : pickChatId('chat');
+        try { await chats.get(sid).chat.send(String(text)); return json(200, { ok: true, id: sid }); }
         catch (e) { return json(500, { ok: false, error: e.message }); }
       }
       if (url.pathname === '/api/chat/option') {
-        const { id, value } = JSON.parse((await readBody(req)) || '{}');
-        try { await chat.setOption(id, value); return json(200, { ok: true }); }
+        const { sid, id, value } = JSON.parse((await readBody(req)) || '{}');
+        try { await chats.get(sid).chat.setOption(id, value); return json(200, { ok: true }); }
         catch (e) { return json(500, { ok: false, error: e.message }); }
       }
       if (url.pathname === '/api/chat/clear') {
-        chat.clear();
+        const { id } = JSON.parse((await readBody(req)) || '{}');
+        chats.get(id)?.chat.clear();
         return json(200, { ok: true });
       }
       if (url.pathname === '/api/chat/cancel') {
-        await chat.cancel();
+        const { id } = JSON.parse((await readBody(req)) || '{}');
+        await chats.get(id)?.chat.cancel();
         return json(200, { ok: true });
       }
       if (url.pathname === '/api/chat/reset') {
-        await chat.reset();
+        const { id } = JSON.parse((await readBody(req)) || '{}');
+        await chats.get(id)?.chat.reset();
+        return json(200, { ok: true });
+      }
+      if (url.pathname === '/api/chat/close') {
+        const { id } = JSON.parse((await readBody(req)) || '{}');
+        const s = chats.get(id);
+        if (s) { try { await s.chat.reset(); } catch { /* noop */ } chats.delete(id); }
         return json(200, { ok: true });
       }
       if (url.pathname === '/api/chat/task') {
-        // パネルの「評価」「対応」ボタン → 生成プロンプトをチャットへ自動送信
+        // パネルの「評価」「対応」ボタン → 空き/新規セッションへ自動送信
         const { key, mode } = JSON.parse((await readBody(req)) || '{}');
         const p = taskPrompt(key, mode);
         if (!p) return json(400, { ok: false, error: 'bad key: ' + key });
         if (p.error) return json(400, { ok: false, error: p.error });
+        const id = pickChatId(key + ' ' + mode);
         try {
-          await chat.send(p.text);
-          if (mode === 'assess') watchAssess(key);
-          if (mode === 'split') watchSplit(key);
-          return json(200, { ok: true });
+          await chats.get(id).chat.send(p.text);
+          if (mode === 'assess') watchAssess(key, chats.get(id).chat);
+          if (mode === 'split') watchSplit(key, chats.get(id).chat);
+          return json(200, { ok: true, id });
         }
         catch (e) { return json(500, { ok: false, error: e.message }); }
       }
@@ -479,7 +506,12 @@ const server = createServer(async (req, res) => {
       } catch (e) { return json(500, { ok: false, error: e.message }); }
     }
     if (url.pathname === '/api/chat') {
-      return json(200, chat.snapshot());
+      const id = +(url.searchParams.get('id') || 0);
+      const s = chats.get(id);
+      return json(200, s ? s.chat.snapshot() : { messages: [], sessions: sessionsList() });
+    }
+    if (url.pathname === '/api/chat/sessions') {
+      return json(200, { sessions: sessionsList() });
     }
     if (url.pathname === '/api/log') {
       const n = Math.min(parseInt(url.searchParams.get('n') ?? '200', 10) || 200, 2000);
