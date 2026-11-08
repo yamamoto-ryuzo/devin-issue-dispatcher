@@ -144,9 +144,13 @@ function taskPrompt(key, mode, skillFile) {
       `\\ndevin-assess--> ブロックを出力。\n` +
       `partial は「要求の一部が既に実装済み・分割可能な残作業がある」場合のみ true。`
     : mode === 'split'
-    ? head + `この課題について、追加スキル指示（_split.md）の手順に従い、実装済み部分と残作業を切り分けてください（コード変更はしない）。\n` +
-      `対象は ${m[2]} #${m[3]}（repo: ${m[1]}）。全実装済みなら完了クローズ、一部なら残課題を新規 issue に分割。\n` +
-      `最後に <!--split\\n{"newKey":"${m[1]} issue#<新issue番号> または null"}\\nsplit--> ブロックを出力。`
+    ? head + `この課題について、現在のリポジトリ状態を確認し、実装済みの部分と未実装の部分を切り分けてください（コード変更はしない）。\n` +
+      `1. 実装状況を調査（git log / コードの現状 / PR履歴）\n` +
+      `2. 元 issue を実装済み扱いにする: gh issue edit ${m[3]} -R ${m[1]} --add-label devin:done し、\n` +
+      `   「実装済み部分は完了として切り分け。残りは新規 issue #N に移行」のコメントを投稿\n` +
+      `3. 未実装の残り作業をまとめた新規 issue を gh issue create -R ${m[1]} で作成\n` +
+      `   （タイトル先頭に [残課題]、本文に元 issue #${m[3]} への参照と残作業の箇条書き）\n` +
+      `4. 最後に <!--split\\n{"newKey":"${m[1]} issue#<新issue番号>"}\\nsplit--> ブロックを出力`
     : head + `ブランチ devin/${m[2]}-${m[3]} を切り、実装→検証→push→` +
       `gh pr create（本文に Closes #${m[3]}）。main直push・force push禁止。` };
 }
