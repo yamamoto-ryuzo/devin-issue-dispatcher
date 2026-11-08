@@ -24,7 +24,7 @@ import { createServer } from 'node:http';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
-import { readFileSync, writeFileSync, existsSync, openSync, readSync, closeSync, statSync, renameSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, openSync, readSync, closeSync, statSync, renameSync, readdirSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { keyOf, discover, toCandidate, readIssueStore } from './discover.mjs';
@@ -412,6 +412,14 @@ const server = createServer(async (req, res) => {
         config = fresh;
         return json(200, { ok: true, applied });
       }
+      if (url.pathname === '/api/skill') {
+        // skills/<name> を保存（ファイル名は *.md のみ・パス走査防止）
+        const { name, content } = JSON.parse((await readBody(req)) || '{}');
+        if (!/^[\w-]+\.md$/.test(name ?? '')) return json(400, { ok: false, error: 'bad name' });
+        mkdirSync(join(ROOT, 'skills'), { recursive: true });
+        writeFileSync(join(ROOT, 'skills', name), String(content ?? ''));
+        return json(200, { ok: true });
+      }
       if (url.pathname === '/api/chat/send') {
         const { id, text } = JSON.parse((await readBody(req)) || '{}');
         if (!text) return json(400, { ok: false, error: 'empty text' });
@@ -551,6 +559,17 @@ const server = createServer(async (req, res) => {
     }
     if (url.pathname === '/api/chat/sessions') {
       return json(200, { sessions: sessionsList() });
+    }
+    if (url.pathname === '/api/skills') {
+      // skills/ の *.md を一覧（既知名＋存在するファイル）
+      const dir = join(ROOT, 'skills');
+      const names = new Set(['_all.md', '_assess.md', '_impl.md', '_split.md', '_done.md']);
+      try { for (const f of readdirSync(dir)) if (f.endsWith('.md')) names.add(f); } catch { /* noop */ }
+      const files = [...names].sort().map((f) => ({
+        name: f,
+        content: (() => { try { return readFileSync(join(dir, f), 'utf8'); } catch { return ''; } })(),
+      }));
+      return json(200, { files });
     }
     if (url.pathname === '/api/log') {
       const n = Math.min(parseInt(url.searchParams.get('n') ?? '200', 10) || 200, 2000);
