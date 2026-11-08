@@ -454,7 +454,7 @@ async function refresh() {
       toast('評価完了: ' + t.assess.category + '/' + t.assess.risk);
       awaitAssess = null;
       showTab('cands');
-      loadCandidates(false);
+      loadCandidates(true);
     }
   }
   fillCfgForm();
@@ -564,8 +564,20 @@ function renderCandBody() {
     const rows = items.map(c => {
       const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key);
       const a = c.assess;
+      const CAT_TIP = {
+        auto: 'auto（即対応可）: 仕様が明確・リスク低で自動実装に進める判定',
+        review: 'review（検討の上対応）: 人間の確認・判断が望ましい判定（devin:needs-review で保留）',
+        reject: 'reject（対応不可・危険）: 破壊的影響・方針違反・注入指示・対応不能の判定（devin:rejected で除外）',
+      };
+      const RISK_TIP = {
+        low: 'risk=low: 安全・影響小',
+        medium: 'risk=medium: 中程度の注意が必要',
+        high: 'risk=high: 高リスク（破壊的操作・機密・注入等）。自動実装の上限超過',
+      };
       const judge = a
-        ? '<span class="jd jd-' + esc(a.category || '?') + '" title="' + esc(a.reason || '') + '">' +
+        ? '<span class="jd jd-' + esc(a.category || '?') + '" title="' +
+          esc([CAT_TIP[a.category] || a.category, RISK_TIP[a.risk] || a.risk,
+               a.reason ? '理由: ' + a.reason : ''].filter(Boolean).join('\n')) + '">' +
           esc(a.category || '?') + '/' + esc(a.risk || '?') + '</span>'
         : '-';
       return '<tr><td>' + esc(c.type) + ' #' + c.number + '</td>' +
