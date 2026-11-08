@@ -225,33 +225,22 @@ const readKillRequests = () => {
 };
 
 function spawnDevin(prompt, task, logPath, key) {
+  // ACP ランナー経由: devin.exe acp に authenticate(windsurf_api_key) →
+  // session/new → session/prompt で実セッションを実行する。
+  // （devin.exe -p は CLI ログインが必要だが、ACP は IDE 認証を共有できる）
   return new Promise((resolve) => {
-    const devinArgs = [
-      '-p', prompt,
-      '--permission-mode', config.permissionMode ?? 'dangerous',
-      '--respect-workspace-trust', 'false',
-      '--verbosity', String(config.verbosity ?? '2'),
-      // 各ターンごとに会話をエクスポート → パネルから作業内容を追跡できる
-      '--export', logPath.replace(/\.log$/, '') + '.export.jsonl',
-    ];
-    if (config.devinExtraArgs) devinArgs.push(...config.devinExtraArgs);
-    const proc = spawn(config.devinExe, devinArgs, {
-      cwd: task.repo.path,
+    const promptFile = join(LOG_DIR,
+      `prompt_${key.replace(/[^\w#-]/g, '_')}_${Date.now()}.txt`);
+    writeFileSync(promptFile, prompt);
+    const proc = spawn(process.execPath,
+      ['acp-runner.mjs', key, promptFile, logPath], {
+      cwd: ROOT,
       windowsHide: true,
       env: { ...process.env },
     });
     running.set(key, { proc, logPath, startedAt: Date.now() });
-    // 未ログイン時は対話式ログインメニューで無限待機するため検出して即 kill
-    const iv = setInterval(() => {
-      let tail = '';
-      try { tail = readFileSync(logPath, 'utf8').slice(-4096); } catch { return; }
-      if (!tail.includes('How would you like to log in')) return;
-      appendFileSync(logPath, `\n[auth required] devin.exe is not logged in. Run \`devin auth login\` once.\n`);
-      try { proc.kill(); } catch { /* noop */ }
-      done(401);
-    }, 2000);
     // パネルの「停止」→ kill-requests.json を2秒ごと監視してプロセスを kill
-    const iv2 = setInterval(() => {
+    const iv = setInterval(() => {
       const ks = readKillRequests().keys ?? [];
       if (!ks.includes(key)) return;
       try {
@@ -262,7 +251,7 @@ function spawnDevin(prompt, task, logPath, key) {
         writeFileSync(KILL_PATH, JSON.stringify(rest));
       } catch { /* noop */ }
     }, 2000);
-    const done = (code) => { clearInterval(iv); clearInterval(iv2); resolve(code); };
+    const done = (code) => { clearInterval(iv); resolve(code); };
     proc.stdout.on('data', (d) => appendFileSync(logPath, d));
     proc.stderr.on('data', (d) => appendFileSync(logPath, d));
     proc.on('error', (e) => { appendFileSync(logPath, `\n[spawn error] ${e.message}\n`); done(1); });
@@ -465,7 +454,7 @@ async function runSingleTask(spec, state) {
     log(`skip ${key}: already has ${LABEL.running} label`);
     return;
   }
-  const task = { repo, type, ...it, labels };
+  const task = { ...it, repo, type, labels };
   await ensureLabels(ghRepo);
   // 手動 dispatch は人間が対象を選定済みのため評価フェーズをスキップ
   await runTask(task, state, { skipAssess: true });
@@ -517,7 +506,8 @@ async function runAssess(spec, state) {
       '--json', 'number,title,body,url,labels,createdAt,updatedAt',
     ]);
   }
-  const task = { repo, type, ...it, labels: it.labels.map((l) => l.name ?? l) };
+  // ストア由来の it.repo は文字列(repo名)。repo オブジェクトで上書きする
+  const task = { ...it, repo, type, labels: it.labels.map((l) => l.name ?? l) };
   await doAssess(task, state);
 }
 

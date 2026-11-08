@@ -262,26 +262,24 @@ const server = createServer(async (req, res) => {
         return json(200, { ok: true, applied });
       }
       if (url.pathname === '/api/dispatch' || url.pathname === '/api/assess') {
-        // 実行キュー登録: エンジンは Devin IDE 側エージェント（mcp-server.mjs 経由で受け取る）
+        // 個別実行: dispatcher.mjs --task / --assess を spawn（ACP 経由で実セッション）
         const isAssess = url.pathname === '/api/assess';
         const { key } = JSON.parse((await readBody(req)) || '{}');
         const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
         if (!m) return json(400, { ok: false, error: 'bad key: ' + key });
-        const repo = config.repos?.find((r) => r.github === m[1]);
-        if (!repo) return json(400, { ok: false, error: 'repo not monitored: ' + m[1] });
-        const q = loadJson(join(ROOT, 'work-queue.json'), { items: [] });
-        if (q.items.some((i) => i.key === key && i.mode === (isAssess ? 'assess' : 'impl'))) {
-          return json(409, { ok: false, error: 'already queued: ' + key });
+        if (!config.repos?.some((r) => r.github === m[1])) {
+          return json(400, { ok: false, error: 'repo not monitored: ' + m[1] });
         }
-        const it = readIssueStore(ISSUES_PATH).issues?.[key] ?? {};
-        q.items.push({
-          key, mode: isAssess ? 'assess' : 'impl',
-          repo, type: m[2], number: +m[3],
-          title: it.title ?? '', url: it.url ?? '', body: it.body ?? '',
-          status: 'pending', queuedAt: new Date().toISOString(),
+        const mkey = isAssess ? 'assess:' + key : key;
+        if (manualRuns.has(mkey)) return json(409, { ok: false, error: 'already running: ' + key });
+        const proc = spawn(process.execPath,
+          ['dispatcher.mjs', isAssess ? '--assess' : '--task', key], {
+          cwd: ROOT, windowsHide: true, stdio: 'ignore',
         });
-        writeFileSync(join(ROOT, 'work-queue.json'), JSON.stringify(q, null, 2));
-        return json(200, { ok: true, queued: key });
+        manualRuns.set(mkey, proc.pid);
+        proc.on('close', () => manualRuns.delete(mkey));
+        proc.on('error', () => manualRuns.delete(mkey));
+        return json(200, { ok: true, pid: proc.pid });
       }
       if (url.pathname === '/api/login') {
         // explorer.exe 経由で .bat を開く → ユーザーの対話セッションに
