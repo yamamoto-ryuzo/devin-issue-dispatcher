@@ -535,7 +535,7 @@ async function assess(key) {
       if (!j.queued) {
         awaitAssess.set(key, new Date().toISOString());
         chatSel = j.id;
-        showTab('chat'); loadSessions(); loadChat();
+        loadSessions();
       }
     }
   } catch (e) { toast('assess: ' + e.message); }
