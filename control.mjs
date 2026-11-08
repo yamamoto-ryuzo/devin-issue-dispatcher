@@ -115,23 +115,74 @@ function saveDesired(d) { writeFileSync(DESIRED_PATH, JSON.stringify(d, null, 2)
 
 let child = null; // { proc, pid, startedAt, mode: 'loop'|'once' }
 const manualRuns = new Map(); // task key -> pid（--task で起動した個別セッション）
-// パネル内蔵チャット: devin.exe acp セッションを複数管理（並行評価/対応対応）
-const chats = new Map(); // id -> {chat: AcpChat, label}
+// パネル内蔵チャット: ACP セッション（devin.exe acp / copilot --acp）を複数管理
+const chats = new Map(); // id -> {chat: AcpChat|shim, label}
 let chatSeq = 0;
+// ACP で常駐セッションを張れるエンジン。それ以外は engineSend の単発 shim
+const ACP_ENGINES = new Set(['devin', 'copilot']);
 function sessionsList() {
   return [...chats.entries()].map(([id, s]) => ({
     id, label: s.label, busy: s.chat.busy, ready: s.chat.ready,
     live: !!s.chat.proc, sessionId: s.chat.sessionId,
+    engine: s.chat.engine ?? 'devin',
   }));
 }
-function pickChatId(label) {
-  for (const [id, s] of chats) if (!s.chat.busy && typeof s.chat.send === 'function') { if (label) s.label = label; return id; }
+// 非 ACP エンジン（antigravity/api）の疑似チャット: AcpChat と同じ
+// send/snapshot/clear/cancel/reset/setOption 面を単発 engineSend で実装
+function makeEngineShim(eng, onError) {
+  const shim = {
+    engine: eng, busy: false, ready: true, proc: true, sessionId: eng,
+    messages: [],
+    push(role, text) {
+      shim.messages.push({ role, text, ts: new Date().toISOString() });
+      if (shim.messages.length > 500) shim.messages = shim.messages.slice(-400);
+    },
+    async send(text) {
+      shim.push('user', text);
+      shim.busy = true;
+      try { shim.push('agent', (await engineSend(eng, text)) || ''); }
+      catch (e) { shim.push('agent', '[engine error] ' + e.message); onError?.(e); }
+      shim.busy = false;
+      const last = shim.messages.at(-1);
+      if (last?.role === 'agent') last.done = true;
+    },
+    snapshot() {
+      return { ready: true, busy: shim.busy, error: null, live: true,
+        sessionId: eng, messages: shim.messages, options: [], modes: null };
+    },
+    clear() { shim.messages.length = 0; },
+    async cancel() { shim.busy = false; },
+    async reset() { shim.messages.length = 0; },
+    async setOption() { throw new Error(eng + ' エンジンはオプション非対応'); },
+  };
+  return shim;
+}
+// ACP オプションはエンジン別に保持（旧フラット形式 {optionId:value} は
+// devin 用とみなす）。copilot/devin で optionId 空間が異なるため混ぜない
+function acpOptionsOf(cfg, eng) {
+  const o = cfg.acpOptions;
+  if (!o) return {};
+  return Object.values(o).some((v) => typeof v === 'string')
+    ? (eng === 'devin' ? o : {})
+    : (o[eng] ?? {});
+}
+function makeChat(eng) {
+  return ACP_ENGINES.has(eng)
+    ? new AcpChat({ engine: eng, devinExe: config.devinExe, cwd: dirname(ROOT),
+        getPersistedOptions: () => acpOptionsOf(config, eng) })
+    : makeEngineShim(eng);
+}
+// 空きセッションはエンジン一致時のみ再利用（設定切替後に旧エンジンへ
+// 誤送信しない）。不一致なら新規セッションを作る
+function pickChatId(label, eng = 'devin') {
+  for (const [id, s] of chats) {
+    if (!s.chat.busy && (s.chat.engine ?? 'devin') === eng) {
+      if (label) s.label = label;
+      return id;
+    }
+  }
   const id = ++chatSeq;
-  chats.set(id, {
-    chat: new AcpChat({ devinExe: config.devinExe, cwd: dirname(ROOT),
-      getPersistedOptions: () => config.acpOptions ?? {} }),
-    label: label ?? `session ${id}`,
-  });
+  chats.set(id, { chat: makeChat(eng), label: label ?? `session ${id}` });
   return id;
 }
 // フェーズ別の上限（maxConcurrentAssess/Impl）を超えた送信は待機キューへ
@@ -219,6 +270,10 @@ function resolveEngine(key, mode, requested, tasksMap, issuesStore) {
 async function dispatchChatTask(key, mode, skill, engine) {
   const p = taskPrompt(key, mode, skill);
   p.text = injectExtraPrompt(p.text, config.extraPrompt);
+  // ツール実行往復の上限を指示文として注入（ACP/bridge/api 全経路共通）
+  const tms = Math.min(Math.max(+(config.toolMaxSteps ?? 10), 1), 20);
+  p.text += '\n\n【ツール往復上限】ツール実行（コマンド・ファイル編集・外部呼び出しの往復）は最大 ' + tms +
+    ' 回まで。上限に達したらその時点の作業内容と未完了事項をまとめて報告し、処理を終了すること';
   const eng = resolveEngine(key, mode, engine);
   // 実際に使われたエンジンを記録（パネル/ログで追跡）
   {
@@ -246,46 +301,37 @@ async function dispatchChatTask(key, mode, skill, engine) {
     e.fatal = true;
     throw e;
   }
-  if (eng !== 'devin') {
-    // 非 devin エンジン: エンジン API に送信し、応答を疑似チャットとして watcher に渡す
+  if (!ACP_ENGINES.has(eng)) {
+    // 非 ACP エンジン: エンジン API への単発送信。応答を疑似チャットとして watcher に渡す
     const id = 'eng' + (++chatSeq);
-    const shim = { busy: true, ready: true, proc: true, sessionId: eng,
-      messages: [], label: key + ' ' + mode,
-      snapshot() {
-        return { ready: this.ready, busy: this.busy, error: null,
-          live: !!this.proc, sessionId: this.sessionId,
-          messages: this.messages, options: [], modes: null };
-      } };
-    chats.set(id, { chat: shim, label: shim.label });
-    engineSend(eng, p.text)
-      .then((t) => { shim.messages.push({ role: 'agent', text: t || '' }); shim.busy = false; })
-      .catch((e) => {
-        shim.messages.push({ role: 'agent', text: '[engine error] ' + e.message });
-        shim.busy = false;
-        // エンジン障害時は判定ブロックが返らず watcher が完了を検出できないため、
-        // 失敗状態をタスクへ記録して未完了のまま残さない。
-        // 評価/切り分けの通信障害は engineError 欄のみに記録し、既存の
-        // done/running を上書きしない。impl のみ status=failed にする
-        // （失敗の発生元を engineError で区別する）
-        const st = loadJson(STATE_PATH, { tasks: {} });
-        const cur = st.tasks[key] ?? {};
-        const now = new Date().toISOString();
-        if (mode === 'impl') {
-          st.tasks[key] = { ...cur, status: 'failed',
-            engineError: 'engine error: ' + e.message, failedAt: now };
-        } else {
-          st.tasks[key] = { ...cur,
-            engineError: 'engine error (' + mode + '): ' + e.message,
-            engineErrorAt: now };
-        }
-        writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
-      });
+    const shim = makeEngineShim(eng, (e) => {
+      // エンジン障害時は判定ブロックが返らず watcher が完了を検出できないため、
+      // 失敗状態をタスクへ記録して未完了のまま残さない。
+      // 評価/切り分けの通信障害は engineError 欄のみに記録し、既存の
+      // done/running を上書きしない。impl のみ status=failed にする
+      // （失敗の発生元を engineError で区別する）
+      const st = loadJson(STATE_PATH, { tasks: {} });
+      const cur = st.tasks[key] ?? {};
+      const now = new Date().toISOString();
+      if (mode === 'impl') {
+        st.tasks[key] = { ...cur, status: 'failed',
+          engineError: 'engine error: ' + e.message, failedAt: now };
+      } else {
+        st.tasks[key] = { ...cur,
+          engineError: 'engine error (' + mode + '): ' + e.message,
+          engineErrorAt: now };
+      }
+      writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+    });
+    chats.set(id, { chat: shim, label: key + ' ' + mode });
+    shim.busy = true;
+    shim.send(p.text).catch(() => {});
     if (mode === 'assess') watchAssess(key, shim);
     if (mode === 'split') watchSplit(key, shim);
     if (mode === 'impl') watchImpl(key, shim);
     return id;
   }
-  const id = pickChatId(key + ' ' + mode);
+  const id = pickChatId(key + ' ' + mode, eng);
   await chats.get(id).chat.send(p.text);
   if (mode === 'assess') watchAssess(key, chats.get(id).chat);
   if (mode === 'split') watchSplit(key, chats.get(id).chat);
@@ -532,6 +578,8 @@ function watchImpl(key, ch) {
         if (u) { prKey = repo + ' pr#' + u[1]; break; }
       }
     }
+    // 別リポジトリの PR は共有チャット履歴の取り違え（誤検出）なので記録しない
+    if (prKey && !prKey.startsWith(repo + ' ')) prKey = null;
     // dispatcher から委譲された自動 impl: chat 完了時に status を確定する
     // （PR 検出=done / 未検出=needs-review）。dispatcher は chatResult と
     // inflightClearedAt を読んで滞留中の委譲マーカーを解除する
@@ -600,6 +648,7 @@ function status() {
       assessMaxAgeHours: config.assessMaxAgeHours ?? 24,
       autoTriggerSince: config.autoTriggerSince ?? null,
       permissionMode: config.permissionMode ?? 'dangerous',
+      toolMaxSteps: config.toolMaxSteps ?? 10,
       maxConcurrent: config.maxConcurrent ?? 1,
       maxConcurrentAssess: config.maxConcurrentAssess ?? config.maxConcurrent ?? 1,
       maxConcurrentImpl: config.maxConcurrentImpl ?? config.maxConcurrent ?? 1,
@@ -634,6 +683,18 @@ function writeCandsCache(items) {
   return fetchedAt;
 }
 
+// open PR の本文から close/fix/resolve #N（または owner/repo#N）参照を抽出する。
+// watchImpl の <!--impl-pr--> マーカー検出の漏れ・誤検出を補完するための派生データ用
+function closingIssueNums(body, repo) {
+  const out = new Set();
+  const re = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:(\S+)#|#)(\d+)/gi;
+  for (const m of body.matchAll(re)) {
+    if (m[1] && m[1] !== repo) continue; // 別 repo を指す close 参照は対象外
+    out.add(+m[2]);
+  }
+  return [...out];
+}
+
 async function candidates(force) {
   const labels = candLabels();
   const cacheMs = (config.candidateCacheSec ?? config.pollIntervalSec ?? 120) * 1000;
@@ -666,6 +727,17 @@ async function candidates(force) {
   for (const [key, v] of Object.entries(issuesAll)) {
     openCounts[v.repo] = (openCounts[v.repo] ?? 0) + 1;
   }
+  // open 中の全課題キー（createdPr が今も open かの判定用）と、
+  // open PR 本文の close 参照から「親issue → PR」の逆引きマップ
+  const openKeys = new Set(Object.keys(issuesAll));
+  const prToIssue = new Map();
+  for (const [k, v] of Object.entries(issuesAll)) {
+    if (v.type !== 'pr') continue;
+    for (const n of closingIssueNums(v.body ?? '', v.repo)) {
+      const ik = keyOf(v.repo, 'issue', n);
+      if (!prToIssue.has(ik)) prToIssue.set(ik, k);
+    }
+  }
   return {
     fetchedAt, cached,
     autoEnabled: config.autoTrigger ?? false,
@@ -674,8 +746,16 @@ async function candidates(force) {
     candidates: raw.map((c) => {
       const key = keyOf(c.repo, c.type, c.number);
       const t = state.tasks?.[key];
+      // 別リポジトリの createdPr は共有チャット履歴の誤検出なので破棄
+      let createdPr = t?.createdPr ?? null;
+      if (createdPr && !String(createdPr).startsWith(c.repo + ' ')) createdPr = null;
+      // 現在 open の関連 PR: 記録済みが open ならそれ、無ければ close 参照から補完
+      const openPr = c.type === 'issue'
+        ? ((createdPr && openKeys.has(createdPr)) ? createdPr
+          : prToIssue.get(key) ?? null)
+        : null;
       return { key, ...c, state: t?.status ?? null, assess: t?.assess ?? null,
-        createdPr: t?.createdPr ?? null,
+        createdPr, openPr,
         engineReq: t?.engineReq ?? null,
         engineIssue: issueEngine(key, issuesAll),
         engine: resolveEngine(key, null, null, state.tasks, issuesAll),
@@ -1062,7 +1142,7 @@ const server = createServer(async (req, res) => {
           'maxAutoRisk',
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax',
           'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt', 'extraOrigins',
-          'apiModels', 'bridgeModels', 'acpOptions'];
+          'toolMaxSteps', 'apiModels', 'bridgeModels', 'acpOptions'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
         // apiUrl は Bearer 送信先: 外部ホストの http 平文送信を保存時に拒否
@@ -1122,7 +1202,10 @@ const server = createServer(async (req, res) => {
       if (url.pathname === '/api/chat/send') {
         const { id, text } = JSON.parse((await readBody(req)) || '{}');
         if (!text) return json(400, { ok: false, error: 'empty text' });
-        const sid = id && chats.has(id) ? id : pickChatId('chat');
+        // 手動チャットも engine 設定に従う（devin/copilot=ACPセッション、その他=単発shim）。
+        // 既存セッション id が指定された場合はそのエンジンのまま継続する
+        const eng = resolveEngine(null, 'chat', null, {}, {});
+        const sid = id && chats.has(id) ? id : pickChatId('chat', eng);
         try { await chats.get(sid).chat.send(String(text)); return json(200, { ok: true, id: sid }); }
         catch (e) { return json(500, { ok: false, error: e.message }); }
       }
@@ -1137,10 +1220,16 @@ const server = createServer(async (req, res) => {
       if (url.pathname === '/api/chat/option') {
         const { sid, id, value } = JSON.parse((await readBody(req)) || '{}');
         try {
-          await chats.get(sid).chat.setOption(id, value);
-          // モデル/モード選択を config.acpOptions へ永続化（次回 session/new で再適用）
+          const s0 = chats.get(sid);
+          const eng = s0?.chat?.engine ?? 'devin';
+          await s0.chat.setOption(id, value);
+          // モデル/モード選択を config.acpOptions[engine] へ永続化（次回 session/new で再適用）
           const fresh = loadJson(CONFIG_PATH, config);
-          (fresh.acpOptions ??= {})[id] = value;
+          const ao = fresh.acpOptions;
+          fresh.acpOptions =
+            ao && !Object.values(ao).some((v) => typeof v === 'string')
+              ? ao : { devin: ao ?? {} };
+          (fresh.acpOptions[eng] ??= {})[id] = value;
           writeFileSync(CONFIG_PATH, JSON.stringify(fresh, null, 2) + '\n');
           config = fresh;
           return json(200, { ok: true });
