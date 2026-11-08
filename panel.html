@@ -237,8 +237,8 @@
   </div>
   <div id="tab-skills" class="tabpanel">
     <div class="h3">スキル（skills/*.md — プロンプト末尾に注入される追加指示）</div>
+    <div id="skill-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
     <div class="row" style="margin-bottom:8px">
-      <select id="skill-name" onchange="loadSkill()"></select>
       <button class="mini primary" onclick="saveSkill()">保存</button>
       <span style="font-size:11px;color:#6b7280">_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別</span>
     </div>
@@ -398,21 +398,21 @@ async function loadSkills() {
     skillOpts.impl = (j.files || []).map((f) => f.name).filter((n) => n.startsWith('_impl'));
     if (!pickAssess) pickAssess = skillOpts.assess[0] || '_assess.md';
     if (!pickImpl) pickImpl = skillOpts.impl[0] || '_impl.md';
-    const sel = document.getElementById('skill-name');
-    sel.innerHTML = (j.files || []).map((f) => {
-      skillFiles[f.name] = f.content;
-      return '<option value="' + esc(f.name) + '">' + esc(f.name) +
-        (f.content ? '' : ' (空)') + '</option>';
-    }).join('');
+    const names = (j.files || []).map((f) => { skillFiles[f.name] = f.content; return f.name; });
+    if (!skillSel || !skillFiles[skillSel]) skillSel = names[0] || '_all.md';
+    document.getElementById('skill-tabs').innerHTML = names.map((n) =>
+      '<span class="csess' + (n === skillSel ? ' active' : '') + '" ' +
+      'onclick="skillSel=\'' + esc(n) + '\';loadSkills()">' + esc(n) +
+      (skillFiles[n] ? '' : ' <span style="opacity:.5">(空)</span>') + '</span>').join('');
     loadSkill();
   } catch { /* noop */ }
 }
+let skillSel = null;
 function loadSkill() {
-  const n = document.getElementById('skill-name').value;
-  document.getElementById('skill-edit').value = skillFiles[n] || '';
+  document.getElementById('skill-edit').value = skillFiles[skillSel] || '';
 }
 async function saveSkill() {
-  const name = document.getElementById('skill-name').value;
+  const name = skillSel;
   const content = document.getElementById('skill-edit').value;
   const r = await fetch(API + '/api/skill', {
     method: 'POST', headers: H, body: JSON.stringify({ name, content }),
