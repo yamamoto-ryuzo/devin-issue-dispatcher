@@ -84,7 +84,8 @@
                padding: 10px; font-size: 12px; white-space: pre-wrap;
                max-height: 240px; overflow-y: auto; }
   #modal .closebtn { float: right; }
-  .jd-auto { color: #16a34a; } .jd-review { color: #b45309; } .jd-reject { color: #dc2626; }
+  .jd-auto { color: #16a34a; } .jd-review { color: #b45309; }
+  .jd-reject { background: #dc2626; color: #fff; padding: 2px 8px; border-radius: 999px; }
   pre { background: #f8fafc; border: 1px solid #e3e7ee; border-radius: 8px;
         padding: 12px; font: 12px/1.5 Consolas, monospace; overflow: auto;
         max-height: 400px; white-space: pre-wrap; word-break: break-all; margin: 0; }
@@ -175,6 +176,26 @@
         <button class="mini" onclick="loadCandidates(true)">今すぐ取得</button>
       </span></div>
     <div class="subtabs" id="cand-tabs"></div>
+    <div id="cand-filters" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px">
+      <span style="color:#6b7280">フィルター:</span>
+      <select id="f-category" onchange="renderCandBody()">
+        <option value="">判定:すべて</option><option value="auto">auto</option>
+        <option value="review">review</option><option value="reject">reject</option>
+        <option value="none">未評価</option>
+      </select>
+      <select id="f-risk" onchange="renderCandBody()">
+        <option value="">リスク:すべて</option><option value="low">low</option>
+        <option value="medium">medium</option><option value="high">high</option>
+      </select>
+      <select id="f-type" onchange="renderCandBody()">
+        <option value="">種別:すべて</option><option value="issue">issue</option>
+        <option value="pr">pr</option>
+      </select>
+      <select id="f-status" onchange="renderCandBody()">
+        <option value="">状態:すべて</option><option value="busy">実行中</option>
+        <option value="queued">待機中</option><option value="idle">非実行</option>
+      </select>
+    </div>
     <div id="cands" style="color:#6b7280;overflow-x:auto">読み込み中…</div>
   </div>
 
@@ -803,13 +824,33 @@ function renderCandBody() {
   const entries = candTab === '__all__'
     ? [...candGroups.entries()]
     : [[candTab, candGroups.get(candTab) || []]];
+  const fCat = document.getElementById('f-category')?.value || '';
+  const fRisk = document.getElementById('f-risk')?.value || '';
+  const fType = document.getElementById('f-type')?.value || '';
+  const fStat = document.getElementById('f-status')?.value || '';
   box.innerHTML = entries.map(([repo, items]) => {
+    const filtered = items.filter((c) => {
+      const a = c.assess;
+      if (fCat === 'none' && a?.category) return false;
+      if (fCat && fCat !== 'none' && a?.category !== fCat) return false;
+      if (fRisk && a?.risk !== fRisk) return false;
+      if (fType && c.type !== fType) return false;
+      const ph = (status.chatBusy || []).some((l) => l.startsWith(c.key + ' ')) ||
+        [...localBusy].some((l) => l.startsWith(c.key + ' '));
+      const qued = (status.chatWaiting || []).includes(c.key + ' assess') ||
+        (status.chatWaiting || []).includes(c.key + ' impl');
+      if (fStat === 'busy' && !ph) return false;
+      if (fStat === 'queued' && !qued) return false;
+      if (fStat === 'idle' && (ph || qued)) return false;
+      return true;
+    });
     const head = '<div class="repo-h">' +
       '<a href="https://github.com/' + esc(repo) + '" target="_blank" rel="noopener">' +
       esc(repo) + '</a>' +
-      '<span class="cnt' + (items.length ? '' : ' zero') + '">' + items.length + '</span></div>';
-    if (!items.length) return head + '<div class="repo-empty">候補なし</div>';
-    const rows = items.map(c => {
+      '<span class="cnt' + (filtered.length ? '' : ' zero') + '">' +
+      filtered.length + '/' + items.length + '</span></div>';
+    if (!filtered.length) return head + '<div class="repo-empty">候補なし</div>';
+    const rows = filtered.map(c => {
       const chatPh = (status.chatBusy || []).find((l) => l.startsWith(c.key + ' '));
       const localPh = [...localBusy].find((l) => l.startsWith(c.key + ' '));
       const chatQueued = (status.chatWaiting || []).includes(c.key + ' assess') ||
