@@ -601,9 +601,14 @@ function detail(key) {
     (a.plan ? '<div class="kv"><b>実施方針</b><pre>' + esc(a.plan) + '</pre></div>' : '') +
     (a.assessedAt ? '<div class="kv"><b>評価日時</b>' + fmt(a.assessedAt) + '</div>' : '') +
     (!a.category ? '<div class="kv">まだ評価されていません。「評価」ボタンで評価を実行できます。</div>' : '') +
-    '<div class="kv" style="margin-top:10px"><button class="mini" ' +
-      'onclick="splitIssue(\'' + esc(c.key) + '\')">切り分け</button>' +
-      '<span style="font-size:11px;color:#6b7280">実装済み部分を完了にし、残りを新規 issue に分割して自動再評価します</span></div>';
+    '<div class="kv" style="margin-top:10px">' +
+      (a.partial === true || a.partial === 'true'
+        ? '<button class="mini" style="background:#7c3aed;border-color:#7c3aed;color:#fff" ' +
+          'onclick="splitIssue(\'' + esc(c.key) + '\')">切り分け</button>' +
+          '<span style="font-size:11px;color:#6b7280">実装済み部分を完了にし、残りを新規 issue に分割して自動再評価します</span>'
+        : '<button class="mini" disabled style="opacity:.4" title="評価で partial=true の場合のみ使用可能">切り分け</button>' +
+          '<span style="font-size:11px;color:#a8b0bd">一部実装済みの課題のみ使用できます</span>') +
+      '</div>';
   document.getElementById('modal').style.display = 'flex';
 }
 

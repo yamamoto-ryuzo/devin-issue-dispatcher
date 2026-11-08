@@ -87,8 +87,9 @@ function taskPrompt(key, mode) {
   return { key, text: mode === 'assess'
     ? head + `この課題の対応可否を【評価のみ】してください（コード変更・コミット禁止）。\n` +
       `最後に <!--devin-assess\\n{"feasible":"yes|needs-human|no","risk":"low|medium|high",` +
-      `"category":"auto|review|reject","reason":"理由","plan":"方針"}\\ndevin-assess-->` +
-      ` ブロックを出力。`
+      `"category":"auto|review|reject","partial":true|false,"reason":"理由","plan":"方針"}` +
+      `\\ndevin-assess--> ブロックを出力。\n` +
+      `partial は「要求の一部が既に実装済み・分割可能な残作業がある」場合のみ true。`
     : mode === 'split'
     ? head + `この課題について、現在のリポジトリ状態を確認し、実装済みの部分と未実装の部分を切り分けてください（コード変更はしない）。\n` +
       `1. 実装状況を調査（git log / コードの現状 / PR履歴）\n` +
