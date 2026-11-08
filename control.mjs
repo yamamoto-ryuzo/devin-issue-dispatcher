@@ -29,6 +29,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { keyOf, discover, toCandidate, readIssueStore } from './discover.mjs';
 import { AcpChat } from './acp-chat.mjs';
+import { createHash } from 'node:crypto';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(ROOT, 'config.json');
@@ -110,7 +111,7 @@ function sessionsList() {
   }));
 }
 function pickChatId(label) {
-  for (const [id, s] of chats) if (!s.chat.busy) { if (label) s.label = label; return id; }
+  for (const [id, s] of chats) if (!s.chat.busy && typeof s.chat.send === 'function') { if (label) s.label = label; return id; }
   const id = ++chatSeq;
   chats.set(id, {
     chat: new AcpChat({ devinExe: config.devinExe, cwd: dirname(ROOT),
@@ -229,7 +230,12 @@ async function dispatchChatTask(key, mode, skill, engine) {
     // 非 devin エンジン: エンジン API に送信し、応答を疑似チャットとして watcher に渡す
     const id = 'eng' + (++chatSeq);
     const shim = { busy: true, ready: true, proc: true, sessionId: eng,
-      messages: [], label: key + ' ' + mode };
+      messages: [], label: key + ' ' + mode,
+      snapshot() {
+        return { ready: this.ready, busy: this.busy, error: null,
+          live: !!this.proc, sessionId: this.sessionId,
+          messages: this.messages, options: [], modes: null };
+      } };
     chats.set(id, { chat: shim, label: shim.label });
     engineSend(eng, p.text)
       .then((t) => { shim.messages.push({ role: 'agent', text: t || '' }); shim.busy = false; })
@@ -428,10 +434,9 @@ function watchSplit(key, ch) {
           st.tasks[key] = { ...(st.tasks[key] ?? {}),
             splitTo: newKey, splitAt: new Date().toISOString() };
           writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
-          const p = taskPrompt(newKey, 'assess');
-          if (p && !p.error) {
-            ch.send(p.text).then(() => watchAssess(newKey, ch));
-          }
+          // エンジン非依存に切り分け先を再評価（非 devin の疑似チャットには send が
+          // 無いため dispatchChatTask 経由でエンジン解決・監視へ委ねる）
+          Promise.resolve(dispatchChatTask(newKey, 'assess', null)).catch(() => {});
         }
       } catch { /* noop */ }
       break;
@@ -593,6 +598,7 @@ async function candidates(force) {
         engineReq: t?.engineReq ?? null,
         engineIssue: issueEngine(key, issuesAll),
         engine: resolveEngine(key, null, null, state.tasks, issuesAll),
+        engineImpl: resolveEngine(key, 'impl', null, state.tasks, issuesAll),
         engineUsed: t?.engineUsed ?? null };
     }),
   };
@@ -817,7 +823,15 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === 'POST') {
-    if (url.pathname === '/mcp') return await handleMcp(req, res, acao);
+    if (url.pathname === '/mcp') {
+      // ブラウザ単純 POST による CSRF 遮断: JSON-RPC は application/json 必須
+      // （外部サイトは preflight なしで送れない）。Origin 付きで非許可なら拒否
+      const ct = String(req.headers['content-type'] || '');
+      if ((req.headers.origin && !acao) || !ct.includes('application/json')) {
+        return json(403, { ok: false, error: 'forbidden' });
+      }
+      return await handleMcp(req, res, acao);
+    }
     // CSRF: カスタムヘッダ必須。preflight は行わないので外部サイトからは送信不可
     if (req.headers[PANEL_HEADER[0]] !== PANEL_HEADER[1]) {
       return json(403, { ok: false, error: 'missing X-Panel header' });
@@ -889,6 +903,8 @@ const server = createServer(async (req, res) => {
           if (patch.apiKey) sec.apiKey = String(patch.apiKey); else delete sec.apiKey;
           writeFileSync(SECRETS_PATH, JSON.stringify(sec, null, 2) + '\n');
           secrets = sec;
+          // 明示操作は最終決定: config.json 残存の旧キーも消し、直後の移行で復活させない
+          delete fresh.apiKey;
           applied.apiKey = patch.apiKey ? 'saved to secrets.json' : 'cleared';
         }
         // config.json に残存する apiKey（旧形式・手動編集分）も secrets へ移して除去
@@ -1018,7 +1034,18 @@ const server = createServer(async (req, res) => {
         const dst = join(ROOT, 'bridge-hub.exe');
         const r = await fetch(url0);
         if (!r.ok) return json(500, { ok: false, error: 'download ' + r.status });
-        writeFileSync(dst, Buffer.from(await r.arrayBuffer()));
+        const buf = Buffer.from(await r.arrayBuffer());
+        // CDN 改変・転送破損の検出: 配布 repo の git blob sha と別経路で照合
+        const meta = await fetch('https://api.github.com/repos/yamamoto-ryuzo/kasugai-canvas-web/contents/stable/download/bridge-hub.exe',
+          { headers: { 'User-Agent': 'devin-issue-dispatcher' } });
+        const mj = await meta.json().catch(() => null);
+        if (!meta.ok || typeof mj?.sha !== 'string') {
+          return json(502, { ok: false, error: 'checksum fetch ' + meta.status });
+        }
+        const blobSha = createHash('sha1')
+          .update(`blob ${buf.length}\0`).update(buf).digest('hex');
+        if (blobSha !== mj.sha) return json(502, { ok: false, error: 'checksum mismatch' });
+        writeFileSync(dst, buf);
         spawn(dst, [], { detached: true, stdio: 'ignore' }).unref();
         return json(200, { ok: true, path: dst });
       }
@@ -1131,7 +1158,12 @@ const server = createServer(async (req, res) => {
         if (engine != null && !eng) {
           return json(400, { ok: false, error: 'unknown engine: ' + engine });
         }
-        if (eng === 'api' && !isAssess) {
+        if (eng && eng !== 'devin') {
+          return json(400, { ok: false,
+            error: 'engine "' + eng + '" はキュー経路では指定不可（MCP 消費側は devin 固定）' });
+        }
+        // 解決エンジン（課題/設定側の指定含む）が api の課題は評価専用。impl 登録を抑止
+        if (!isAssess && resolveEngine(key, 'impl', eng) === 'api') {
           return json(400, { ok: false,
             error: 'api エンジンは評価(assess)専用です。impl は起動できません' });
         }
@@ -1227,7 +1259,8 @@ const server = createServer(async (req, res) => {
       return json(200, { ok: true, goals: repo ? g.filter((x) => x.repo === repo) : g });
     }
     if (url.pathname === '/api/chat') {
-      const id = +(url.searchParams.get('id') || 0);
+      const idRaw = url.searchParams.get('id');
+      const id = idRaw != null && /^\d+$/.test(idRaw) ? +idRaw : idRaw;
       const s = chats.get(id);
       return json(200, s ? s.chat.snapshot() : { messages: [], sessions: sessionsList() });
     }
