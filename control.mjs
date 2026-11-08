@@ -96,6 +96,16 @@ function busyCount(mode, isPr) {
   return n;
 }
 function chatCapacity(mode, key) {
+  // 同一リポジトリの impl（issue/pr 問わず）は同じ作業ツリーを使うため直列化。
+  // 別枠の上限を個別に数えると issue と PR が同時起動して checkout/push が衝突する
+  if (mode === 'impl' && key) {
+    const repo = key.slice(0, key.indexOf(' '));
+    for (const s of chats.values()) {
+      if (s.chat.busy && s.label.endsWith(' impl') && s.label.startsWith(repo + ' ')) {
+        return false;
+      }
+    }
+  }
   const isPr = mode === 'impl' && key ? key.includes(' pr#') : undefined;
   const max = mode === 'assess'
     ? (config.maxConcurrentAssess ?? config.maxConcurrent ?? 1)

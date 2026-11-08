@@ -179,6 +179,7 @@
 <div class="tabs" id="tabs">
   <button data-tab="cands" class="active" onclick="showTab('cands')">対応候補</button>
   <button data-tab="tasks" onclick="showTab('tasks')">処理履歴</button>
+  <button data-tab="prs" onclick="showTab('prs')">PR処理</button>
   <button data-tab="cfg" onclick="showTab('cfg')">設定</button>
   <button data-tab="chat" onclick="showTab('chat')">チャット</button>
   <button data-tab="skills" onclick="showTab('skills')">スキル</button>
@@ -212,10 +213,6 @@
         <option value="">リスク:すべて</option><option value="low">low</option>
         <option value="medium">medium</option><option value="high">high</option>
       </select>
-      <select id="f-type" onchange="renderCandBody()">
-        <option value="">種別:すべて</option><option value="issue">issue</option>
-        <option value="pr">pr</option>
-      </select>
       <select id="f-status" onchange="renderCandBody()">
         <option value="">状態:すべて</option><option value="busy">実行中</option>
         <option value="queued">待機中</option><option value="idle">非実行</option>
@@ -230,6 +227,11 @@
       <thead><tr><th>課題</th><th>状態</th><th>評価</th><th>開始</th><th>終了</th><th>exit</th><th></th></tr></thead>
       <tbody id="tasks"></tbody>
     </table>
+  </div>
+
+  <div id="tab-prs" class="tabpanel">
+    <div class="h3">PR処理（プルリクエスト課題を集約）</div>
+    <div id="prs" style="color:#6b7280;overflow-x:auto">読み込み中…</div>
   </div>
 
   <div id="tab-cfg" class="tabpanel">
@@ -501,7 +503,11 @@ function mdToHtml(src) {
   const inline = (s) => e(s)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) =>
+      /^https?:\/\//i.test(u)
+        ? '<a href="' + u.replace(/"/g, '&quot;') + '" target="_blank" rel="noopener">' +
+          t + '</a>'
+        : m);
   const rows = String(src).split(/\r?\n/);
   const out = [];
   let i = 0;

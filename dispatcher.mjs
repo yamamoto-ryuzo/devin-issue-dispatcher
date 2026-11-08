@@ -36,6 +36,7 @@ const POLL_MS = (config.pollIntervalSec ?? 120) * 1000;
 // 並行数はフェーズ別に分離: 評価=軽量なので多め、実装=衝突回避で少なめ
 const MAX_ASSESS = config.maxConcurrentAssess ?? config.maxConcurrent ?? 1;
 const MAX_IMPL = config.maxConcurrentImpl ?? config.maxConcurrent ?? 1;
+const MAX_PR = config.maxConcurrentPr ?? MAX_IMPL;
 const STALE_MS = (config.staleRunningMinutes ?? 180) * 60 * 1000;
 const LABEL = {
   trigger: config.triggerLabel ?? 'devin',
@@ -136,6 +137,16 @@ function loadPolicy(ghRepo) {
     catch { /* try next */ }
   }
   return { file: null, text: '' };
+}
+
+// skills/*.md をプロンプトへ注入（control.mjs taskPrompt と同じ構成: 全体+モード別+完了時）
+function loadSkills(kind) {
+  const files = ['_all.md', kind === 'pr' ? '_pr.md' : '_impl.md', '_done.md'];
+  const text = files.map((f) => {
+    try { return readFileSync(join(ROOT, 'skills', f), 'utf8').trim(); }
+    catch { return ''; }
+  }).filter(Boolean).join('\n\n');
+  return text ? `\n## 追加スキル指示\n${text}\n` : '';
 }
 
 const ISSUE_PROMPT = (t, policy = '') => `あなたは GitHub issue への対応を自動化されたディスパッチャーから割り当てられたエージェントです。
@@ -290,7 +301,7 @@ async function runTask(task, state, { skipAssess = false } = {}) {
   await comment(task.repo.github, task.number, task.type,
     `Devin エージェントが起動しました。完了時に結果を報告します。`);
 
-  running.set(key, { proc: null, logPath: base, startedAt: Date.now() });
+  running.set(key, { proc: null, logPath: base, startedAt: Date.now(), phase: 'assess' });
   state.tasks[key] = { status: 'running', phase: 'assess', startedAt: new Date().toISOString() };
   saveState(state);
 
@@ -361,9 +372,13 @@ async function runTask(task, state, { skipAssess = false } = {}) {
     state.tasks[key] = { ...state.tasks[key], phase: 'impl' };
     saveState(state);
     const ip = base + '_impl.log';
-    const prompt = task.type === 'pr'
+    const prompt = (task.type === 'pr'
       ? PR_PROMPT(task, loadPolicy(task.repo.github).text)
-      : ISSUE_PROMPT(task, loadPolicy(task.repo.github).text);
+      : ISSUE_PROMPT(task, loadPolicy(task.repo.github).text)) +
+      loadSkills(task.type) +
+      `\n検証が NG の場合は修正→再検証のループを最大 ${config.implLoopMax ?? 5} 回まで行う。\n` +
+      `上限に達しても完了しない場合は「対応困難」として理由と現状を ` +
+      `${task.type === 'pr' ? 'PR' : 'issue'} コメントで報告し、ユーザーへ対応を依頼する。`;
     log(`IMPL ${key} -> ${ip}`);
     const code = await spawnDevin(prompt, task, ip, key);
     const ok = code === 0;
@@ -392,8 +407,15 @@ function drainQueue(state) {
     while (queue.length) {
       const idx = queue.findIndex((t) => {
         const phase = t.assessOnly ? 'assess' : 'impl';
-        const max = phase === 'assess' ? MAX_ASSESS : MAX_IMPL;
-        return [...running.values()].filter((v) => v.phase === phase).length < max;
+        const isPr = phase === 'impl' && t.type === 'pr';
+        const max = phase === 'assess' ? MAX_ASSESS : isPr ? MAX_PR : MAX_IMPL;
+        const busy = [...running.entries()].filter(([k, v]) =>
+          v.phase === phase &&
+          (phase === 'assess' || k.includes(isPr ? ' pr#' : ' issue#'))).length;
+        // 同一リポジトリの impl は同じ作業ツリーで checkout/push が衝突するため直列化
+        const repoBusy = phase === 'impl' && [...running.entries()]
+          .some(([k, v]) => v.phase === 'impl' && k.startsWith(t.repo.github + ' '));
+        return busy < max && !repoBusy;
       });
       if (idx < 0) break;
       const task = queue.splice(idx, 1)[0];
@@ -476,12 +498,12 @@ async function doAssess(task, state) {
   const ap = join(LOG_DIR,
     `${task.repo.github.replace('/', '_')}_${task.type}${task.number}_assess_${Date.now()}.log`);
   log(`ASSESS-ONLY ${key} -> ${ap}`);
-  running.set(key, { proc: null, logPath: ap, startedAt: Date.now() });
+  running.set(key, { proc: null, logPath: ap, startedAt: Date.now(), phase: 'assess' });
   state.tasks[key] = { ...(state.tasks[key] ?? {}), inflight: 'assess' };
   saveState(state);
   try {
     const code = await spawnDevin(
-      ASSESS_PROMPT(task, loadPolicy(task.repo.github).text), task, ap, key);
+      ASSESS_PROMPT(task, loadPolicy(task.repo.github).text), task, ap, key, 'assess');
     const verdict = code === 0 ? parseVerdict(ap) : null;
     state.tasks[key] = {
       ...(state.tasks[key] ?? {}),
