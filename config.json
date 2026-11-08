@@ -60,6 +60,10 @@
     {
       "path": "C:\\devin\\agent",
       "github": "yamamoto-ryuzo/devin-issue-dispatcher"
+    },
+    {
+      "path": "C:\\devin\\kasugai_qgis",
+      "github": "yamamoto-ryuzo/kasugai_qgis"
     }
   ],
   "candidateCacheSec": 120,
