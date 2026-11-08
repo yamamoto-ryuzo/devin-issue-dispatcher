@@ -721,9 +721,9 @@ function renderCandBody() {
         (status.chatWaiting || []).includes(c.key + ' impl');
       const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key) || !!chatPh;
       const phaseBadge = chatPh
-        ? '<span class="badge" style="background:#b45309">' +
+        ? '<span class="badge" style="background:#b45309;color:#fff;margin-right:4px">' +
           (chatPh.endsWith(' assess') ? '評価中' : chatPh.endsWith(' impl') ? '対応中' : '実行中') + '</span>'
-        : chatQueued ? '<span class="badge" style="background:#6b7280">待機中</span>' : '';
+        : chatQueued ? '<span class="badge" style="background:#6b7280;color:#fff;margin-right:4px">待機中</span>' : '';
       const a = c.assess;
       const CAT_TIP = {
         auto: 'auto（即対応可）: 仕様が明確・リスク低で自動実装に進める判定',
