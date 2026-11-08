@@ -206,7 +206,7 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 | `controlPort` | `8585` | 管理パネルのポート（127.0.0.1 のみにバインド） |
 | `candidateCacheSec` | `pollIntervalSec` と同じ | `/api/candidates` のキャッシュ有効期間（秒）。期限切れ or `?force=1` でライブ取得し `candidates.json` を更新 |
 | `repos` | 9リポジトリ | 監視対象。`path`＝ローカル作業ディレクトリ、`github`＝`owner/name` |
-| `engine` | `devin` | 全体既定の実行エンジン。`devin`（ACPチャット）/ `copilot`・`antigravity`（bridge-hub 経由）/ `api`（OpenAI 互換 API。単発応答のため評価用途向け） |
+| `engine` | `devin` | 全体既定の実行エンジン。`devin`（ACPチャット）/ `copilot`・`antigravity`（bridge-hub 経由）/ `api`（OpenAI 互換 API。**評価専用**: 単発応答のため impl/split の起動は抑止される） |
 | `engineModes` | なし | モード別既定（任意）。例: `{"assess":"api","impl":"devin"}`。課題指定がない場合にだけ効く |
 
 ### 課題単位のエンジン指定

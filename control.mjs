@@ -215,6 +215,16 @@ async function dispatchChatTask(key, mode, skill, engine) {
       engineUsed: eng, engineUsedAt: new Date().toISOString() };
     writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
   }
+  if (eng === 'api' && mode !== 'assess') {
+    // api エンジンは単発テキスト応答のみ。impl/split は抑止（fatal=再キューしない）
+    const st0 = loadJson(STATE_PATH, { tasks: {} });
+    st0.tasks[key] = { ...(st0.tasks[key] ?? {}),
+      note: 'api エンジンは評価専用のため ' + mode + ' を起動しませんでした' };
+    writeFileSync(STATE_PATH, JSON.stringify(st0, null, 2));
+    const e = new Error('api エンジンは評価(assess)専用です。impl/split は起動できません（devin/ブリッジ系を指定してください）');
+    e.fatal = true;
+    throw e;
+  }
   if (eng !== 'devin') {
     // 非 devin エンジン: エンジン API に送信し、応答を疑似チャットとして watcher に渡す
     const id = 'eng' + (++chatSeq);
@@ -243,7 +253,7 @@ setInterval(() => {
       if (!chatCapacity(chatWait[i].mode, chatWait[i].key)) continue;
       const { key, mode, skill, engine } = chatWait.splice(i, 1)[0];
       try { await dispatchChatTask(key, mode, skill, engine); }
-      catch { chatWait.push({ key, mode, skill, engine }); }
+      catch (e) { if (!e?.fatal) chatWait.push({ key, mode, skill, engine }); }
     }
   })();
 }, 3000).unref?.();
@@ -588,6 +598,200 @@ async function candidates(force) {
   };
 }
 
+// ---- MCP (Streamable HTTP): 管理系ツールを外部 MCP クライアントへ公開 ----
+// /mcp は X-Panel を課さない（MCP クライアントはカスタムヘッダを送れない）。
+// Content-Type: application/json の POST はブラウザでは preflight 必須のため、
+// 未許可オリジンは CORS で既に遮断される。127.0.0.1 バインドで外部直叩き不可。
+// tools/call は自前の /api/* へ内部プロキシし、権限・検証ロジックを単一実装に保つ。
+// queue_*（pull 型の課題引受ツール）は IDE エージェント専用の stdio 版
+// (mcp-server.mjs) に限定し、ここでは管理系のみ公開する。
+const MCP_PROTOCOL = '2025-06-18';
+const MCP_SERVER_INFO = { name: 'devin-agent-dispatcher', version: '1.0.0' };
+const RO = { readOnlyHint: true };
+const WR = { readOnlyHint: false };
+const DE = { readOnlyHint: false, destructiveHint: true };
+const KEY_PARAM = { type: 'string', description: "課題キー 'owner/repo issue#N' または 'owner/repo pr#N'" };
+const MCP_TOOLS = [
+  { name: 'status', annotations: RO,
+    description: '稼働状態・設定・最近タスク・実行中セッションを取得',
+    inputSchema: { type: 'object', properties: {} },
+    api: { method: 'GET', path: '/api/status' } },
+  { name: 'candidates', annotations: RO,
+    description: '監視対象リポジトリの対応候補課題（open issue/PR・評価結果・状態）一覧',
+    inputSchema: { type: 'object', properties: { force: { type: 'boolean', description: 'キャッシュを無視して再取得' } } },
+    api: { method: 'GET', path: (a) => '/api/candidates' + (a.force ? '?force=1' : '') } },
+  { name: 'log', annotations: RO,
+    description: 'dispatcher ログ末尾を取得',
+    inputSchema: { type: 'object', properties: { n: { type: 'number', description: '行数(既定200)' } } },
+    api: { method: 'GET', path: (a) => `/api/log?n=${encodeURIComponent(a.n ?? 200)}` } },
+  { name: 'task_log', annotations: RO,
+    description: '課題セッションのログ末尾を取得',
+    inputSchema: { type: 'object', properties: { key: KEY_PARAM, n: { type: 'number' } }, required: ['key'] },
+    api: { method: 'GET', path: (a) => `/api/tasklog?key=${encodeURIComponent(a.key ?? '')}&n=${encodeURIComponent(a.n ?? 150)}` } },
+  { name: 'chat_sessions', annotations: RO,
+    description: '内蔵チャット（エンジン実行セッション）の一覧',
+    inputSchema: { type: 'object', properties: {} },
+    api: { method: 'GET', path: '/api/chat/sessions' } },
+  { name: 'chat_get', annotations: RO,
+    description: 'チャットセッションのメッセージ履歴（id 省略で最新）',
+    inputSchema: { type: 'object', properties: { id: { type: 'number' } } },
+    api: { method: 'GET', path: (a) => `/api/chat?id=${encodeURIComponent(a.id ?? 0)}` } },
+  { name: 'goals_list', annotations: RO,
+    description: '課題整理タブの目的（goals）一覧',
+    inputSchema: { type: 'object', properties: { repo: { type: 'string' } } },
+    api: { method: 'GET', path: (a) => '/api/goals' + (a.repo ? `?repo=${encodeURIComponent(a.repo)}` : '') } },
+  { name: 'skills_list', annotations: RO,
+    description: 'skills/ の *.md 一覧（モード別・完了時カスタム指示）',
+    inputSchema: { type: 'object', properties: {} },
+    api: { method: 'GET', path: '/api/skills' } },
+  { name: 'auth_status', annotations: RO,
+    description: 'devin CLI のログイン状態を確認',
+    inputSchema: { type: 'object', properties: {} },
+    api: { method: 'GET', path: '/api/auth' } },
+  { name: 'dispatch', annotations: WR,
+    description: '課題を作業キューへ登録（実装）。IDE エージェントが MCP(issue-queue) 経由で取り出して実行',
+    inputSchema: { type: 'object', properties: { key: KEY_PARAM, engine: { type: 'string', description: 'devin/copilot/antigravity/api' } }, required: ['key'] },
+    api: { method: 'POST', path: '/api/dispatch' } },
+  { name: 'assess', annotations: WR,
+    description: '課題を評価キューへ登録（評価のみ・実装しない）',
+    inputSchema: { type: 'object', properties: { key: KEY_PARAM, engine: { type: 'string' } }, required: ['key'] },
+    api: { method: 'POST', path: '/api/assess' } },
+  { name: 'chat_task', annotations: WR,
+    description: '課題をエンジンセッションで即時実行（assess=評価/impl=実装/split=切り分け）',
+    inputSchema: { type: 'object', properties: { key: KEY_PARAM, mode: { type: 'string', description: 'assess/impl/split' }, skill: { type: 'string' }, engine: { type: 'string' } }, required: ['key'] },
+    api: { method: 'POST', path: '/api/chat/task' } },
+  { name: 'chat_send', annotations: WR,
+    description: '内蔵チャットへ自由文を送信（id 省略で空き/新規セッション）',
+    inputSchema: { type: 'object', properties: { text: { type: 'string' }, id: { type: 'number' } }, required: ['text'] },
+    api: { method: 'POST', path: '/api/chat/send' } },
+  { name: 'steer', annotations: WR,
+    description: '実行中課題セッションへ追加入力（ACP ランナー経由のみ有効）',
+    inputSchema: { type: 'object', properties: { key: KEY_PARAM, text: { type: 'string' } }, required: ['key', 'text'] },
+    api: { method: 'POST', path: '/api/steer' } },
+  { name: 'issue_create', annotations: WR,
+    description: '監視対象リポジトリへ GitHub Issue を起票',
+    inputSchema: { type: 'object', properties: { repo: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' } }, required: ['repo', 'title'] },
+    api: { method: 'POST', path: '/api/issue' } },
+  { name: 'verdict', annotations: WR,
+    description: '課題の評価カテゴリを手動上書き（auto/review/human/reject）',
+    inputSchema: { type: 'object', properties: { key: KEY_PARAM, category: { type: 'string' } }, required: ['key', 'category'] },
+    api: { method: 'POST', path: '/api/verdict' } },
+  { name: 'task_engine', annotations: WR,
+    description: '課題単位の実行エンジン指定（空 engine で解除）',
+    inputSchema: { type: 'object', properties: { key: KEY_PARAM, engine: { type: 'string' } }, required: ['key'] },
+    api: { method: 'POST', path: '/api/task-engine' } },
+  { name: 'config_update', annotations: WR,
+    description: 'config.json の許可キーを更新（patch オブジェクトをそのまま適用）',
+    inputSchema: { type: 'object', properties: { patch: { type: 'object' } }, required: ['patch'] },
+    api: { method: 'POST', path: '/api/config', body: (a) => a.patch ?? {} } },
+  { name: 'assess_all', annotations: WR,
+    description: '全候補のうち未評価のものを評価キューへ一括投入',
+    inputSchema: { type: 'object', properties: {} },
+    api: { method: 'POST', path: '/api/assess-all', body: () => ({}) } },
+  { name: 'impl_all', annotations: WR,
+    description: '自動処理条件を満たす全課題を対応キューへ一括投入',
+    inputSchema: { type: 'object', properties: {} },
+    api: { method: 'POST', path: '/api/impl-all', body: () => ({}) } },
+  { name: 'start', annotations: WR,
+    description: 'dispatcher ポーリングループを起動',
+    inputSchema: { type: 'object', properties: {} },
+    api: { method: 'POST', path: '/api/start', body: () => ({}) } },
+  { name: 'kill', annotations: DE,
+    description: '実行中課題セッションを停止',
+    inputSchema: { type: 'object', properties: { key: KEY_PARAM }, required: ['key'] },
+    api: { method: 'POST', path: '/api/kill' } },
+  { name: 'chat_cancel', annotations: DE,
+    description: '実行中チャットセッションをキャンセル',
+    inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'] },
+    api: { method: 'POST', path: '/api/chat/cancel' } },
+  { name: 'chat_close', annotations: DE,
+    description: 'チャットセッションを閉じる',
+    inputSchema: { type: 'object', properties: { id: { type: 'number' } }, required: ['id'] },
+    api: { method: 'POST', path: '/api/chat/close' } },
+  { name: 'issue_close', annotations: DE,
+    description: 'GitHub Issue をクローズ（issue 課題のみ）',
+    inputSchema: { type: 'object', properties: { key: KEY_PARAM }, required: ['key'] },
+    api: { method: 'POST', path: '/api/close' } },
+  { name: 'stop', annotations: DE,
+    description: 'dispatcher ポーリングループを停止',
+    inputSchema: { type: 'object', properties: {} },
+    api: { method: 'POST', path: '/api/stop', body: () => ({}) } },
+];
+
+async function mcpToolCall(tool, args) {
+  const path = typeof tool.api.path === 'function' ? tool.api.path(args) : tool.api.path;
+  let res;
+  if (tool.api.method === 'GET') {
+    res = await fetch(SELF_ORIGIN + path);
+  } else {
+    const body = typeof tool.api.body === 'function' ? tool.api.body(args) : args;
+    res = await fetch(SELF_ORIGIN + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+      body: JSON.stringify(body ?? {}),
+    });
+  }
+  return await res.json().catch(() => ({}));
+}
+
+async function handleMcp(req, res, acao) {
+  const headers = { 'Content-Type': 'application/json; charset=utf-8' };
+  if (acao) headers['Access-Control-Allow-Origin'] = acao;
+  let msg;
+  try { msg = JSON.parse(await readBody(req) || '{}'); }
+  catch { msg = null; }
+  const reply = (code, obj, extra) => {
+    res.writeHead(code, { ...headers, ...(extra ?? {}) });
+    res.end(JSON.stringify(obj));
+  };
+  if (!msg || typeof msg !== 'object') {
+    return reply(400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } });
+  }
+  if (msg.id == null) {
+    res.writeHead(202, headers);
+    return res.end();
+  }
+  const id = msg.id;
+  const result = (r) => reply(200, { jsonrpc: '2.0', id, result: r });
+  const error = (code, message) => reply(200, { jsonrpc: '2.0', id, error: { code, message } });
+  const method = String(msg.method ?? '');
+  if (method === 'initialize') {
+    return reply(200, {
+      jsonrpc: '2.0', id,
+      result: {
+        protocolVersion: msg.params?.protocolVersion ?? MCP_PROTOCOL,
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: MCP_SERVER_INFO,
+      },
+    }, { 'Mcp-Session-Id': crypto.randomUUID() });
+  }
+  if (method === 'ping') return result({});
+  if (method === 'tools/list') {
+    return result({
+      tools: MCP_TOOLS.map((t) => ({
+        name: t.name, description: t.description,
+        inputSchema: t.inputSchema, annotations: t.annotations,
+      })),
+    });
+  }
+  if (method === 'tools/call') {
+    const name = msg.params?.name;
+    const tool = MCP_TOOLS.find((t) => t.name === name);
+    const text = (obj, isError) => result({
+      content: [{ type: 'text', text: JSON.stringify(obj) }],
+      ...(isError ? { isError: true } : {}),
+    });
+    if (!tool) return text({ error: `unknown tool: ${name}` }, true);
+    try {
+      const out = await mcpToolCall(tool, msg.params?.arguments ?? {});
+      return text(out, out?.ok === false);
+    } catch (e) {
+      return text({ error: String(e?.message ?? e) }, true);
+    }
+  }
+  return error(-32601, `method not found: ${method}`);
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const acao = corsOrigin(req);
@@ -602,7 +806,8 @@ const server = createServer(async (req, res) => {
     if (!acao) return json(403, { ok: false });
     res.writeHead(204, {
       'Access-Control-Allow-Origin': acao,
-      'Access-Control-Allow-Headers': 'X-Panel',
+      // X-Panel: パネル CSRF 対策 / Content-Type・MCP 系: /mcp の Streamable HTTP
+      'Access-Control-Allow-Headers': 'X-Panel, Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version',
       'Access-Control-Allow-Methods': 'GET, POST',
       'Access-Control-Max-Age': '600',
       // public→private 通信（CDN ホスト版から localhost API 利用）に必要
@@ -612,6 +817,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === 'POST') {
+    if (url.pathname === '/mcp') return await handleMcp(req, res, acao);
     // CSRF: カスタムヘッダ必須。preflight は行わないので外部サイトからは送信不可
     if (req.headers[PANEL_HEADER[0]] !== PANEL_HEADER[1]) {
       return json(403, { ok: false, error: 'missing X-Panel header' });
@@ -882,6 +1088,10 @@ const server = createServer(async (req, res) => {
         const p = taskPrompt(key, mode, skill);
         if (!p) return json(400, { ok: false, error: 'bad key: ' + key });
         if (p.error) return json(400, { ok: false, error: p.error });
+        if (mode !== 'assess' && resolveEngine(key, mode, engine) === 'api') {
+          return json(400, { ok: false,
+            error: 'api エンジンは評価(assess)専用です。' + mode + ' は起動できません' });
+        }
         try {
           if (!chatCapacity(mode, key)) {
             chatWait.push({ key, mode, skill, engine });
@@ -920,6 +1130,10 @@ const server = createServer(async (req, res) => {
         const eng = engine == null ? null : normEngine(engine);
         if (engine != null && !eng) {
           return json(400, { ok: false, error: 'unknown engine: ' + engine });
+        }
+        if (eng === 'api' && !isAssess) {
+          return json(400, { ok: false,
+            error: 'api エンジンは評価(assess)専用です。impl は起動できません' });
         }
         const q = loadJson(join(ROOT, 'work-queue.json'), { items: [] });
         if (q.items.some((i) => i.key === key && i.mode === (isAssess ? 'assess' : 'impl'))) {

@@ -467,7 +467,7 @@ const ENG_DESC = {
   devin: 'Devin ACP（devin.exe acp）セッションを使用します。対話・ツール実行・セッション継続に対応した本体エンジンです。',
   copilot: 'GitHub Copilot を bridge-hub 経由で使用します。bridge-hub.exe（127.0.0.1:8511 常駐）が必要です。',
   antigravity: 'Antigravity（agy CLI）を bridge-hub 経由で使用します。bridge-hub.exe（127.0.0.1:8511 常駐）が必要です。',
-  api: 'OpenAI 互換 API（/v1/chat/completions）を使用します。単発のテキスト応答のため評価用途向けで、実装（impl）には devin/ブリッジ系を推奨します。',
+  api: 'OpenAI 互換 API（/v1/chat/completions）を使用します。単発のテキスト応答のみのため評価（assess）専用です。impl/split の起動は抑止されます（実装には devin/ブリッジ系を指定）。',
 };
 let apiModels = {};   // エンドポイント別の最終選択モデル（config.apiModels）
 let bridgeModels = {}; // ブリッジプロバイダ別の選択モデル（config.bridgeModels）
@@ -1551,8 +1551,10 @@ function renderCandBody() {
           ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? '再評価' : '評価') + '</button>';
       const implCell = ph?.endsWith(' impl') ? badge('#b45309', '対応中')
         : quedImpl ? badge('#6b7280', '待機中')
-        : '<button class="mini primary" ' + (busy ? 'disabled' : '') +
-          ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button>';
+        : c.engine === 'api'
+          ? '<span style="font-size:11px;color:#9ca3af" title="api エンジンは評価専用のため対応を起動できません">評価専用(api)</span>'
+          : '<button class="mini primary" ' + (busy ? 'disabled' : '') +
+            ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button>';
       const engCell =
         '<select style="font-size:11px" title="この課題で使う実行エンジン。自動=GitHub指定→課題指定→全体設定の順に解決" ' +
         'onchange="setTaskEngine(\'' + esc(c.key) + '\',this.value)">' +
