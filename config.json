@@ -20,6 +20,8 @@
   "maxAutoRisk": "medium",
   "needsReviewLabel": "devin:needs-review",
   "rejectedLabel": "devin:rejected",
+  "implDoneLabel": "AI:impl-done",
+  "verifyLoopMax": 3,
   "controlPort": 8585,
   "devinExtraArgs": [],
   "repos": [

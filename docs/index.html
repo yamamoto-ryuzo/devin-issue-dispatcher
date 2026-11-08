@@ -53,17 +53,16 @@ flowchart TD
   S1 -->|部分実装あり| SP["split 切り分け<br/>実装済みを done で検証 → 元 issue クローズ<br/>残りは [残課題] 新 issue へ（再帰）"]
   SP --> S1
   S1 --> V{"判定 category"}
-  V -->|"auto / review / human"| S2["ステップ2: 対応 (impl)<br/>devin/ ブランチで実装"]
+  V -->|"auto / review / human"| S2["ステップ2: 対応 (impl)<br/>既定ブランチで実装→ローカルコミット<br/>issue に AI:impl-done 付与"]
   V -->|reject| X["対応しない"]
   S2 --> D{"_done で動作確認"}
   D -->|NG| LP["修正ループ（implLoopMax 回まで）<br/>到達で「対応困難」報告→ユーザー依頼"]
   LP --> S2
-  D -->|OK| PRC["push → gh pr create"]
-  PRC --> PA["作成 PR を必ず assess で評価"]
-  PA --> S3["ステップ3: PR対応 (_pr)<br/>gh pr checkout → 指摘/CI 対応 → push"]
+  D -->|OK| FLG["AI:impl-done フラグ検出"]
+  FLG --> S3["ステップ3: PR処理=再検証 (_pr)<br/>未 push コミットを確認 → 違う視点で再検証"]
   S3 --> D2{"_done を「違う視点」で再検証"}
-  D2 -->|OK| MG["gh pr merge --delete-branch → クローズ"]
-  D2 -->|NG| RO["元 issue を reopen ＋再対応依頼<br/>PR は gh pr close"]
+  D2 -->|OK| MG["git push → devin:done 付与<br/>→ gh issue close"]
+  D2 -->|NG| RO["git reset --hard で未検証コミット破棄<br/>→ AI:impl-done 除去＋コメントで差し戻し"]
 </pre>
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
@@ -76,7 +75,7 @@ flowchart TD
 <tr><th>タブ</th><th>役割</th></tr>
 <tr><td><b>課題整理</b></td><td>「やりたいこと・目的」を入力（スクリーンショット貼付可・リポジトリ単位で保存/再編集）→「課題抽出」で AI が起票候補を整理 → Issue作成フォームで起票</td></tr>
 <tr><td><b>課題処理</b></td><td>issue 候補の一覧。評価/対応ボタン・判定セレクト・実行中/待機中バッジ・リポジトリサブタブ・フィルター</td></tr>
-<tr><td><b>PR処理</b></td><td>pr 候補を集約（課題処理と同じUI、`_pr*` スキル使用）</td></tr>
+<tr><td><b>PR処理</b></td><td>pr 候補を集約（課題処理と同じUI、`_pr*` スキル使用。AI:impl-done 付き課題の再検証もこの枠）</td></tr>
 <tr><td><b>処理履歴</b></td><td>state.json のタスク状態一覧</td></tr>
 <tr><td><b>設定</b></td><td>ポーリング周期・同時起動数（評価/対応/PR）・検証ループ上限などの編集</td></tr>
 <tr><td><b>チャット</b></td><td>ACP セッションの閲覧・追加入力・中断・リセット</td></tr>
@@ -90,8 +89,8 @@ flowchart TD
 <tr><th>ファイル</th><th>内容</th></tr>
 <tr><td><code>_all.md</code></td><td>全モード共通: ステップ0〜3の全体フロー・常に守ること</td></tr>
 <tr><td><code>_assess.md</code></td><td>評価のみ。4段階判定・risk・partial・出力ブロック形式</td></tr>
-<tr><td><code>_impl.md</code></td><td>実装。ブランチ/コミット規約・禁止事項・検証ループ・PR マーカー・公開データ機密チェック</td></tr>
-<tr><td><code>_pr.md</code></td><td>PR対応。checkout→修正→push→違う視点で再検証→merge(--delete-branch)/close</td></tr>
+<tr><td><code>_impl.md</code></td><td>実装。既定ブランチでローカルコミットまで（push 禁止）・AI:impl-done 付与・禁止事項・検証ループ・公開データ機密チェック</td></tr>
+<tr><td><code>_pr.md</code></td><td>再検証。未 push コミットを違う視点で検証 → OK: push＋クローズ / NG: reset＋差し戻し</td></tr>
 <tr><td><code>_split.md</code></td><td>切り分け。実装済み部分の完了化＋残課題の issue 分割</td></tr>
 <tr><td><code>_done.md</code></td><td>完了確認。実動作検証・スクリーンショット・DOCS 整備・クローズ時コメント</td></tr>
 </table>
@@ -112,14 +111,16 @@ flowchart TD
 <tr><td><code>pollIntervalSec</code></td><td>120</td><td>候補検出のポーリング周期</td></tr>
 <tr><td><code>maxConcurrentAssess</code> / <code>Impl</code> / <code>Pr</code></td><td>5 / 1 / 5</td><td>モード別同時起動数</td></tr>
 <tr><td><code>implLoopMax</code></td><td>5</td><td>対応→検証 NG→修正ループの上限</td></tr>
-<tr><td><code>autoDiscover/autoAssess/autoTrigger/autoPr</code></td><td>false</td><td>自動化フラグ（パネルのトグルと連動）</td></tr>
+<tr><td><code>verifyLoopMax</code></td><td>3</td><td>再検証セッションのリトライ上限（到達で needs-review）</td></tr>
+<tr><td><code>implDoneLabel</code></td><td>AI:impl-done</td><td>実装済み・未検証のフラグラベル（付いた課題が再検証候補）</td></tr>
+<tr><td><code>autoDiscover/autoAssess/autoTrigger/autoPr</code></td><td>false</td><td>自動化フラグ（パネルのトグルと連動。autoPr=再検証の自動実行）</td></tr>
 <tr><td><code>repos</code></td><td>—</td><td>監視リポジトリ（path + github）</td></tr>
 <tr><td><code>permissionMode</code></td><td>dangerous</td><td>devin -p の権限モード</td></tr>
 </table>
 
 <h2 id="safety">安全設計</h2>
 <ul>
-<li><b>PR 必須</b>: 監視対象全リポジトリで main 直 push 不可（ブランチ保護適用済み）</li>
+<li><b>二段階の検証ゲート</b>: 実装セッションはローカルコミットまで（push 禁止）。リモートへの push は別視点の再検証を通ったコミットのみ。未検証コミットが残るリポジトリでは新規実装を開始しない（混入 push 防止）</li>
 <li><b>CSRF 対策</b>: POST は <code>X-Panel: 1</code> ヘッダ必須・127.0.0.1 バインドのみ</li>
 <li><b>レース対策</b>: state.json の原子的リネーム・children.json の flock による多重起動防止</li>
 <li><b>検証ループ有界</b>: 実装↔検証のループは implLoopMax で打ち止め、対応困難は issue コメントでユーザーへ報告</li>

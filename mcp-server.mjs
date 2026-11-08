@@ -58,8 +58,9 @@ const call = (name, args) => {
         `note:"{category|risk|reason}形式のJSON"}) を呼ぶ。` };
     }
     return { task: it, instructions: common +
-      `ブランチ devin/${it.type}-${it.number} を切り、実装→検証→push→` +
-      `gh pr create（本文に Closes #${it.number}）。main直push・force push禁止。\n` +
+      `既定ブランチで git pull --ff-only してから実装→検証→ローカルコミット（push 禁止）→\n` +
+      `gh issue edit ${it.number} -R ${it.repo.github} --add-label AI:impl-done で処理済みフラグを立て、実施内容をコメント。\n` +
+      `ブランチ作成・PR 作成・push・force push は禁止。リモートへの反映は別セッションの再検証が行う。\n` +
       `完了したら queue_done({key:"${it.key}",status:"done"|"failed",note:"結果要約"}) を呼ぶ。` };
   }
   if (name === 'queue_done') {

@@ -442,7 +442,7 @@
       <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px">対応</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px;align-items:end">
         <label>対応 同時起動数<br><input id="set-maxc-impl" type="number" min="1" style="width:60px"></label>
-        <label>PR対応 同時起動数<br><input id="set-maxc-pr" type="number" min="1" style="width:60px" title="pr# 課題の対応セッションの同時起動上限（issue課題とは別枠）"></label>
+        <label>PR/再検証 同時起動数<br><input id="set-maxc-pr" type="number" min="1" style="width:60px" title="pr# 課題・AI:impl-done 再検証セッションの同時起動上限（issue課題とは別枠）"></label>
         <label>検証ループ上限 (回)<br><input id="set-impl-loop" type="number" min="1" style="width:60px" title="対応→完了確認→NG→修正のループをこの回数まで実施。到達後はユーザーへ対応依頼"></label>
         <label>ツール往復上限 (回)<br><input id="set-toolsteps" type="number" min="1" max="20" style="width:60px" title="エージェントのツール実行（コマンド・編集の往復）の上限としてプロンプトへ注入される指示（1-20）。到達時は作業をまとめて報告し終了。api エンジンは単発応答のため実効なし"></label>
         <label>自動処理の判定範囲<br><select id="set-autocat" style="font-size:12px" title="選択した判定まで自動で対応へ進めます&#10;auto のみ / review まで / human まで / reject まで(全て)">
@@ -1166,17 +1166,18 @@ async function assess(key) {
   } catch (e) { toast('assess: ' + e.message); }
 }
 
-async function dispatch(key) {
+async function dispatch(key, verify) {
+  const mode = verify ? 'pr' : 'impl';
   try {
     const r = await fetch(API + '/api/chat/task', {
-      method: 'POST', headers: H, body: JSON.stringify({ key, mode: 'impl', skill: key.includes(' pr#') ? pickPr : pickImpl }),
+      method: 'POST', headers: H, body: JSON.stringify({ key, mode, skill: (verify || key.includes(' pr#')) ? pickPr : pickImpl }),
     });
     const j = await r.json();
     toast(j.queued ? '同時起動上限のため待機キューに登録しました（空き次第自動実行）: ' + key
-          : j.ok ? '対応を送信: ' + key : '失敗: ' + (j.error || ''));
+          : j.ok ? (verify ? '再検証を送信: ' : '対応を送信: ') + key : '失敗: ' + (j.error || ''));
     if (j.ok) {
-      if (j.queued) localWait.add(key + ' impl');
-      else { localBusy.set(key + ' impl', Date.now()); chatSel = j.id; loadSessions(); }
+      if (j.queued) localWait.add(key + ' ' + mode);
+      else { localBusy.set(key + ' ' + mode, Date.now()); chatSel = j.id; loadSessions(); }
       renderCandBody();
     }
   } catch (e) { toast('dispatch: ' + e.message); }
@@ -1785,7 +1786,8 @@ function renderCandBody() {
       const quedAssess = (status.chatWaiting || []).includes(c.key + ' assess') ||
         localWait.has(c.key + ' assess');
       const quedImpl = (status.chatWaiting || []).includes(c.key + ' impl') ||
-        localWait.has(c.key + ' impl');
+        (status.chatWaiting || []).includes(c.key + ' pr') ||
+        localWait.has(c.key + ' impl') || localWait.has(c.key + ' pr');
       const chatQueued = quedAssess || quedImpl;
       const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key) || !!chatPh || !!localPh || chatQueued;
       const a = c.assess;
@@ -1819,7 +1821,7 @@ function renderCandBody() {
       const prM = c.openPr ? String(c.openPr).match(/^(\S+)\s+pr#(\d+)$/) : null;
       const crM = c.createdPr ? String(c.createdPr).match(/^(\S+)\s+pr#(\d+)$/) : null;
       const remPr = prM || crM;
-      const implCell = ph?.endsWith(' impl') ? badge('#b45309', '対応中')
+      const implCell = (ph?.endsWith(' impl') || ph?.endsWith(' pr')) ? badge('#b45309', c.verify ? '再検証中' : '対応中')
         : quedImpl ? badge('#6b7280', '待機中')
         : prM
           ? '<a class="badge" style="background:#6b7280;color:#fff;text-decoration:none" ' +
@@ -1828,8 +1830,11 @@ function renderCandBody() {
             ' へ移行しました（PR一覧で継続中）">PR中#' + prM[2] + '</a>'
         : (c.engineImpl ?? c.engine) === 'api'
           ? '<span style="font-size:11px;color:#9ca3af" title="api エンジンは評価専用のため対応を起動できません">評価専用(api)</span>'
-          : '<button class="mini primary" ' + (busy ? 'disabled' : '') +
-            ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button>';
+          : c.verify
+            ? '<button class="mini primary" ' + (busy ? 'disabled' : '') +
+              ' onclick="dispatch(\'' + esc(c.key) + '\', true)">再検証</button>'
+            : '<button class="mini primary" ' + (busy ? 'disabled' : '') +
+              ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button>';
       return '<tr' + rowBg + '><td><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">' +
         (c.type === 'pr'
@@ -1838,8 +1843,8 @@ function renderCandBody() {
       '<td style="white-space:nowrap">' + assessCell + '</td>' +
       '<td style="white-space:normal;min-width:220px;max-width:560px;word-break:break-all"><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener">' + esc(c.title) + '</a></td>' +
-      '<td class="' + (c.trigger === 'auto-new' ? 'trig-auto' : 'trig-label') + '">' +
-        (c.trigger === 'auto-new' ? '自動(新規)' : 'devin ラベル') + '</td>' +
+      '<td class="' + (c.trigger === 'auto-new' || c.trigger === 'impl-done' ? 'trig-auto' : 'trig-label') + '">' +
+        (c.trigger === 'auto-new' ? '自動(新規)' : c.trigger === 'impl-done' ? '処理済み(要再検証)' : 'devin ラベル') + '</td>' +
       '<td>' + implCell + '</td>' +
       '<td>' + judge + '</td>' +
       '<td>' + fmt(c.createdAt) + '</td>' +

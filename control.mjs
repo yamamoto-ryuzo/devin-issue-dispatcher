@@ -21,14 +21,14 @@
  * 127.0.0.1 のみにバインドする。
  */
 import { createServer } from 'node:http';
-import { engineSendCore, injectExtraPrompt, ASSESS_RE, SPLIT_RE, IMPLPR_RE, PRURL_RE } from './engine.mjs';
+import { engineSendCore, injectExtraPrompt, ASSESS_RE, SPLIT_RE } from './engine.mjs';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { readFileSync, writeFileSync, existsSync, openSync, readSync, closeSync, statSync, renameSync, readdirSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { keyOf, discover, toCandidate, readIssueStore } from './discover.mjs';
+import { keyOf, discover, toCandidate, readIssueStore, ghJson } from './discover.mjs';
 import { AcpChat } from './acp-chat.mjs';
 import { createHash } from 'node:crypto';
 
@@ -196,12 +196,14 @@ function busyCount(mode, isPr) {
   return n;
 }
 function chatCapacity(mode, key) {
-  // 同一リポジトリの impl（issue/pr 問わず）は同じ作業ツリーを使うため直列化。
-  // 別枠の上限を個別に数えると issue と PR が同時起動して checkout/push が衝突する
-  if (mode === 'impl' && key) {
+  // 同一リポジトリの書き込み系（impl=ローカルコミット / pr=再検証 push）は
+  // 同じ作業ツリーを使うため直列化。issue と PR が同時起動して
+  // commit/push が衝突するのを防ぐ
+  if ((mode === 'impl' || mode === 'pr') && key) {
     const repo = key.slice(0, key.indexOf(' '));
     for (const s of chats.values()) {
-      if (s.chat.busy && s.label.endsWith(' impl') && s.label.startsWith(repo + ' ')) {
+      if (s.chat.busy && (s.label.endsWith(' impl') || s.label.endsWith(' pr'))
+          && s.label.startsWith(repo + ' ')) {
         return false;
       }
     }
@@ -209,7 +211,7 @@ function chatCapacity(mode, key) {
   const isPr = mode === 'impl' && key ? key.includes(' pr#') : undefined;
   const max = mode === 'assess'
     ? (config.maxConcurrentAssess ?? config.maxConcurrent ?? 1)
-    : isPr === true
+    : (mode === 'pr' || isPr === true)
     ? (config.maxConcurrentPr ?? config.maxConcurrentImpl ?? config.maxConcurrent ?? 1)
     : (config.maxConcurrentImpl ?? config.maxConcurrent ?? 1);
   return busyCount(mode, isPr) < max;
@@ -328,14 +330,14 @@ async function dispatchChatTask(key, mode, skill, engine) {
     shim.send(p.text).catch(() => {});
     if (mode === 'assess') watchAssess(key, shim);
     if (mode === 'split') watchSplit(key, shim);
-    if (mode === 'impl') watchImpl(key, shim);
+    if (mode === 'impl' || mode === 'pr') watchImpl(key, shim);
     return id;
   }
   const id = pickChatId(key + ' ' + mode, eng);
   await chats.get(id).chat.send(p.text);
   if (mode === 'assess') watchAssess(key, chats.get(id).chat);
   if (mode === 'split') watchSplit(key, chats.get(id).chat);
-  if (mode === 'impl') watchImpl(key, chats.get(id).chat);
+  if (mode === 'impl' || mode === 'pr') watchImpl(key, chats.get(id).chat);
   return id;
 }
 setInterval(() => {
@@ -388,15 +390,27 @@ function taskPrompt(key, mode, skillFile) {
       `   （タイトル先頭に [残課題]、本文に元 issue #${m[3]} への参照と残作業の箇条書き）\n` +
       `4. 最後に <!--split\\n{"newKey":"${m[1]} issue#<新issue番号>"}\\nsplit--> ブロックを出力`
     : head + (m[2] === 'pr'
+        // 手動作成の PR 課題（旧経路）
         ? `gh pr checkout ${m[3]} -R ${m[1]} で対象 PR のブランチへ移り、レビュー指摘・CI 失敗等へ対応→検証→push。\n` +
-          `新規ブランチ・新規 PR の作成は禁止。main直push・force push禁止。\n`
-        : `ブランチ devin/${m[2]}-${m[3]} を切り、実装→検証→push→` +
-          `gh pr create（本文に Closes #${m[3]}）。main直push・force push禁止。\n`) +
-      `検証が NG の場合は修正→再検証のループを最大 ${config.implLoopMax ?? 5} 回まで行う。\n` +
-      `上限に達しても完了しない場合は「対応困難」として理由と現状を ` +
-      `${m[2] === 'pr' ? 'PR' : 'issue'} コメントで報告し、ユーザーへ対応を依頼する。\n` +
-      `PR を作成した場合は最後に <!--impl-pr\\n{"prKey":"${m[1]} pr#<作成したPR番号>"}\\nimpl-pr--> ` +
-      `ブロックを出力（作成した PR は評価スキルで評価されてから PR 対応へ進む）。` };
+          `新規ブランチ・新規 PR の作成は禁止。main直push・force push禁止。\n` +
+          `検証が NG の場合は修正→再検証のループを最大 ${config.implLoopMax ?? 5} 回まで行う。\n` +
+          `上限に達しても完了しない場合は「対応困難」として理由と現状を PR コメントで報告し、ユーザーへ対応を依頼する。\n`
+        : mode === 'pr'
+        // AI:impl-done 付き issue の再検証（PR処理=リモートへのコミット）
+        ? `この課題は実装済み（AI:impl-done フラグ付き）です。既定ブランチ上の未 push コミットを別視点で再検証してください。\n` +
+          `1. git status と git log origin/<既定ブランチ>..HEAD --oneline で未 push コミットを確認\n` +
+          `2. 完了時スキル（_done）の確認項目を違う視点で再検証\n` +
+          `3. OK → git push でリモートへ反映 → 検証内容をコメント → ` +
+          `gh issue edit ${m[3]} -R ${m[1]} --add-label devin:done --remove-label AI:impl-done → ` +
+          `gh issue close ${m[3]} -R ${m[1]}\n` +
+          `   NG → git reset --hard origin/<既定ブランチ> で未検証コミットを破棄 → ` +
+          `gh issue edit ${m[3]} -R ${m[1]} --remove-label AI:impl-done → NG 内容をコメント\n` +
+          `コード修正・新規コミット・ブランチ/PR 作成・force push は禁止。\n`
+        : `既定ブランチで git pull --ff-only してから実装→検証→ローカルコミット（push 禁止。コミットはこの課題の変更のみ）→\n` +
+          `gh issue edit ${m[3]} -R ${m[1]} --add-label AI:impl-done で処理済みフラグを立て、実施内容を issue コメントで報告。\n` +
+          `ブランチ作成・PR 作成・push・force push は禁止。\n` +
+          `検証が NG の場合は修正→再検証のループを最大 ${config.implLoopMax ?? 5} 回まで行う。\n` +
+          `上限に達しても完了しない場合は「対応困難」として理由と現状を issue コメントで報告し、ユーザーへ対応を依頼する。\n`) };
 }
 
 const readBody = (req, limit = 64 * 1024) => new Promise((resolve, reject) => {
@@ -552,64 +566,48 @@ function watchSplit(key, ch) {
   setTimeout(() => clearInterval(iv), 30 * 60 * 1000).unref?.();
 }
 
-// 対応完了を監視: <!--impl-pr {"prKey":...}--> または PR URL を検出したら作成 PR を評価キューへ投入
+// 対応完了を監視: 委譲 impl/verify セッションの終了時に issue の状態から status を確定する
+// （impl: AI:impl-done 有=impl-done / 無=needs-review、
+//   verify: close=done / flag残=impl-done(再検証) / flag除去=verify-ng）
 const implWatchers = new Set();
 function watchImpl(key, ch) {
   if (implWatchers.has(key)) return;
   implWatchers.add(key);
-  const repo = key.slice(0, key.indexOf(' '));
   const iv = setInterval(() => {
     if (ch.busy) return;
     clearInterval(iv);
     implWatchers.delete(key);
-    // 直近30件の agent メッセージから検出: まずマーカー（正規経路）、無ければ PR URL で補完
-    let prKey = null;
-    const agentMsgs = [];
-    for (let i = ch.messages.length - 1; i >= 0 && agentMsgs.length < 30; i--) {
-      if (ch.messages[i].role === 'agent') agentMsgs.push(ch.messages[i].text);
-    }
-    for (const text of agentMsgs) {
-      const m = text.match(IMPLPR_RE);
-      if (m) { try { prKey = JSON.parse(m[1].trim()).prKey || null; } catch { /* noop */ } break; }
-    }
-    if (!prKey) {
-      for (const text of agentMsgs) {
-        const u = text.match(PRURL_RE);
-        if (u) { prKey = repo + ' pr#' + u[1]; break; }
-      }
-    }
-    // 別リポジトリの PR は共有チャット履歴の取り違え（誤検出）なので記録しない
-    if (prKey && !prKey.startsWith(repo + ' ')) prKey = null;
-    // dispatcher から委譲された自動 impl: chat 完了時に status を確定する
-    // （PR 検出=done / 未検出=needs-review）。dispatcher は chatResult と
-    // inflightClearedAt を読んで滞留中の委譲マーカーを解除する
-    {
-      const st0 = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
-      if (st0.tasks[key]?.chatDelegated === 'impl') {
-        const at = new Date().toISOString();
-        st0.tasks[key] = { ...st0.tasks[key],
-          chatResult: { status: prKey ? 'done' : 'needs-review', at },
-          inflightClearedAt: at };
-        delete st0.tasks[key].inflight;
-        writeFileSync(STATE_PATH, JSON.stringify(st0, null, 2));
-      }
-    }
-    if (!prKey) return;
-    const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
-    st.tasks[key] = { ...(st.tasks[key] ?? {}),
-      createdPr: prKey, prAt: new Date().toISOString() };
-    // PR 検出＝実装成功。エンジン障害由来の failed が残っていれば done に戻す
-    if (st.tasks[key].status === 'failed' && st.tasks[key].engineError) {
-      st.tasks[key].status = 'done';
-      delete st.tasks[key].engineError;
-      delete st.tasks[key].engineErrorAt;
-    }
-    writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
-    if (!chatWait.some((w) => w.key === prKey) &&
-        ![...chats.values()].some((s) => s.chat.busy && s.label === prKey + ' assess') &&
-        !st.tasks[prKey]?.assess?.category) {
-      chatWait.push({ key: prKey, mode: 'assess' });
-    }
+    // dispatcher から委譲された自動 impl/verify: chat 完了時に status を確定する。
+    // dispatcher は chatResult と inflightClearedAt を読んで滞留中の委譲マーカーを解除する
+    const st0 = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+    const delegated = st0.tasks[key]?.chatDelegated;
+    if (delegated !== 'impl' && delegated !== 'verify') return;
+    const m = key.match(/^(\S+)\s+issue#(\d+)$/);
+    (async () => {
+      let status = 'needs-review';
+      try {
+        if (m && delegated === 'verify') {
+          const cur = await ghJson(['issue', 'view', m[2], '-R', m[1], '--json', 'state,labels']);
+          const names = (cur.labels ?? []).map((l) => l.name ?? l);
+          const flag = config.implDoneLabel ?? 'AI:impl-done';
+          status = cur.state === 'CLOSED' ? 'done'
+            : names.includes(flag) ? 'impl-done' : 'verify-ng';
+        } else if (m) {
+          const cur = await ghJson(['issue', 'view', m[2], '-R', m[1], '--json', 'labels']);
+          const flag = config.implDoneLabel ?? 'AI:impl-done';
+          status = (cur.labels ?? []).some((l) => (l.name ?? l) === flag)
+            ? 'impl-done' : 'needs-review';
+        } else {
+          status = 'done'; // pr#N 課題（旧経路）
+        }
+      } catch { /* 確認失敗 → needs-review */ }
+      const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+      const at = new Date().toISOString();
+      st.tasks[key] = { ...st.tasks[key],
+        chatResult: { status, at }, inflightClearedAt: at };
+      delete st.tasks[key].inflight;
+      writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+    })();
   }, 3000);
   setTimeout(() => { clearInterval(iv); implWatchers.delete(key); }, 30 * 60 * 1000).unref?.();
 }
@@ -672,6 +670,7 @@ function candLabels() {
     failed: config.failedLabel ?? 'devin:failed',
     needsReview: config.needsReviewLabel ?? 'devin:needs-review',
     rejected: config.rejectedLabel ?? 'devin:rejected',
+    implDone: config.implDoneLabel ?? 'AI:impl-done',
   };
 }
 
@@ -684,7 +683,7 @@ function writeCandsCache(items) {
 }
 
 // open PR の本文から close/fix/resolve #N（または owner/repo#N）参照を抽出する。
-// watchImpl の <!--impl-pr--> マーカー検出の漏れ・誤検出を補完するための派生データ用
+// パネルで「親 issue に対応する open PR」を表示するための派生データ用
 function closingIssueNums(body, repo) {
   const out = new Set();
   const re = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:(\S+)#|#)(\d+)/gi;

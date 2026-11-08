@@ -58,8 +58,6 @@ export function injectExtraPrompt(text, extraPrompt) {
   return text && extraPrompt ? text + '\n\n【追加指示】\n' + extraPrompt : text;
 }
 
-// 判定・PRブロック抽出（watchAssess/watchImpl と同一正規表現）
+// 判定・切り分けブロック抽出（watchAssess/watchSplit と同一正規表現）
 export const ASSESS_RE = /<!--devin-assess\s*([\s\S]*?)devin-assess-->/;
 export const SPLIT_RE = /<!--split\s*([\s\S]*?)split-->/;
-export const IMPLPR_RE = /<!--impl-pr\s*([\s\S]*?)impl-pr-->/;
-export const PRURL_RE = /github\.com\/[^\s/]+\/[^\s/]+\/pull\/(\d+)/;

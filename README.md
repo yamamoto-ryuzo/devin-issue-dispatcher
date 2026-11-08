@@ -27,15 +27,19 @@ flowchart TD
         NR["`devin:needs-review` ラベル<br/>＋ 評価結果コメント"]
         SP2["Phase2: 実装セッション起動<br/>(dangerous モード devin -p)"]
         F{"終了コード"}
-        OK["`devin:done` ラベル<br/>＋ 完了コメント(ログパス)"]
+        OK["`AI:impl-done` ラベル確認<br/>＋ 完了コメント(ログパス)"]
         NG["`devin:failed` ラベル<br/>＋ 失敗コメント(ログパス)"]
+        VF["`AI:impl-done` 付き課題を検出<br/>→ Phase3: 再検証セッション起動"]
+        VO{"別視点の検証結果"}
+        VOK["git push → `devin:done` 付与<br/>→ issue クローズ"]
+        VNG["未検証コミットを reset で破棄<br/>→ `AI:impl-done` 除去で差し戻し"]
         ST["起動時: `running` のまま残り<br/>180分超の取り残しを検出<br/>→ `failed` へ回収"]
     end
 
     subgraph S["Phase2 devin -p セッション (dangerous)"]
-        P1["AGENTS.md/規約を読込<br/>`git switch -c devin/issue-N`"]
+        P1["AGENTS.md/規約を読込<br/>既定ブランチで `git pull --ff-only`<br/>(ブランチは切らない)"]
         P2["Issue 実装 / PR レビュー対応<br/>lint・test・build で検証"]
-        P3["push → `gh pr create`<br/>(本文に Closes #N)"]
+        P3["ローカルコミット（push しない）<br/>issue に `AI:impl-done` 付与"]
     end
 
     A --> B
@@ -46,7 +50,9 @@ flowchart TD
     V -- "yes/low〜medium" --> SP2
     V -- "no / needs-human / high" --> NR
     SP2 --> P1 --> P2 --> P3 --> F
-    F -- "0" --> OK
+    F -- "0" --> OK --> VF --> VO
+    VO -- "OK" --> VOK
+    VO -- "NG" --> VNG -.-> R
     F -- "非0 / spawn失敗" --> NG
     NG -.-> R
     NR -.-> R
@@ -59,7 +65,9 @@ flowchart TD
 stateDiagram-v2
     [*] --> open: Issue/PR が open(autoTrigger ON の間は全件候補)
     open --> devin_running: dispatcher が検出・評価セッション起動
-    devin_running --> devin_done: 評価OK→実装→exit 0 (PR作成済み)
+    devin_running --> impl_done: 評価OK→実装→ローカルコミット＋`AI:impl-done` 付与
+    impl_done --> devin_done: 再検証 OK → push＋`devin:done` 付与＋クローズ
+    impl_done --> open: 再検証 NG → 未検証コミット破棄＋`AI:impl-done` 除去で再候補化
     devin_running --> devin_failed: 実装 exit 非0 / spawn失敗 / stale回収
     devin_running --> devin_needs_review: feasible=no/needs-human または risk=high
     devin_failed --> open: `devin:failed` ラベルを外す<br/>or パネルの「再実行」
@@ -198,6 +206,9 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 | `permissionMode` | `dangerous` | `devin -p` の権限モード。**無人運用には `dangerous` が事実上必須**（Windows は `--sandbox` 非対応のため）。リスクを下げたい場合は `smart`（承認待ちになりうる） |
 | `assessFirst` | `true` | 実装前に読み取り専用の**評価セッション**を実行（feasible/risk/category/reason/plan を JSON 出力させる） |
 | `maxAutoRisk` | `medium` | 自動実装に進めるリスク上限 |
+| `autoPr` | `false` | `AI:impl-done` 付き課題の再検証（PR処理＝リモートへのコミット）を自動実行するか |
+| `implDoneLabel` | `AI:impl-done` | 実装済み・未検証のフラグラベル。付いた open issue が再検証候補になる |
+| `verifyLoopMax` | 3 | 再検証セッションのリトライ上限（到達で `devin:needs-review`） |
 | `needsReviewLabel` | `devin:needs-review` | category=`review` 時の保留ラベル（付いた課題は候補から除外。外すと再候補化） |
 | `rejectedLabel` | `devin:rejected` | category=`reject`・risk 超過・評価不能時の除外ラベル（恒久的に候補から除外。外すと再候補化） |
 
@@ -274,8 +285,9 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 - **評価の手動スキップ**: 個別「対応」ボタン／`POST /api/dispatch` は人間が対象を
   選定済みとみなし評価フェーズをスキップして実装に直行する。
 - **冪等性**: ラベル + state.json の二重管理。再起動しても二重起動しない。
-- **破壊的操作の抑止**: プロンプトで main 直 push・force push を禁止し、
-  常に `devin/issue-N` ブランチ → PR 経由に限定している。
+- **破壊的操作の抑止**: 実装セッションは push を禁止し**ローカルコミットまで**に限定。
+  リモートへの反映は、別セッションの再検証（違う視点の動作確認）を通った
+  コミットのみが `git push` される二段階方式（「PR処理」= 実質リモートへのコミット）。
 
 ## エンジン別の動作検証（非 devin エンジン E2E）
 
@@ -301,14 +313,13 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 | assess 判定ブロック出力 | ○ `<!--devin-assess-->` 出力 | ○ 同左 | 未検証 |
 | `state.tasks[key].assess` 反映 | ○ | ○ | — |
 | autoTrigger 連鎖（assess→impl 自動投入） | ○ | ○ | — |
-| impl 到達（編集〜PR 作成） | × | × | ×（単発応答） |
+| impl 到達（編集〜ローカルコミット＋フラグ付与） | × | × | ×（単発応答） |
 
 ### 制限事項（検証で判明・確認した挙動）
 
 - **bridge プロバイダはリポジトリ操作ツールを持たず impl は成立しない**
   - copilot:「地図操作のみを扱う設定で、リポジトリの閲覧・変更や GitHub 操作は
-    できません」と応答。ファイル編集・push・`gh pr create` ができず
-    `<!--impl-pr-->` も出力されない
+    できません」と応答。ファイル編集・コミット・`AI:impl-done` フラグ付与ができない
   - antigravity: ツール基盤自体はあるが `command` が権限拒否される
     （`~/.gemini/antigravity-cli/settings.json` の `permissions.allow` 設定が必要。
     許可すれば将来 impl が可能になる可能性あり）

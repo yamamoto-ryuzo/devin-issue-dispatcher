@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { engineSendCore, injectExtraPrompt, assertApiUrlSafe,
-         ASSESS_RE, IMPLPR_RE, PRURL_RE } from '../engine.mjs';
+         ASSESS_RE, SPLIT_RE } from '../engine.mjs';
 
 const mockFetch = (fn) => { const orig = globalThis.fetch; globalThis.fetch = fn; return () => { globalThis.fetch = orig; }; };
 const res = (body, ok = true, status = 200) => ({ ok, status, json: async () => body });
@@ -49,10 +49,9 @@ test('assertApiUrlSafe: https 許可・loopback http 許可・外部 http 拒否
   assert.throws(() => assertApiUrlSafe('http://8.8.8.8'), /https のみ許可/);
 });
 
-test('判定ブロック抽出: assess/impl-pr/PR URL', () => {
+test('判定ブロック抽出: assess/split', () => {
   const m = 'text <!--devin-assess {"feasible":"yes"} devin-assess--> tail'.match(ASSESS_RE);
   assert.equal(JSON.parse(m[1].trim()).feasible, 'yes');
-  const p = 'log <!--impl-pr {"prKey":"o/r pr#5"} impl-pr-->'.match(IMPLPR_RE);
-  assert.equal(JSON.parse(p[1].trim()).prKey, 'o/r pr#5');
-  assert.equal('see https://github.com/o/r/pull/42'.match(PRURL_RE)[1], '42');
+  const s = 'log <!--split {"newKey":"o/r issue#9"} split-->'.match(SPLIT_RE);
+  assert.equal(JSON.parse(s[1].trim()).newKey, 'o/r issue#9');
 });
