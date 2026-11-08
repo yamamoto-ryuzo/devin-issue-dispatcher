@@ -88,11 +88,7 @@
 </style>
 </head>
 <body>
-<div style="display:flex;align-items:center;gap:14px">
-  <h1 style="margin-right:auto">Devin Agent Dispatcher</h1>
-  <span id="auth-status" style="font-size:12px;color:#6b7280"></span>
-  <button id="btn-login" class="loginbtn" onclick="doLogin()">Devinログイン</button>
-</div>
+<h1>Devin Agent Dispatcher</h1>
 <div class="sub">GitHub Issue/PR → devin -p 自動対応エージェントの管理パネル</div>
 
 <div class="card">
@@ -220,22 +216,7 @@ let cfgInit = false;
 const flags = { autoDiscover: false, autoAssess: false, autoTrigger: false };
 let logKey = null;
 function viewLog(key) { logKey = key; showTab('log'); }
-async function checkAuth() {
-  try {
-    const j = await (await fetch(API + '/api/auth')).json();
-    document.getElementById('auth-status').textContent =
-      j.loggedIn ? 'ログイン済み' : 'devin 未ログイン';
-    document.getElementById('auth-status').style.color = j.loggedIn ? '#15803d' : '#dc2626';
-    const lb = document.getElementById('btn-login');
-    lb.classList.toggle('loggedin', !!j.loggedIn);
-    lb.textContent = j.loggedIn ? 'ログイン済み' : 'Devinログイン';
-  } catch { /* noop */ }
-}
-async function doLogin() {
-  await fetch(API + '/api/login', { method: 'POST', headers: H });
-  toast('ログインウィンドウを開きました（ブラウザで認証後、自動で閉じます）');
-}
-checkAuth();
+// devin.exe CLI ログインは IDE エンジン方式では不要（実行は Devin IDE セッションが担う）
 let lastActive = [];
 async function killActive() {
   for (const s of lastActive) {
