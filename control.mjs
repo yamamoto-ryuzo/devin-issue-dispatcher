@@ -89,6 +89,14 @@ function taskPrompt(key, mode) {
       `最後に <!--devin-assess\\n{"feasible":"yes|needs-human|no","risk":"low|medium|high",` +
       `"category":"auto|review|reject","reason":"理由","plan":"方針"}\\ndevin-assess-->` +
       ` ブロックを出力。`
+    : mode === 'split'
+    ? head + `この課題について、現在のリポジトリ状態を確認し、実装済みの部分と未実装の部分を切り分けてください（コード変更はしない）。\n` +
+      `1. 実装状況を調査（git log / コードの現状 / PR履歴）\n` +
+      `2. 元 issue を実装済み扱いにする: gh issue edit ${m[3]} -R ${m[1]} --add-label devin:done し、\n` +
+      `   「実装済み部分は完了として切り分け。残りは新規 issue #N に移行」のコメントを投稿\n` +
+      `3. 未実装の残り作業をまとめた新規 issue を gh issue create -R ${m[1]} で作成\n` +
+      `   （タイトル先頭に [残課題]、本文に元 issue #${m[3]} への参照と残作業の箇条書き）\n` +
+      `4. 最後に <!--split\\n{"newKey":"${m[1]} issue#<新issue番号>"}\\nsplit--> ブロックを出力`
     : head + `ブランチ devin/${m[2]}-${m[3]} を切り、実装→検証→push→` +
       `gh pr create（本文に Closes #${m[3]}）。main直push・force push禁止。` };
 }
@@ -161,6 +169,35 @@ function watchAssess(key) {
   }, 3000);
   // 30分で強制終了
   setTimeout(() => { clearInterval(iv); assessWatchers.delete(key); }, 30 * 60 * 1000).unref?.();
+}
+
+// 切り分け完了を監視: <!--split {"newKey":...}--> を検出したら新 issue を自動再評価
+function watchSplit(key) {
+  const iv = setInterval(() => {
+    if (chat.busy) return;
+    clearInterval(iv);
+    for (let i = chat.messages.length - 1; i >= 0; i--) {
+      const msg = chat.messages[i];
+      if (msg.role !== 'agent') continue;
+      const m = msg.text.match(/<!--split\s*([\s\S]*?)split-->/);
+      if (!m) continue;
+      try {
+        const { newKey } = JSON.parse(m[1].trim());
+        if (newKey) {
+          const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+          st.tasks[key] = { ...(st.tasks[key] ?? {}),
+            splitTo: newKey, splitAt: new Date().toISOString() };
+          writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+          const p = taskPrompt(newKey, 'assess');
+          if (p && !p.error) {
+            chat.send(p.text).then(() => watchAssess(newKey));
+          }
+        }
+      } catch { /* noop */ }
+      break;
+    }
+  }, 3000);
+  setTimeout(() => clearInterval(iv), 30 * 60 * 1000).unref?.();
 }
 
 function status() {
@@ -349,6 +386,7 @@ const server = createServer(async (req, res) => {
         try {
           await chat.send(p.text);
           if (mode === 'assess') watchAssess(key);
+          if (mode === 'split') watchSplit(key);
           return json(200, { ok: true });
         }
         catch (e) { return json(500, { ok: false, error: e.message }); }

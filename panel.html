@@ -600,8 +600,23 @@ function detail(key) {
     (a.reason ? '<div class="kv"><b>判定理由</b>' + esc(a.reason) + '</div>' : '') +
     (a.plan ? '<div class="kv"><b>実施方針</b><pre>' + esc(a.plan) + '</pre></div>' : '') +
     (a.assessedAt ? '<div class="kv"><b>評価日時</b>' + fmt(a.assessedAt) + '</div>' : '') +
-    (!a.category ? '<div class="kv">まだ評価されていません。「評価」ボタンで評価を実行できます。</div>' : '');
+    (!a.category ? '<div class="kv">まだ評価されていません。「評価」ボタンで評価を実行できます。</div>' : '') +
+    '<div class="kv" style="margin-top:10px"><button class="mini" ' +
+      'onclick="splitIssue(\'' + esc(c.key) + '\')">切り分け</button>' +
+      '<span style="font-size:11px;color:#6b7280">実装済み部分を完了にし、残りを新規 issue に分割して自動再評価します</span></div>';
   document.getElementById('modal').style.display = 'flex';
+}
+
+// 切り分け: 実装済み部分を完了・残りを新規Issue化 → 新Issueを自動再評価
+async function splitIssue(key) {
+  try {
+    const r = await fetch(API + '/api/chat/task', {
+      method: 'POST', headers: H, body: JSON.stringify({ key, mode: 'split' }),
+    });
+    const j = await r.json();
+    toast(j.ok ? '切り分けを実行中: ' + key : '失敗: ' + (j.error || ''));
+    if (j.ok) { showTab('chat'); loadChat(); }
+  } catch (e) { toast('split: ' + e.message); }
 }
 let candTab = '__all__';
 let openCounts = {};
