@@ -398,7 +398,14 @@ async function loadSkills() {
     skillOpts.impl = (j.files || []).map((f) => f.name).filter((n) => n.startsWith('_impl'));
     if (!pickAssess) pickAssess = skillOpts.assess[0] || '_assess.md';
     if (!pickImpl) pickImpl = skillOpts.impl[0] || '_impl.md';
-    const names = (j.files || []).map((f) => { skillFiles[f.name] = f.content; return f.name; });
+    // 動作順に並べる: 全体 → 評価 → 切り分け → 対応 → 完了時 → その他
+    const ORDER = ['_all', '_assess', '_split', '_impl', '_done'];
+    const names = (j.files || []).map((f) => { skillFiles[f.name] = f.content; return f.name; })
+      .sort((a, b) => {
+        const ia = ORDER.findIndex((o) => a.startsWith(o));
+        const ib = ORDER.findIndex((o) => b.startsWith(o));
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+      });
     if (!skillSel || !skillFiles[skillSel]) skillSel = names[0] || '_all.md';
     const skillPurpose = (n) =>
       n.startsWith('_all') ? '全モード' :
