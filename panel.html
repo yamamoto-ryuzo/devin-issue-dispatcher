@@ -388,10 +388,16 @@ async function saveCfg() {
 }
 
 let skillFiles = {};
+const skillOpts = { assess: [], impl: [] };
+let pickAssess = '', pickImpl = '';
 async function loadSkills() {
   try {
     const j = await (await fetch(API + '/api/skills')).json();
     skillFiles = {};
+    skillOpts.assess = (j.files || []).map((f) => f.name).filter((n) => n.startsWith('_assess'));
+    skillOpts.impl = (j.files || []).map((f) => f.name).filter((n) => n.startsWith('_impl'));
+    if (!pickAssess) pickAssess = skillOpts.assess[0] || '_assess.md';
+    if (!pickImpl) pickImpl = skillOpts.impl[0] || '_impl.md';
     const sel = document.getElementById('skill-name');
     sel.innerHTML = (j.files || []).map((f) => {
       skillFiles[f.name] = f.content;
@@ -501,7 +507,7 @@ const localBusy = new Set(); // 押下直後から即反映するローカルの
 async function assess(key) {
   try {
     const r = await fetch(API + '/api/chat/task', {
-      method: 'POST', headers: H, body: JSON.stringify({ key, mode: 'assess' }),
+      method: 'POST', headers: H, body: JSON.stringify({ key, mode: 'assess', skill: pickAssess }),
     });
     const j = await r.json();
     toast(j.queued ? '同時起動上限のため待機キューに登録しました（空き次第自動実行）: ' + key
@@ -521,7 +527,7 @@ async function assess(key) {
 async function dispatch(key) {
   try {
     const r = await fetch(API + '/api/chat/task', {
-      method: 'POST', headers: H, body: JSON.stringify({ key, mode: 'impl' }),
+      method: 'POST', headers: H, body: JSON.stringify({ key, mode: 'impl', skill: pickImpl }),
     });
     const j = await r.json();
     toast(j.queued ? '同時起動上限のため待機キューに登録しました（空き次第自動実行）: ' + key
@@ -807,9 +813,16 @@ function renderCandBody() {
       '<td>' + (c.runningLabel ? 'running ラベル付き(起動中/取残し)' :
                 c.state ? 'state: ' + c.state : '') + '</td></tr>';
     }).join('');
+    const skillSel = (id, opts, cur) =>
+      '<select style="font-size:10px;width:78px" title="使用する skills/*.md" ' +
+      'onchange="' + (id === 'a' ? 'pickAssess' : 'pickImpl') + '=this.value">' +
+      opts.map((f) => '<option value="' + esc(f) + '"' + (f === cur ? ' selected' : '') + '>' +
+        esc(f.replace('.md', '')) + '</option>').join('') + '</select>';
     return head + '<table><thead><tr>' +
       '<th title="課題の種別（issue / PR）と番号">種別</th>' +
-      '<th title="評価: チャットで対応可否だけを評価（変更しない）&#10;対応: 実装の実行指示を送信">操作</th>' +
+      '<th title="評価: チャットで対応可否だけを評価（変更しない）&#10;対応: 実装の実行指示を送信">操作' +
+        '<br>' + skillSel('a', skillOpts.assess, pickAssess) +
+        '<br>' + skillSel('i', skillOpts.impl, pickImpl) + '</th>' +
       '<th title="GitHub の課題タイトル（クリックで GitHub を開く）">タイトル</th>' +
       '<th title="候補になった経路&#10;自動(新規): 起点以降に作成された未処理課題&#10;devin ラベル: 明示的にラベル指定">トリガー</th>' +
       '<th title="評価セッションの判定結果&#10;auto: 即対応可 / review: 検討の上対応 / reject: 不可・危険&#10;risk: low/medium/high&#10;ホバーで理由も表示">判定</th>' +

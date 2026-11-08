@@ -86,7 +86,7 @@ function pickChatId(label) {
   return id;
 }
 // フェーズ別の上限（maxConcurrentAssess/Impl）を超えた送信は待機キューへ
-const chatWait = []; // {key, mode}
+const chatWait = []; // {key, mode, skill}
 function busyCount(mode) {
   let n = 0;
   for (const s of chats.values()) if (s.chat.busy && s.label.endsWith(' ' + mode)) n++;
@@ -98,8 +98,8 @@ function chatCapacity(mode) {
     : (config.maxConcurrentImpl ?? config.maxConcurrent ?? 1);
   return busyCount(mode) < max;
 }
-async function dispatchChatTask(key, mode) {
-  const p = taskPrompt(key, mode);
+async function dispatchChatTask(key, mode, skill) {
+  const p = taskPrompt(key, mode, skill);
   const id = pickChatId(key + ' ' + mode);
   await chats.get(id).chat.send(p.text);
   if (mode === 'assess') watchAssess(key, chats.get(id).chat);
@@ -109,13 +109,13 @@ async function dispatchChatTask(key, mode) {
 setInterval(() => {
   for (let i = chatWait.length - 1; i >= 0; i--) {
     if (chatCapacity(chatWait[i].mode)) {
-      const { key, mode } = chatWait.splice(i, 1)[0];
-      dispatchChatTask(key, mode).catch(() => { /* noop */ });
+      const { key, mode, skill } = chatWait.splice(i, 1)[0];
+      dispatchChatTask(key, mode, skill).catch(() => { /* noop */ });
     }
   }
 }, 3000).unref?.();
 
-function taskPrompt(key, mode) {
+function taskPrompt(key, mode, skillFile) {
   const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
   if (!m) return null;
   const repo = config.repos?.find((r) => r.github === m[1]);
@@ -127,7 +127,9 @@ function taskPrompt(key, mode) {
     catch { /* next */ }
   }
   // skills/: モード別・完了時のカスタム指示を注入（_all/_assess/_impl/_split/_done.md）
-  const skillFiles = ['_all.md', `_${mode}.md`, '_done.md'];
+  // skillFile 指定時はモード既定ではなくそのファイルを使う（パス走査防止の検証付き）
+  const modeSkill = (skillFile && /^[\w-]+\.md$/.test(skillFile)) ? skillFile : `_${mode}.md`;
+  const skillFiles = ['_all.md', modeSkill, '_done.md'];
   const skills = skillFiles
     .map((f) => { try { return readFileSync(join(ROOT, 'skills', f), 'utf8').trim(); } catch { return ''; } })
     .filter(Boolean).join('\n\n');
@@ -455,16 +457,16 @@ const server = createServer(async (req, res) => {
       }
       if (url.pathname === '/api/chat/task') {
         // パネルの「評価」「対応」ボタン → 空き/新規セッションへ自動送信
-        const { key, mode } = JSON.parse((await readBody(req)) || '{}');
-        const p = taskPrompt(key, mode);
+        const { key, mode, skill } = JSON.parse((await readBody(req)) || '{}');
+        const p = taskPrompt(key, mode, skill);
         if (!p) return json(400, { ok: false, error: 'bad key: ' + key });
         if (p.error) return json(400, { ok: false, error: p.error });
         try {
           if (!chatCapacity(mode)) {
-            chatWait.push({ key, mode });
+            chatWait.push({ key, mode, skill });
             return json(202, { ok: true, queued: true });
           }
-          const id = await dispatchChatTask(key, mode);
+          const id = await dispatchChatTask(key, mode, skill);
           return json(200, { ok: true, id });
         }
         catch (e) { return json(500, { ok: false, error: e.message }); }
