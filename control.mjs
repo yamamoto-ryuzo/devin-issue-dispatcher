@@ -113,7 +113,8 @@ function pickChatId(label) {
   for (const [id, s] of chats) if (!s.chat.busy) { if (label) s.label = label; return id; }
   const id = ++chatSeq;
   chats.set(id, {
-    chat: new AcpChat({ devinExe: config.devinExe, cwd: dirname(ROOT) }),
+    chat: new AcpChat({ devinExe: config.devinExe, cwd: dirname(ROOT),
+      getPersistedOptions: () => config.acpOptions ?? {} }),
     label: label ?? `session ${id}`,
   });
   return id;
@@ -167,7 +168,8 @@ async function engineSend(eng, prompt) {
   const hub = (config.bridgeHub || 'http://127.0.0.1:8511').replace(/\/+$/, '');
   const r = await fetch(hub + '/agent', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider: eng, prompt }),
+    body: JSON.stringify({ provider: eng, prompt,
+      ...(config.bridgeModels?.[eng] ? { model: config.bridgeModels[eng] } : {}) }),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || 'bridge-hub ' + r.status);
@@ -494,6 +496,8 @@ function status() {
       engine: config.engine ?? 'devin',
       bridgeHub: config.bridgeHub ?? 'http://127.0.0.1:8511',
       apiUrl: config.apiUrl ?? '', apiModel: config.apiModel ?? '',
+      apiModels: config.apiModels ?? {},
+      bridgeModels: config.bridgeModels ?? {},
       apiKeySet: !!effectiveApiKey(), // 値自体は返さない（hasValue のみ）
       extraPrompt: config.extraPrompt ?? '',
       repos: (config.repos || []).map((r) => r.github),
@@ -668,7 +672,8 @@ const server = createServer(async (req, res) => {
           'autoDiscover', 'autoTrigger', 'autoAssess', 'autoPr', 'autoCategory',
           'maxAutoRisk',
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax',
-          'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt'];
+          'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt',
+          'apiModels', 'bridgeModels', 'acpOptions'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
         const applied = {};
@@ -727,7 +732,15 @@ const server = createServer(async (req, res) => {
       }
       if (url.pathname === '/api/chat/option') {
         const { sid, id, value } = JSON.parse((await readBody(req)) || '{}');
-        try { await chats.get(sid).chat.setOption(id, value); return json(200, { ok: true }); }
+        try {
+          await chats.get(sid).chat.setOption(id, value);
+          // モデル/モード選択を config.acpOptions へ永続化（次回 session/new で再適用）
+          const fresh = loadJson(CONFIG_PATH, config);
+          (fresh.acpOptions ??= {})[id] = value;
+          writeFileSync(CONFIG_PATH, JSON.stringify(fresh, null, 2) + '\n');
+          config = fresh;
+          return json(200, { ok: true });
+        }
         catch (e) { return json(500, { ok: false, error: e.message }); }
       }
       if (url.pathname === '/api/chat/clear') {
@@ -770,7 +783,21 @@ const server = createServer(async (req, res) => {
         } catch (e) { return json(500, { ok: false, error: e.message }); }
       }
       if (url.pathname === '/api/models') {
-        // 汎用 API エンドポイントのモデル一覧を取得（OpenAI互換 GET /v1/models）
+        // モデル一覧取得。provider=api → OpenAI互換 GET {apiUrl}/models
+        // provider=copilot/antigravity → bridge-hub GET /models?provider=
+        const { provider } = JSON.parse((await readBody(req)) || '{}');
+        if (provider === 'copilot' || provider === 'antigravity') {
+          const hub = (config.bridgeHub || 'http://127.0.0.1:8511').replace(/\/+$/, '');
+          const r = await fetch(`${hub}/models?provider=${provider}`);
+          const j = await r.json().catch(() => null);
+          if (!r.ok || !j?.models) {
+            return json(502, { ok: false, error: j?.error || 'hub models ' + r.status });
+          }
+          // fallback:true は CLI 未ログイン疑い（固定一覧）としてパネルへ伝達
+          return json(200, { ok: true,
+            models: j.models.map((m) => m.id ?? m).filter(Boolean),
+            fallback: !!j.fallback });
+        }
         const u = (config.apiUrl || '').replace(/\/+$/, '');
         if (!u) return json(400, { ok: false, error: 'apiUrl 未設定' });
         const r = await fetch(u + '/models',

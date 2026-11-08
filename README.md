@@ -225,6 +225,7 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 - GitHub 側から指定する場合は `engine:copilot` のようなラベル、または本文に `engine: copilot` の行を書く
 - API: `POST /api/chat/task`・`/api/dispatch`・`/api/assess` のボディに `engine` を渡すとその実行だけエンジンを上書きできる
 - 実際に使われたエンジンは `state.tasks[key].engineUsed` に記録され、処理履歴タブの「エンジン」列に表示される
+- モデル選択: api エンジンはエンドポイント別の最終選択を `config.apiModels` に記憶しエンドポイント変更時に復元＋一覧自動取得。bridge プロバイダは AI タブのモデル欄（hub `/models` 実取得・fallback=未ログイン疑い）で `config.bridgeModels` へ保存し `/agent` へ `model` 付与。devin ACP のモデル/モード選択は `config.acpOptions` へ永続化し次回セッションへ自動再適用
 
 ### シークレットの取り扱い（統一ルール）
 
