@@ -126,9 +126,15 @@ function taskPrompt(key, mode) {
     try { policy = readFileSync(join(ROOT, 'prompts', f + '.md'), 'utf8').trim(); break; }
     catch { /* next */ }
   }
+  // skills/: モード別・完了時のカスタム指示を注入（_all/_assess/_impl/_split/_done.md）
+  const skillFiles = ['_all.md', `_${mode}.md`, '_done.md'];
+  const skills = skillFiles
+    .map((f) => { try { return readFileSync(join(ROOT, 'skills', f), 'utf8').trim(); } catch { return ''; } })
+    .filter(Boolean).join('\n\n');
   const head = `GitHub ${m[2]} #${m[3]} (${m[1]}):\n` +
     `- リポジトリ: ${repo.path}\n- タイトル: ${it.title ?? ''}\n- URL: ${it.url ?? ''}\n` +
-    `- 本文:\n${it.body || '(本文なし)'}\n\n## リポジトリ指針\n${policy}\n\n`;
+    `- 本文:\n${it.body || '(本文なし)'}\n\n## リポジトリ指針\n${policy}\n\n` +
+    (skills ? `## 追加スキル指示\n${skills}\n\n` : '');
   return { key, text: mode === 'assess'
     ? head + `この課題の対応可否を【評価のみ】してください（コード変更・コミット禁止）。\n` +
       `最後に <!--devin-assess\\n{"feasible":"yes|needs-human|no","risk":"low|medium|high",` +
