@@ -74,7 +74,8 @@ git log origin/<既定ブランチ>..HEAD で未 push コミット（= その課
           │      devin:done 付与＋AI:impl-done 除去 → gh issue close
           └─ NG → git reset --hard origin/<既定ブランチ> で未検証コミットを
                   破棄 → AI:impl-done を除去＋NG 内容をコメント
-                  （課題は自動で再対応キューへ戻る）
+                  （保存済み評価の category/risk は dispatcher が1ランク
+                    引き上げ、課題は自動で再対応キューへ戻る）
 ```
 
 ## 常に守ること

@@ -32,7 +32,7 @@ flowchart TD
         VF["`AI:impl-done` 付き課題を検出<br/>→ Phase3: 再検証セッション起動"]
         VO{"別視点の検証結果"}
         VOK["git push → `devin:done` 付与<br/>→ issue クローズ"]
-        VNG["未検証コミットを reset で破棄<br/>→ `AI:impl-done` 除去で差し戻し"]
+        VNG["未検証コミットを reset で破棄<br/>→ `AI:impl-done` 除去で差し戻し<br/>→ 判定ランク1段引上げ"]
         ST["起動時: `running` のまま残り<br/>180分超の取り残しを検出<br/>→ `failed` へ回収"]
     end
 
@@ -67,7 +67,7 @@ stateDiagram-v2
     open --> devin_running: dispatcher が検出・評価セッション起動
     devin_running --> impl_done: 評価OK→実装→ローカルコミット＋`AI:impl-done` 付与
     impl_done --> devin_done: 再検証 OK → push＋`devin:done` 付与＋クローズ
-    impl_done --> open: 再検証 NG → 未検証コミット破棄＋`AI:impl-done` 除去で再候補化
+    impl_done --> open: 再検証 NG → 未検証コミット破棄＋`AI:impl-done` 除去＋判定ランク引上げで再候補化
     devin_running --> devin_failed: 実装 exit 非0 / spawn失敗 / stale回収
     devin_running --> devin_needs_review: feasible=no/needs-human または risk=high
     devin_failed --> open: `devin:failed` ラベルを外す<br/>or パネルの「再実行」
@@ -302,6 +302,11 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 - **破壊的操作の抑止**: 実装セッションは push を禁止し**ローカルコミットまで**に限定。
   リモートへの反映は、別セッションの再検証（違う視点の動作確認）を通った
   コミットのみが `git push` される二段階方式（「PR処理」= 実質リモートへのコミット）。
+- **再検証 NG 時のエスカレーション**: 差し戻された課題は保存済み verdict の
+  category/risk を**1ランク引き上げて**再候補化する。引き上げ後も自動処理範囲内なら
+  impl へ再投入され（委譲エンジン経路も同様）、範囲外なら `devin:needs-review` /
+  `devin:rejected` で停止。同じ判定での無限再試行を防ぎ、繰り返し NG になる課題は
+  段階的に人間確認へ収束する。
 
 ## エンジン別の動作検証（非 devin エンジン E2E）
 

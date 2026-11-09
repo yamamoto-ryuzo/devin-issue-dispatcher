@@ -297,6 +297,26 @@ ${policy ? `\n## このリポジトリ固有の対応指針（評価基準に含
 const running = new Map(); // key -> { proc, startedAt }
 const RISK_RANK = { low: 0, medium: 1, high: 2 };
 const MAX_RISK = () => RISK_RANK[config.maxAutoRisk ?? 'medium'] ?? 1;
+const CAT_RANK = ['auto', 'review', 'human', 'reject'];
+const MAX_CAT = () => CAT_RANK.indexOf(config.autoCategory ?? 'review');
+
+// verify NG（差し戻し）時に保存済み verdict の category/risk を1ランク引き上げる。
+// 同じ判定の再利用で impl → verify-ng が無限に繰り返されるのを防ぎ、
+// 再試行のたびに needs-review / reject 側へ収束させる。NG 内容は reason へ引き継ぐ
+const VERDICT_STEPS = { risk: ['low', 'medium', 'high'], category: CAT_RANK };
+function escalateVerdict(assess, why) {
+  if (!assess || assess.error) return assess;
+  const up = (steps, v) =>
+    steps[Math.min(Math.max(steps.indexOf(v), 0) + 1, steps.length - 1)];
+  return { ...assess,
+    risk: up(VERDICT_STEPS.risk, assess.risk),
+    category: up(VERDICT_STEPS.category, assess.category),
+    reason: `${assess.reason ?? ''} [verify-ng差し戻し: ${why}]`.trim() };
+}
+// verdict が自動処理範囲を超えたか（引き上げ後の判定に使用）
+const verdictOverLimit = (a) => !a || a.category === 'reject'
+  || (RISK_RANK[a.risk] ?? 2) > MAX_RISK()
+  || CAT_RANK.indexOf(a.category) > MAX_CAT();
 
 const KILL_PATH = join(ROOT, 'kill-requests.json');
 const readKillRequests = () => {
@@ -436,9 +456,27 @@ async function syncShared(state) {
       // （control は state.json しか書かず GitHub ラベルは操作しない）
       const m2 = k.match(/^(\S+)\s+(issue|pr)#(\d+)$/);
       const rst = dt.chatResult.status;
-      const add = rst === 'done' ? [LABEL.done]
+      let add = rst === 'done' ? [LABEL.done]
         : rst === 'impl-done' ? [LABEL.implDone]
         : rst === 'needs-review' ? [LABEL.needsReview] : [];
+      // 委譲 verify の NG 差し戻しでも devin 経路と同様に verdict を1ランク引き上げる。
+      // 引き上げ後に自動処理範囲外なら滞留させず needs-review / rejected で終了させる
+      // （チャット経路は新 verdict なしに impl へ再投入しないため、ここで確定する）
+      if (rst === 'verify-ng' && cur.assess && !cur.assess.error) {
+        const before = `${cur.assess.category}/${cur.assess.risk}`;
+        cur.assess = escalateVerdict(cur.assess, '再検証 NG（委譲セッション）');
+        log(`ESCALATE ${k}: ${before} -> ${cur.assess.category}/${cur.assess.risk}`);
+        if (verdictOverLimit(cur.assess)) {
+          cur.status = (cur.assess.category === 'reject'
+            || (RISK_RANK[cur.assess.risk] ?? 2) > MAX_RISK()) ? 'rejected' : 'needs-review';
+          add = [cur.status === 'rejected' ? LABEL.rejected : LABEL.needsReview];
+          if (m2) await comment(m2[1], +m2[3], m2[2],
+            `再検証 NG による差し戻しで判定ランクが引き上げられ、自動処理範囲を超えました。\n\n` +
+            `- category: \`${cur.assess.category}\` / risk: \`${cur.assess.risk}\`\n` +
+            `- 理由: ${cur.assess.reason}\n\n` +
+            `人間が対応する場合はラベルを外すか、パネルの「対応」ボタンで直接起動してください。`);
+        }
+      }
       if (m2) await setLabel(m2[1], +m2[3], m2[2], add,
         [LABEL.running, LABEL.failed]);
     }
@@ -492,37 +530,53 @@ async function runTask(task, state, { skipAssess = false } = {}) {
     const cur = state.tasks[key] ?? {};
     const verdictFresh = cur.assess?.category && cur.assessedAt
       && Date.now() - new Date(cur.assessedAt).getTime() <= ASSESS_MAX_AGE_MS;
+    // verify-ng 差し戻し直後の再候補: 引き上げ済み verdict が自動範囲内なら
+    // impl へ再投入する。watchAssess の impl 連鎖は新 verdict 記録時にのみ
+    // 発火するため、「判定済みスキップ」のままだと差し戻し課題が滞留する
+    const verifyNgRetry = !task.verify && !skipAssess
+      && cur.status === 'verify-ng' && verdictFresh
+      && !cur.inflight && !cur.chatDelegated
+      && !verdictOverLimit(cur.assess);
     // 委譲が飛行中、または判定済み（impl 連鎖は control 側 watchAssess が担う）
     // なら二重送信しない
-    if (cur.inflight || cur.chatDelegated || (!skipAssess && !task.verify && verdictFresh)) {
+    if (!verifyNgRetry &&
+        (cur.inflight || cur.chatDelegated || (!skipAssess && !task.verify && verdictFresh))) {
       log(`CHAT-ROUTE-SKIP ${key}: delegated in flight or verdict recorded`);
       return;
     }
-    const dmode = mode;
-    const j = await dispatchViaChat(key, dmode, eng);
-    const now = new Date().toISOString();
-    // assess 委譲: verdict 記録・impl 連鎖は watchAssess が担う。status='running'
-    // にすると自動連鎖条件（status が running 系でないこと）を塞ぐため
-    // inflight マーカーのみ立てる
-    // impl/verify 委譲: chat 完了時に control 側 watchImpl が chatResult で
-    // status を確定するまで running 表示を維持。chatId は停止要求
-    // （kill-requests → /api/chat/cancel）用に記録する
-    state.tasks[key] = { ...cur,
-      inflight: dmode, inflightAt: now, engineUsed: eng,
-      ...(j?.id != null ? { chatId: j.id } : {}),
-      note: `エンジン ${eng} のためチャット経路へ委譲(${dmode})`,
-      ...(dmode !== 'assess'
-        ? { status: 'running', chatDelegated: dmode === 'pr' ? 'verify' : 'impl',
-            delegatedAt: now, startedAt: now }
-        : {}) };
-    saveState(state);
-    if (dmode !== 'assess') {
-      // devin 経路と同じ running ラベルを付与（完了時の done/failed 等は
-      // syncShared が chatResult 消費時に適用、stale 回収は reclaimStale が担う）
-      await setLabel(task.repo.github, task.number, task.type,
-        [LABEL.running], [LABEL.failed, LABEL.done, LABEL.needsReview, LABEL.rejected]);
+    const dmode = verifyNgRetry ? 'impl' : mode;
+    // 再投入は impl 用エンジンで解決し直す（assess 用と異なる場合がある）。
+    // impl エンジンが devin 解決なら委譲せず、このまま devin 経路へ継続する
+    // （評価フェーズで引き上げ済み verdict が再利用され impl へ進む）
+    const deng = verifyNgRetry ? resolveTaskEngine(key, 'impl', state) : eng;
+    if (deng === 'devin') {
+      log(`CHAT-ROUTE-RETRY ${key}: impl エンジンは devin 解決のため devin 経路へ継続`);
+    } else {
+      const j = await dispatchViaChat(key, dmode, deng);
+      const now = new Date().toISOString();
+      // assess 委譲: verdict 記録・impl 連鎖は watchAssess が担う。status='running'
+      // にすると自動連鎖条件（status が running 系でないこと）を塞ぐため
+      // inflight マーカーのみ立てる
+      // impl/verify 委譲: chat 完了時に control 側 watchImpl が chatResult で
+      // status を確定するまで running 表示を維持。chatId は停止要求
+      // （kill-requests → /api/chat/cancel）用に記録する
+      state.tasks[key] = { ...cur,
+        inflight: dmode, inflightAt: now, engineUsed: deng,
+        ...(j?.id != null ? { chatId: j.id } : {}),
+        note: `エンジン ${deng} のためチャット経路へ委譲(${dmode})`,
+        ...(dmode !== 'assess'
+          ? { status: 'running', chatDelegated: dmode === 'pr' ? 'verify' : 'impl',
+              delegatedAt: now, startedAt: now }
+          : {}) };
+      saveState(state);
+      if (dmode !== 'assess') {
+        // devin 経路と同じ running ラベルを付与（完了時の done/failed 等は
+        // syncShared が chatResult 消費時に適用、stale 回収は reclaimStale が担う）
+        await setLabel(task.repo.github, task.number, task.type,
+          [LABEL.running], [LABEL.failed, LABEL.done, LABEL.needsReview, LABEL.rejected]);
+      }
+      return;
     }
-    return;
   }
   const base = join(LOG_DIR,
     `${task.repo.github.replace('/', '_')}_${task.type}${task.number}_${Date.now()}`);
@@ -552,17 +606,32 @@ async function runTask(task, state, { skipAssess = false } = {}) {
       const vcode = await spawnDevin(withTms(vprompt), task, vp, key);
       // 結果を issue の状態で確定する: close=反映済み / flag残=未完(再検証) / flag除去=差し戻し
       let st2 = 'needs-review';
+      let ngNote = '';
       if (vcode === 0) {
         try {
           const cur = await ghJson(['issue', 'view', String(task.number), '-R', task.repo.github,
-            '--json', 'state,labels']);
+            '--json', 'state,labels,comments']);
           const names2 = (cur.labels ?? []).map((l) => l.name ?? l);
           if (cur.state === 'CLOSED') st2 = 'done';
           else if (names2.includes(LABEL.implDone)) st2 = tries >= vMax ? 'needs-review' : 'impl-done';
-          else st2 = 'verify-ng';
+          else {
+            st2 = 'verify-ng';
+            // 差し戻し理由は検証セッションが残した最終コメントから引き継ぐ
+            ngNote = (cur.comments ?? []).at(-1)?.body?.split('\n')[0].slice(0, 160) ?? '';
+          }
         } catch { st2 = 'needs-review'; }
       } else st2 = 'failed';
+      // verify NG で差し戻された課題は保存済み verdict の category/risk を
+      // 1ランク引き上げて再候補化（同一判定での無限再試行を防ぐ）
+      const prevAssess = state.tasks[key]?.assess;
+      const escalated = st2 === 'verify-ng' && prevAssess && !prevAssess.error
+        ? escalateVerdict(prevAssess, ngNote || `再検証 NG（try ${tries}）`)
+        : null;
+      if (escalated) {
+        log(`ESCALATE ${key}: ${prevAssess.category}/${prevAssess.risk} -> ${escalated.category}/${escalated.risk}`);
+      }
       state.tasks[key] = { ...state.tasks[key], verifyLog: vp, phase: null,
+        ...(escalated ? { assess: escalated } : {}),
         status: st2, finishedAt: new Date().toISOString(), exitCode: vcode };
       saveState(state);
       log(`VERIFY-${st2.toUpperCase()} ${key} (exit ${vcode})`);
@@ -573,6 +642,10 @@ async function runTask(task, state, { skipAssess = false } = {}) {
         `再検証セッションが異常終了しました（exit ${vcode}）。ログ: \`${vp}\`\n\n再試行はパネルの「再実行」ボタンまたは \`POST /api/dispatch\` から行えます。`);
       if (st2 === 'needs-review') await comment(task.repo.github, task.number, task.type,
         `再検証が ${vMax} 回試行しても完了しませんでした。人間の確認が必要です。`);
+      if (escalated) await comment(task.repo.github, task.number, task.type,
+        `再検証 NG のため差し戻しました。判定ランクを引き上げます: ` +
+        `category \`${prevAssess.category}\`→\`${escalated.category}\` / ` +
+        `risk \`${prevAssess.risk}\`→\`${escalated.risk}\`。課題は再対応キューへ戻ります。`);
       return;
     }
 
@@ -599,10 +672,8 @@ async function runTask(task, state, { skipAssess = false } = {}) {
 
       const tooRisky = verdict && (RISK_RANK[verdict.risk] ?? 2) > MAX_RISK();
       const reject = code !== 0 || !verdict || verdict.category === 'reject' || tooRisky;
-      const CAT_ORDER = ['auto', 'review', 'human', 'reject'];
-      const lim = config.autoCategory ?? 'review';
       const proceed = !reject &&
-        CAT_ORDER.indexOf(verdict.category) <= CAT_ORDER.indexOf(lim);
+        CAT_RANK.indexOf(verdict.category) <= MAX_CAT();
       if (reject) {
         // reject: 破壊的影響・方針違反・評価不能など。実施せず恒久的に除外
         const why = verdict

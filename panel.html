@@ -118,6 +118,7 @@
   .jd-auto { color: #16a34a; } .jd-review { color: #b45309; }
   .jd-human { background: #facc15; color: #1f2937; padding: 2px 8px; border-radius: 999px; }
   .jd-reject { background: #dc2626; color: #fff; padding: 2px 8px; border-radius: 999px; }
+  .jd-err { background: #fee2e2; color: #b91c1c; padding: 2px 8px; border-radius: 999px; }
   .badge-pr { background: #ea580c; color: #fff; padding: 2px 8px; border-radius: 999px;
     font-size: 11px; font-weight: 600; }
   #cands tr.row-no { background: #dc2626; color: #fff; }
@@ -1478,8 +1479,9 @@ async function refresh() {
   document.getElementById('tasks').innerHTML = status.tasks.map(t =>
     '<tr><td>' + esc(t.key) + '</td><td class="st-' + esc(t.status || '') + '">' +
     esc(t.status || '-') + '</td>' +
-    '<td title="' + esc(t.assess?.reason || '') + '">' +
-      (t.assess ? esc(t.assess.category || t.assess.feasible || '?') +
+    '<td title="' + esc(t.assess?.reason || t.assess?.error || '') + '">' +
+      (t.assess?.error ? '<span class="jd jd-err">評価失敗</span>'
+        : t.assess ? esc(t.assess.category || t.assess.feasible || '?') +
         '/' + esc(t.assess.risk || '?') : '-') + '</td>' +
     '<td>' + fmt(t.startedAt) + '</td><td>' +
     fmt(t.finishedAt) + '</td><td>' + (t.exitCode ?? '') + '</td>' +
@@ -1597,7 +1599,8 @@ function detail(key) {
     (a.reason ? '<div class="kv"><b>判定理由</b>' + esc(a.reason) + '</div>' : '') +
     (a.plan ? '<div class="kv"><b>実施方針</b><pre>' + esc(a.plan) + '</pre></div>' : '') +
     (a.assessedAt ? '<div class="kv"><b>評価日時</b>' + fmt(a.assessedAt) + '</div>' : '') +
-    (!a.category ? '<div class="kv">まだ評価されていません。「評価」ボタンで評価を実行できます。</div>' : '') +
+    (a.error ? '<div class="kv"><b>判定</b><span class="jd jd-err">評価失敗</span> ' + esc(a.error) + '</div>'
+      : !a.category ? '<div class="kv">まだ評価されていません。「評価」ボタンで評価を実行できます。</div>' : '') +
     '<div class="kv" style="margin-top:10px">' +
       (a.partial === true || a.partial === 'true'
         ? '<button class="mini" style="background:#7c3aed;border-color:#7c3aed;color:#fff" ' +
@@ -2014,7 +2017,11 @@ function renderCandBody() {
         medium: 'risk=medium: 中程度の注意が必要',
         high: 'risk=high: 高リスク（破壊的操作・機密・注入等）。自動実装の上限超過',
       };
-      const judge = a
+      const judge = a?.error
+        ? '<span class="jd jd-err" title="' + esc(a.error) + '">評価失敗</span>' +
+          '<button class="mini" style="margin-left:4px" onclick="detail(\'' +
+          esc(c.key) + '\')">詳細</button>'
+        : a
         ? '<span class="jd jd-' + esc(a.category || '?') + '">' +
           esc(a.category || '?') + '/' + esc(a.risk || '?') + '</span>' +
           '<button class="mini" style="margin-left:4px" onclick="detail(\'' +
