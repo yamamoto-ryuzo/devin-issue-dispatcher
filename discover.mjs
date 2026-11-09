@@ -117,15 +117,17 @@ export async function discover({ config, labels, state, autoTrigger, maxNewPerPo
     if (names.includes(labels.done) || names.includes(labels.failed)
       || names.includes(labels.needsReview) || names.includes(labels.rejected)) continue;
     const key = keyOf(it.ghRepo, it.type, it.number);
+    const st = state.tasks?.[key]?.status;
     // AI:impl-done フラグ付き issue = 実装済み・未検証。再検証（PR処理）候補。
-    // 新規課題カウントには含めない（既存課題の後段フェーズ）
-    if (it.type === 'issue' && names.includes(implDoneLabel)) {
+    // 新規課題カウントには含めない（既存課題の後段フェーズ）。
+    // クローズ直後は検索インデックス反映まで open で返ることがあるため、
+    // state 上 closed の課題は候補から除外する
+    if (it.type === 'issue' && names.includes(implDoneLabel) && st !== 'closed') {
       found.push({ repo: r, type: it.type, number: it.number, title: it.title,
         body: it.body, url: it.url, labels: names,
         createdAt: it.createdAt, updatedAt: it.updatedAt, auto: true, verify: true });
       continue;
     }
-    const st = state.tasks?.[key]?.status;
     // 候補 = 起点以降に作成された未処理の open Issue/PR（ラベルは使わない）
     // needs-review/rejected の履歴がある課題はラベル除去後に再候補化できる
     const isNew = autoTrigger && (!st || st === 'needs-review' || st === 'rejected' || st === 'verify-ng')

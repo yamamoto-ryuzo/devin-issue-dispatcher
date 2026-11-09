@@ -1325,6 +1325,19 @@ const server = createServer(async (req, res) => {
           st.tasks[key] = { ...(st.tasks[key] ?? {}), status: 'closed',
             closedAt: new Date().toISOString() };
           writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+          // closed 課題に処理済み/実行中ラベルが残ると、検索インデックス反映まで
+          // 再検証候補として残像が出るため併せて剥がす（失敗は無視）
+          try {
+            const lbls = candLabels();
+            const cur2 = await ghJson(['issue', 'view', m[3], '-R', m[1], '--json', 'labels']);
+            const have = new Set((cur2.labels ?? []).map((l) => l.name ?? l));
+            for (const l of [lbls.implDone, lbls.running].filter((x) => have.has(x))) {
+              await new Promise((res) => {
+                execFile('gh', ['issue', 'edit', m[3], '-R', m[1],
+                  '--remove-label', l], () => res());
+              });
+            }
+          } catch { /* noop */ }
           return json(200, { ok: true });
         } catch (e) { return json(500, { ok: false, error: e.message }); }
       }
