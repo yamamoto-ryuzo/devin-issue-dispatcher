@@ -1039,6 +1039,8 @@ async function candidates(force) {
         phase: t?.phase ?? null, inflight: t?.inflight ?? null,
         chatDelegated: t?.chatDelegated ?? null,
         queued: t?.queued ?? null,
+        // dispatcher の待機キュー滞留理由（concurrency/repo-serial/unpushed）
+        waitReason: t?.waitReason ?? null,
         createdPr, openPr,
         engineReq: t?.engineReq ?? null,
         engineIssue: issueEngine(key, issuesAll),

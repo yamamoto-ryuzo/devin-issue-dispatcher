@@ -761,6 +761,24 @@ function unpushedIssueOrder(repoPath) {
   } catch { return new Map(); }
 }
 
+// 同リポジトリに再検証待ち（AI:impl-done 付き open issue）が存在するか。
+// issues.json は discover が毎サイクル更新する open 課題ストア。
+// discover() の verify 候補条件と同じ判定を使う: 終端ラベル
+// （done/failed/needs-review/rejected）付きや state 上 closed の課題は
+// 候補から外れて verify が将来走らないため、それらを解除主体に数えると
+// 未pushゲートが永久に解除されない
+function verifyPending(ghRepo, state) {
+  const issues = readIssueStore(ISSUES_PATH).issues ?? {};
+  return Object.keys(issues).some((k) => {
+    if (!k.startsWith(ghRepo + ' issue#')) return false;
+    const names = issues[k].labels ?? [];
+    if (!names.includes(LABEL.implDone)) return false;
+    if (names.includes(LABEL.done) || names.includes(LABEL.failed)
+      || names.includes(LABEL.needsReview) || names.includes(LABEL.rejected)) return false;
+    return state?.tasks?.[k]?.status !== 'closed';
+  });
+}
+
 const queue = [];
 let draining = false;
 function drainQueue(state) {
@@ -769,34 +787,45 @@ function drainQueue(state) {
   // 起動可能なタスクを全て起動して抜ける（await しない）。
   // 各タスクの完了時に再度 drainQueue が呼ばれ、空いた枠で次が起動される
   const ordCache = new Map(); // verify 優先順位用: repo -> Map(issue番号->順位)
+  // 起動不可の理由を返す（起動可なら null）。滞留タスクへ理由を記録して
+  // 「同時起動がないのに待機」に見える状態を説明可能にする
+  const blockedReason = (t) => {
+    const dest = t.verify ? 'verify' : t.assessOnly ? 'assess' : 'impl';
+    const isPr = dest === 'impl' && t.type === 'pr';
+    // 同時起動数はフェーズ別（パネル変更を即時反映するため都度 config を読む）
+    const base = liveConfig('maxConcurrent', config.maxConcurrent ?? 1);
+    // 0 以下の設定値はキュー永久滞留になるため 1 に丸める
+    const max = Math.max(1, dest === 'assess'
+      ? liveConfig('maxConcurrentAssess', base)
+      : (dest === 'verify' || isPr)
+        ? liveConfig('maxConcurrentPr', liveConfig('maxConcurrentImpl', base))
+        : liveConfig('maxConcurrentImpl', base));
+    // dest（行き先フェーズ）で数える: impl 予定のタスクは評価中でも impl 枠を占有し、
+    // 評価通過後に上限を超えて impl へ進まないようにする
+    const busy = [...running.entries()].filter(([k, v]) =>
+      v.dest === dest &&
+      (dest === 'assess' || k.includes(isPr ? ' pr#' : ' issue#'))).length;
+    if (busy >= max) return 'concurrency';
+    // 同一リポジトリの書き込み系（impl=ローカルコミット / verify=push・reset）は
+    // 同じ作業ツリーで衝突するため直列化
+    const repoBusy = (dest === 'impl' || dest === 'verify') && [...running.entries()]
+      .some(([k, v]) => (v.dest === 'impl' || v.dest === 'verify')
+        && k.startsWith(t.repo.github + ' '));
+    if (repoBusy) return 'repo-serial';
+    // 未 push コミット（= 未検証の実装）が残るリポジトリでは、同リポジトリの
+    // 再検証が控えている場合のみ新規実装を開始しない（別課題の未検証コミットが
+    // 再検証の push に巻き込まれるのを防ぐ）。逆に verify の起点となる
+    // impl-done 課題・キュー内 verify が無い滞留コミット（帰属不明・
+    // closed/rejected 課題由来）は、この実装の後続 verify が revert＋push で
+    // 解消するため、待たせると解除主体が無く永久待機になる
+    const gated = dest === 'impl' && t.type === 'issue'
+      && unpushedCommits(t.repo.path) > 0
+      && (verifyPending(t.repo.github, state)
+        || queue.some((q) => q.verify && q.repo.github === t.repo.github));
+    return gated ? 'unpushed' : null;
+  };
   for (;;) {
-    const elig = (t) => {
-      const dest = t.verify ? 'verify' : t.assessOnly ? 'assess' : 'impl';
-      const isPr = dest === 'impl' && t.type === 'pr';
-      // 同時起動数はフェーズ別（パネル変更を即時反映するため都度 config を読む）
-      const base = liveConfig('maxConcurrent', config.maxConcurrent ?? 1);
-      // 0 以下の設定値はキュー永久滞留になるため 1 に丸める
-      const max = Math.max(1, dest === 'assess'
-        ? liveConfig('maxConcurrentAssess', base)
-        : (dest === 'verify' || isPr)
-          ? liveConfig('maxConcurrentPr', liveConfig('maxConcurrentImpl', base))
-          : liveConfig('maxConcurrentImpl', base));
-      // dest（行き先フェーズ）で数える: impl 予定のタスクは評価中でも impl 枠を占有し、
-      // 評価通過後に上限を超えて impl へ進まないようにする
-      const busy = [...running.entries()].filter(([k, v]) =>
-        v.dest === dest &&
-        (dest === 'assess' || k.includes(isPr ? ' pr#' : ' issue#'))).length;
-      // 同一リポジトリの書き込み系（impl=ローカルコミット / verify=push・reset）は
-      // 同じ作業ツリーで衝突するため直列化
-      const repoBusy = (dest === 'impl' || dest === 'verify') && [...running.entries()]
-        .some(([k, v]) => (v.dest === 'impl' || v.dest === 'verify')
-          && k.startsWith(t.repo.github + ' '));
-      // 未 push コミット（= 未検証の実装）が残るリポジトリでは新規実装を開始しない。
-      // 別課題の未検証コミットが再検証の push に巻き込まれるのを防ぐ
-      const gated = dest === 'impl' && t.type === 'issue' && unpushedCommits(t.repo.path) > 0;
-      return busy < max && !repoBusy && !gated;
-    };
-    let idx = queue.findIndex(elig);
+    let idx = queue.findIndex((t) => !blockedReason(t));
     // 同リポジトリの verify が複数起動可能なら未 push コミットの最古帰属を優先
     // （未検証コミットが他課題 verify の push に同乗する機会を減らす）
     if (idx >= 0 && queue[idx].verify) {
@@ -817,8 +846,9 @@ function drainQueue(state) {
     const key = keyOf(task.repo.github, task.type, task.number);
     // キュー待ちマーカーを解除（runTask が task エントリを spread 更新する前に
     // 消さないと実行中エントリへ queued が残ってしまう）
-    if (state.tasks[key]?.queued) {
+    if (state.tasks[key]?.queued || state.tasks[key]?.waitReason) {
       delete state.tasks[key].queued; delete state.tasks[key].queuedAt;
+      delete state.tasks[key].waitReason;
       saveState(state);
     }
     // running.set は runTask/doAssess 内で非同期に行われるため、ここで先行登録して
@@ -830,6 +860,19 @@ function drainQueue(state) {
       .catch((e) => log(`runTask error ${key}: ${e.message}`))
       .finally(() => { running.delete(key); drainQueue(state); });
   }
+  // 起動できず滞留しているタスクへ待機理由を記録する
+  // （/api/candidates 経由でパネルの「待機中」表示に理由を出すため。
+  // 理由が消えた＝起動条件を満たした滞留は次回 findIndex で起動される）
+  let wq = false;
+  for (const q of queue) {
+    const k = keyOf(q.repo.github, q.type, q.number);
+    const rsn = blockedReason(q);
+    if ((state.tasks[k]?.waitReason ?? null) !== rsn) {
+      state.tasks[k] = { ...(state.tasks[k] ?? {}), waitReason: rsn };
+      wq = true;
+    }
+  }
+  if (wq) saveState(state);
   draining = false;
 }
 
@@ -1173,7 +1216,7 @@ async function main() {
   // 前回プロセスが残したキュー待ちマーカーを掃除（queued はメモリ内キューと
   // 連動する揮発状態。再起動直後はキューが空なので全て陳腐）
   for (const t of Object.values(state.tasks ?? {})) {
-    delete t.queued; delete t.queuedAt;
+    delete t.queued; delete t.queuedAt; delete t.waitReason;
   }
   state.deployedAt ??= new Date().toISOString();
   saveState(state);

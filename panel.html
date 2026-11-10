@@ -2736,8 +2736,15 @@ function renderCandBody() {
         chatQueued ? ' style="background:#eef1f5;color:#94a3b8"' :
         (a?.feasible === 'no' || a?.category === 'reject' || a?.risk === 'high') ? ' class="row-no"' : '';
       const ph = chatPh || localPh;
-      const badge = (bg, t) =>
-        '<span class="badge" style="background:' + bg + ';color:#fff">' + t + '</span>';
+      const badge = (bg, t, tip) =>
+        '<span class="badge" style="background:' + bg + ';color:#fff"' +
+        (tip ? ' title="' + esc(tip) + '"' : '') + '>' + t + '</span>';
+      // dispatcher の待機キュー滞留理由（state.waitReason 由来。candidates API が同梱）
+      const WAIT_TIP = {
+        concurrency: '同時起動数の上限に達しているため待機中（空き次第自動実行）',
+        'repo-serial': '同一リポジトリで対応/検証が実行中のため待機中（直列実行）',
+        unpushed: '未 push コミットがあり同リポジトリの再検証（PR処理）完了を待機中',
+      };
       const CAT_TIP = {
         auto: 'auto（即対応可）: 仕様が明確・リスク低で自動実装に進める判定',
         review: 'review（検討の上対応）: 人間の確認・判断が望ましい判定（devin:needs-review で保留）',
@@ -2766,7 +2773,7 @@ function renderCandBody() {
         : ph?.endsWith(' impl') || c.phase === 'impl' || c.inflight === 'impl' || c.chatDelegated === 'impl' ? 'impl'
         : ph?.endsWith(' assess') || c.phase === 'assess' || c.inflight === 'assess' ? 'assess' : null;
       const assessCell = runKind === 'assess' ? badge('#b45309', tr('評価中'))
-        : quedAssess || c.queued === 'assess' ? badge('#6b7280', tr('待機中'))
+        : quedAssess || c.queued === 'assess' ? badge('#6b7280', tr('待機中'), WAIT_TIP[c.waitReason])
         : '<button class="mini" ' + (busy ? 'disabled' : '') +
           ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? tr('再評価') : tr('評価')) + '</button>';
       const prM = c.openPr ? String(c.openPr).match(/^(\S+)\s+pr#(\d+)$/) : null;
@@ -2774,7 +2781,7 @@ function renderCandBody() {
       const remPr = prM || crM;
       const implCell = runKind === 'verify' ? badge('#b45309', tr('再検証中'))
         : runKind === 'impl' ? badge('#b45309', tr('対応中'))
-        : quedImpl || c.queued === 'impl' || c.queued === 'verify' ? badge('#6b7280', tr('待機中'))
+        : quedImpl || c.queued === 'impl' || c.queued === 'verify' ? badge('#6b7280', tr('待機中'), WAIT_TIP[c.waitReason])
         : prM
           ? '<a class="badge" style="background:#6b7280;color:#fff;text-decoration:none" ' +
             'href="https://github.com/' + esc(prM[1]) + '/pull/' + prM[2] +
