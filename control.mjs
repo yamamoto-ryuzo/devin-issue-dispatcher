@@ -461,7 +461,7 @@ async function dispatchChatTask(key, mode, skill, engine) {
     chats.set(id, { chat: shim, label: key + ' ' + mode });
     shim.busy = true;
     shim.send(p.text).catch(() => {});
-    if (mode === 'impl' || mode === 'pr') recordChatId(key, id);
+    recordChatId(key, id); // 全モードで記録（engN セッション後追い用）
     if (mode === 'assess') watchAssess(key, shim);
     if (mode === 'split') watchSplit(key, shim);
     if (mode === 'impl' || mode === 'pr') watchImpl(key, shim);
@@ -656,6 +656,28 @@ function tailLines(path, n) {
 // チャット評価の判定結果を state.tasks[key].assess に反映する監視
 // （チャット内でエージェントが <!--devin-assess-->{JSON} を出力 → パネル判定列へ）
 const assessWatchers = new Set();
+// watcher の 30 分タイムアウト記録。inflight が残っている（=完了検出できなかった）
+// 場合に state へ記録し issue/pr コメントでも通知する。完了済みは何もしない
+function recordWatchTimeout(key, mode) {
+  const st = loadJson(STATE_PATH, { tasks: {} });
+  const t = st.tasks[key];
+  if (!t?.inflight || t?.chatResult || t?.splitTo) return;
+  const now = new Date().toISOString();
+  st.tasks[key] = { ...t,
+    watchTimeout: mode, watchTimeoutAt: now,
+    engineError: 'watch timeout (' + mode + '): 30分応答なし',
+    engineErrorAt: now, inflightClearedAt: now };
+  delete st.tasks[key].inflight;
+  delete st.tasks[key].inflightAt;
+  writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+  const m = key.match(/^([^ ]+) +(issue|pr)#([0-9]+)$/);
+  if (m) {
+    ghJson([m[2], 'comment', m[3], '-R', m[1], '--body',
+      '[watcher] ' + mode + ' セッションが30分応答なしでタイムアウトしました'])
+      .catch(() => {});
+  }
+}
+
 function watchAssess(key, ch) {
   if (assessWatchers.has(key)) return;
   assessWatchers.add(key);
@@ -663,6 +685,7 @@ function watchAssess(key, ch) {
     if (ch.busy) return;
     clearInterval(iv);
     assessWatchers.delete(key);
+    clearTimeout(to);
     // 直近の agent メッセージ群（最大8件）から判定・split ブロックを横断検出
     let verdictDone = false, splitDone = false, scanned = 0;
     for (let i = ch.messages.length - 1; i >= 0 && scanned < 8; i--) {
@@ -731,16 +754,10 @@ function watchAssess(key, ch) {
       if (verdictDone && splitDone) break;
     }
   }, 3000);
-  // 30分で強制終了。委譲評価の inflight マーカーが残っていればここで解除
-  // （verdict 未出力で滞留した場合に課題が永久スキップされないようにする）
-  setTimeout(() => {
+  // 30分で強制終了。完了検出前に応答が途絶えた場合は失敗として記録する
+  const to = setTimeout(() => {
     clearInterval(iv); assessWatchers.delete(key);
-    const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
-    if (st.tasks[key]?.inflight) {
-      delete st.tasks[key].inflight;
-      st.tasks[key].inflightClearedAt = new Date().toISOString();
-      writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
-    }
+    recordWatchTimeout(key, 'assess');
   }, 30 * 60 * 1000).unref?.();
 }
 
@@ -749,6 +766,7 @@ function watchSplit(key, ch) {
   const iv = setInterval(() => {
     if (ch.busy) return;
     clearInterval(iv);
+    clearTimeout(to);
     for (let i = ch.messages.length - 1; i >= 0; i--) {
       const msg = ch.messages[i];
       if (msg.role !== 'agent') continue;
@@ -769,7 +787,8 @@ function watchSplit(key, ch) {
       break;
     }
   }, 3000);
-  setTimeout(() => clearInterval(iv), 30 * 60 * 1000).unref?.();
+  const to = setTimeout(() => { clearInterval(iv);
+    recordWatchTimeout(key, 'split'); }, 30 * 60 * 1000).unref?.();
 }
 
 // 対応完了を監視: 委譲 impl/verify セッションの終了時に issue の状態から status を確定する
@@ -783,6 +802,7 @@ function watchImpl(key, ch) {
     if (ch.busy) return;
     clearInterval(iv);
     implWatchers.delete(key);
+    clearTimeout(to);
     // dispatcher から委譲された自動 impl/verify: chat 完了時に status を確定する。
     // dispatcher は chatResult と inflightClearedAt を読んで滞留中の委譲マーカーを解除する
     const st0 = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
@@ -816,7 +836,8 @@ function watchImpl(key, ch) {
       writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
     })();
   }, 3000);
-  setTimeout(() => { clearInterval(iv); implWatchers.delete(key); }, 30 * 60 * 1000).unref?.();
+  const to = setTimeout(() => { clearInterval(iv); implWatchers.delete(key);
+    recordWatchTimeout(key, 'impl'); }, 30 * 60 * 1000).unref?.();
 }
 
 function status() {

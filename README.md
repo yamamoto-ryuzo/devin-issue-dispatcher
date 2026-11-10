@@ -356,16 +356,21 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
     許可すれば将来 impl が可能になる可能性あり）
   - assess も**コード未参照のテキスト評価**になる点に注意（プロバイダ自身が
     「コードを参照できないため実装状況は未確認」と回答）
-- **エラー応答は静かに消える**: ハブ未到達等で `engineSend` が失敗すると shim に
-  `[engine error] <msg>` が入るが、watcher はマーカー非検出で何も記録せず終了する。
-  `devin:failed` ラベル・state へのエラー記録・再試行は行われない（実機確認済み）
-- **watcher タイムアウト（30分）も記録なし**: 監視が解除されるだけで状態遷移は
-  起きない（コード確認。長時間実測は未実施）
-- **shim 経路では split 継続が機能しない**: `<!--split-->` 検出後の新規課題再評価は
-  `ch.send()` を呼ぶが shim に `send` がなく、TypeError が catch で握りつぶされ
-  静かに失敗する（コード確認）
-- **shim セッションは `/api/chat?id=` で内容を参照できない**: id が `engN` 形式で
-  数値変換に失敗し messages が空になる（`snapshot()` も未実装。コード確認）
+- **エラー応答は静かに消える → 解消済み**: `engineSend` 失敗時は shim の
+  onError が `state.tasks[key].engineError` を記録し、impl は `status:failed`
+  にする（再検証: 2026-11-10）
+- **watcher タイムアウト（30分）も記録なし → 解消済み**: 各 watcher は正常完了で
+  タイマーを解除し、30分応答なしで打ち切られた場合は `recordWatchTimeout` が
+  `state.tasks[key].watchTimeout`/`engineError` を記録し issue/pr コメントでも
+  通知する（#38、2026-11-10 実装）
+- **shim 経路では split 継続が機能しない → 解消済み**: `<!--split-->` 検出後の
+  再評価は `ch.send()` ではなく `dispatchChatTask` 経由でエンジン解決する
+  （watchSplit、再検証: 2026-11-10）
+- **shim セッションは `/api/chat?id=` で参照できない → 解消済み**: `/api/chat` は
+  `engN` 形式の id をそのまま解釈し shim の `snapshot()` を返す。また全モードで
+  `engN` 形式の id をそのまま解釈し shim の `snapshot()` を返す。`/api/chat/sessions`
+  にも label（課題キー）付きで列挙され、委譲タスクは `state.tasks[key].chatId` にも
+  記録されるため後追いできる（#38、2026-11-10）
 - **`engine` はグローバル設定**: 切替中は投入される全タスクがそのエンジン経路になる。
   検証後は `devin` へ戻すこと
 
