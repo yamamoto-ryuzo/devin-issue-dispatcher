@@ -643,6 +643,7 @@ function setLang(v) {
     <div class="row" style="margin-bottom:6px">
       <button class="mini" onclick="saveGoal()" data-i18n="保存">保存</button>
       <button class="mini" onclick="delGoal()" data-i18n="削除">削除</button>
+      <button class="mini" onclick="svClear()" data-i18n="クリア">クリア</button>
       <span style="font-size:12px;color:#6b7280" data-i18n="リポジトリごとに保存し、選択して再編集できます">リポジトリごとに保存し、選択して再編集できます</span>
     </div>
     <label style="display:block;font-size:12px;font-weight:600;color:#4b5563;margin-bottom:10px"><span data-i18n="どのようなことをしたいか（目的・要望）">どのようなことをしたいか（目的・要望）</span>
@@ -2204,6 +2205,14 @@ function renderGoalImgs() {
     'style="position:absolute;top:-6px;right:-6px;background:#dc2626;color:#fff;border-radius:50%;' +
     'width:16px;height:16px;font-size:12px;line-height:16px;text-align:center;cursor:pointer">×</span></span>'
   ).join('');
+}
+function svClear() {
+  document.getElementById('sv-goal').value = '';
+  document.getElementById('iss-title').value = '';
+  document.getElementById('iss-body').value = '';
+  document.getElementById('iss-result').textContent = '';
+  goalImages = [];
+  renderGoalImgs();
 }
 function loadGoal() {
   const g = goals.find((x) => x.id === document.getElementById('sv-goal-sel').value);
