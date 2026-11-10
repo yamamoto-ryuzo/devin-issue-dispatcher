@@ -320,6 +320,8 @@ ${policy ? `\n## このリポジトリ固有の対応指針（評価基準に含
 
 const running = new Map(); // key -> { proc, startedAt }
 // RISK_RANK / CAT_RANK / VERDICT_STEPS / escalateVerdict は core-logic.mjs へ分離（テスト可能な純粋関数）
+const MAX_RISK = () => RISK_RANK[config.maxAutoRisk ?? 'medium'] ?? 1;
+const MAX_CAT = () => CAT_RANK.indexOf(config.autoCategory ?? 'review');
 // verdict が自動処理範囲を超えたか（引き上げ後の判定に使用）
 const verdictOverLimit = (a) => !a || a.category === 'reject'
   || (RISK_RANK[a.risk] ?? 2) > MAX_RISK()
@@ -799,6 +801,18 @@ async function runTask(task, state, { skipAssess = false } = {}) {
               ? `完了と報告されましたが処理済みフラグ（${LABEL.implDone}）が確認できませんでした。人間の確認が必要です。`
               : `最終報告はセッションログの末尾を参照してください。`)
         : `Devin セッションが異常終了しました（exit ${code}）。ログ: \`${ip}\`\n\n再試行はパネルの「再実行」ボタンまたは \`POST /api/dispatch\` から行えます。`);
+  } catch (e) {
+    // 予期しない例外（コード不具合・外部コマンド失敗等）で中断した課題を
+    // status='running' のまま残さない。stale 回収と同じ failed 終端へ寄せる
+    log(`runTask error ${key}: ${e.message}`);
+    state.tasks[key] = { ...(state.tasks[key] ?? {}), status: 'failed', phase: null,
+      note: `runTask 中断: ${e.message}`, finishedAt: new Date().toISOString() };
+    saveState(state);
+    await setLabel(task.repo.github, task.number, task.type,
+      [LABEL.failed], [LABEL.running]);
+    await comment(task.repo.github, task.number, task.type,
+      `Devin セッションが内部エラーで中断しました（${e.message}）。` +
+      `再試行はパネルの「再実行」ボタンまたは \`POST /api/dispatch\` から行えます。`);
   } finally {
     running.delete(key);
     drainQueue(state);
@@ -976,6 +990,40 @@ async function sweepDelegatedStale(state) {
     delete state.tasks[key].chatId;
     saveState(state);
     log(`delegated sweep resolved ${key} -> ${status}`);
+  }
+}
+
+// ---------- orphaned runs ----------
+
+// 前回プロセスが中断した実行中課題を起動時に終端化する。
+// running マップは起動直後は空なので、status='running' の残存は全て中断の痕跡。
+// phase のみ残った課題（終端処理前に落ちた完了タスク）も掃除する。
+// 委譲チャット経路（inflight/chatDelegated）は control 側の回収・watch 系が
+// 担うため対象外。stale ラベル（devin:running 残留）は reclaimStale が担う。
+async function sweepOrphanedRuns(state) {
+  for (const [key, t] of Object.entries(state.tasks ?? {})) {
+    if (!t || running.has(key) || t.inflight || t.chatDelegated) continue;
+    if (t.status !== 'running') {
+      if (t.phase) { delete t.phase; saveState(state); }
+      continue;
+    }
+    const m = key.match(/^(\S+)\s+(issue|pr)#(\d+)$/);
+    if (!m) continue;
+    let closed = false;
+    try {
+      const cur = await ghJson([m[2], 'view', m[3], '-R', m[1], '--json', 'state']);
+      closed = cur.state === 'CLOSED' || cur.state === 'MERGED';
+    } catch { /* 判定不能なら failed 扱い */ }
+    const post = closed ? 'done' : 'failed';
+    log(`orphaned run reclaimed: ${key} -> ${post}`);
+    state.tasks[key] = { ...t, status: post, phase: null,
+      note: 'dispatcher 停止により中断', finishedAt: new Date().toISOString() };
+    saveState(state);
+    await setLabel(m[1], +m[3], m[2],
+      [closed ? LABEL.done : LABEL.failed], [LABEL.running]);
+    if (!closed) await comment(m[1], +m[3], m[2],
+      `前回の Devin セッションが中断しました（dispatcher 停止またはクラッシュ）。` +
+      `再試行はパネルの「再実行」ボタンまたは \`POST /api/dispatch\` から行えます。`);
   }
 }
 
@@ -1225,6 +1273,7 @@ async function main() {
   if (!DRY_RUN) {
     for (const r of config.repos) await ensureLabels(r.github);
     await reclaimStale(state);
+    await sweepOrphanedRuns(state);
   }
   await cycle(state);
   while (!ONCE) {
