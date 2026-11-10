@@ -27,7 +27,7 @@
 <p>GitHub Issue/PR を監視し、Devin エージェント（<code>devin -p</code> / ACP チャット）が課題の評価・実装・PR対応を自動で行う常駐システム。管理パネル <code>http://127.0.0.1:8585</code> から全体を制御する。</p>
 
 <nav>
-<b>目次:</b> <a href="#arch">構成</a> · <a href="#flow">全体フロー</a> · <a href="#panel">管理パネル</a> ·
+<b>目次:</b> <a href="#arch">構成</a> · <a href="#flow">全体フロー</a> · <a href="#delegate">委譲ライフサイクル</a> · <a href="#panel">管理パネル</a> ·
 <a href="#skills">スキル</a> · <a href="#verdict">4段階判定</a> · <a href="#config">設定項目</a> · <a href="#ide">他IDE連携</a> · <a href="#safety">安全設計</a>
 </nav>
 
@@ -73,6 +73,84 @@ flowchart TD
   mermaid.initialize({ startOnLoad: true });
 </script>
 <p style="font-size:12px;color:#6b7280">図は Mermaid（MIT License）で描画</p>
+
+<h2 id="delegate">委譲チャット実行（chatDelegated）のライフサイクル</h2>
+<p>impl/verify を <code>devin -p</code> 単発セッションではなく ACP チャットセッションへ委譲する経路。投入は2系統ある: ① dispatcher の <code>runTask</code> が非 devin エンジン解決時に <code>POST /api/chat/task</code> 経由で委譲（<code>devin:running</code> ラベル付き）、② control 側の自動連鎖（評価 verdict → <code>chatWait</code> → <code>dispatchChatTask</code>。<b>こちらはラベルを付けない</b>）。</p>
+
+<pre class="mermaid">
+sequenceDiagram
+  participant D as dispatcher.mjs
+  participant C as control.mjs
+  participant A as AcpChat (devin acp)
+  participant GH as GitHub
+  Note over D,C: 投入: dispatcher /api/chat/task<br/>または control 自動連鎖 (chatWait)
+  D->>C: POST /api/chat/task {key, mode}
+  C->>C: state.json: inflight, status=running,<br/>chatDelegated, delegatedAt, chatId
+  C->>A: session/prompt (busy=true)
+  A->>GH: 作業 → コミット → AI:impl-done 付与
+  A-->>C: turn 完了 → busy=false
+  loop watchImpl (3秒毎)
+    C->>C: ch.busy を監視
+  end
+  C->>GH: issue 状態・AI:impl-done フラグ確認
+  C->>C: state.json: chatResult{status} + inflightClearedAt
+  D->>D: syncShared: chatResult 消費<br/>status 確定・chatDelegated 解除・ラベル適用
+</pre>
+
+<p>完了確定は「control が <code>chatResult</code> を書く → dispatcher の <code>syncShared</code> が消費して status/ラベルを確定」の二段書き。<code>chatResult</code> が書かれない限り <code>chatDelegated</code> は解除されず、dispatcher は <code>SKIP: delegated chat run in flight</code> を繰り返す。</p>
+
+<h3>停滞ポイント（観測例: issue#45/#43, 2026-11-10）</h3>
+<pre class="mermaid">
+flowchart TD
+  A["session/prompt 送信<br/>busy=true"] --> B{"turn 完了?"}
+  B -->|OK| C["watchImpl が busy=false 検出<br/>→ chatResult 書込"]
+  B -->|"G1: busy 停滞<br/>(prompt応答/turn_complete 不達)"| D["watchImpl が検出不能"]
+  B -->|"G2: control 再起動<br/>watcher はメモリ内のみ"| E["監視者ごと消滅<br/>chatResult は永久に書かれない"]
+  D --> F["30分 timeout"]
+  F -->|"G3: recordWatchTimeout は<br/>inflight のみ解除"| G["chatDelegated/chatId/<br/>status=running が残留"]
+  E --> G
+  C --> H["dispatcher が chatResult 消費 → 終端"]
+  G --> I["毎サイクル SKIP<br/>delegated chat run in flight"]
+  I --> J{"reclaimStale"}
+  J -->|"G4: devin:running ラベル無し<br/>(自動連鎖経路は付与しない)"| K["回収対象外 → 永久滞留"]
+</pre>
+
+<table>
+<tr><th>#</th><th>隙間</th><th>原因</th></tr>
+<tr><td>G1</td><td><code>ch.busy</code> が解消しない</td><td><code>session/prompt</code> の応答も <code>turn_complete</code> も来ずプロセスも生存 → busy を false にする経路が無い（acp-chat.mjs 側にターン上限が無い）</td></tr>
+<tr><td>G2</td><td>watcher が再起動で消える</td><td><code>implWatchers</code> はインメモリ。<code>restoreChats</code> はチャットを復元するが watcher は再アームされず、委譲中タスクが孤立する</td></tr>
+<tr><td>G3</td><td>timeout が終端化しない</td><td><code>recordWatchTimeout</code> は <code>inflight</code> 系のみ解除。<code>chatDelegated/delegatedAt/chatId/status='running'</code> を残す（<code>!t?.inflight</code> 早期 return もあり）</td></tr>
+<tr><td>G4</td><td>stale 回収が届かない</td><td><code>reclaimStale</code> は <code>devin:running</code> ラベル走査のみ。自動連鎖（chatWait）経路はこのラベルを付けないため対象外</td></tr>
+</table>
+
+<h3>再発防止ロジック</h3>
+<pre class="mermaid">
+flowchart LR
+  subgraph L0["L0: 上流の防御 (acp-chat.mjs)"]
+    P1["busy 停滞検知<br/>turn 中の session/update 無応答<br/>chatStallMinutes(30) 超過<br/>→ session/cancel + busy=false"]
+  end
+  subgraph L1["L1: watcher の終端化 (control.mjs)"]
+    P2["recordWatchTimeout 拡張<br/>chatDelegated も対象化<br/>gh でフラグ確認 → chatResult{via:watch-timeout}<br/>→ 既存消費経路で正常終端"]
+    P3["起動時 watcher 再武装<br/>state.json 走査: chatDelegated 残存を検出<br/>busy→watchImpl 再アーム / 非busy→即終端解決"]
+  end
+  subgraph L2["L2: 最終網 (dispatcher.mjs)"]
+    P4["委譲滞留スイープ<br/>delegatedAt &gt; delegatedSweepMinutes(90)<br/>&amp; chatResult 無し → gh 確認で終端化<br/>control 停止中でも回収可"]
+  end
+  P1 -->|busy が有限時間で解消| P2
+  P2 -->|それでも残った分| P4
+  P3 -->|再起動孤立分| P4
+</pre>
+
+<table>
+<tr><th>層</th><th>機構</th><th>配置</th><th>効果</th></tr>
+<tr><td>L0</td><td>busy 停滞検知＋強制 turn 終了（無応答 <code>chatStallMinutes</code> 分で <code>session/cancel</code>→proc kill → <code>busy=false</code>）</td><td>acp-chat.mjs <code>send()</code> / <code>onUpdate</code> / <code>checkStall</code></td><td>根本原因を塞ぎ、通常経路で <code>chatResult</code> へ到達させる</td></tr>
+<tr><td>L1a</td><td>watcher timeout を「マーカー掃除」から「終端解決」へ: gh のフラグ/close 状態を確認し <code>chatResult{via:'watch-timeout'}</code> を書く。失敗時は <code>needs-review</code>＋<code>engineError</code>。併せて滞留セッションを cancel</td><td>control.mjs <code>recordWatchTimeout</code></td><td>30分で必ず終端状態へ遷移。dispatcher の既存消費（ラベル適用・verify-ng エスカレーション）をそのまま通る</td></tr>
+<tr><td>L1b</td><td>起動時に <code>chatDelegated</code> 残存タスクを走査し watcher 再アーム or 即終端解決</td><td>control.mjs 起動シーケンス（<code>restoreChats</code> 後）</td><td>control 再起動による孤立を解消</td></tr>
+<tr><td>L2</td><td><code>chatDelegated</code>＋<code>delegatedAt</code> 超過＋<code>chatResult</code> 無しを dispatcher が自前で gh 確認→終端化</td><td>dispatcher.mjs <code>reclaimStale</code> 拡張 or 別 sweep</td><td>control 全停止時の最終セーフティネット。閾値は L1(30分)より長く設定し二重解決を避ける</td></tr>
+<tr><td>補助</td><td>パネルに委譲経過時間＋滞留警告を表示</td><td>panel.html / <code>/api/candidates</code></td><td>人間が気づけるようにする（表示用フィールドは API 応答へ含める規約に従う）</td></tr>
+</table>
+
+<div class="note"><b>設計上の要点:</b> 終端化は「マーカーを消す」ではなく「<code>chatResult</code> を書く」で行う。これにより status 確定・ラベル適用・verify-ng エスカレーションが全て dispatcher の既存消費経路（<code>syncShared</code>）に一本化され、二重状態遷移を防げる。観測例では作業自体は完了し <code>AI:impl-done</code> も付与済みだったため、いずれの層が機能していても <code>impl-done</code> 終端へ正しく落ちていた。</div>
 
 <h2 id="panel">管理パネル</h2>
 <table>

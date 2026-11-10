@@ -43,7 +43,7 @@ function copilotSpawnSpec() {
 
 export class AcpChat {
   constructor({ engine, devinExe, devinExtraArgs = [], cwd, getPersistedOptions, saveOption, getMcpServers,
-                initialSessionId, onSessionId }) {
+                initialSessionId, onSessionId, getStallMinutes }) {
     this.engine = engine ?? 'devin';
     this.devinExe = devinExe;
     this.devinExtraArgs = devinExtraArgs;
@@ -52,6 +52,8 @@ export class AcpChat {
     this.saveOption = saveOption ?? (() => {});
     // session/new の mcpServers を都度解決する（config 変更を新セッションへ反映）
     this.getMcpServers = getMcpServers ?? (() => []);
+    // ターン無応答とみなす分数を都度解決（0/負 = 停滞検知を無効化）
+    this.getStallMinutes = getStallMinutes ?? (() => 30);
     // 切断・再起動後に ACP session/load で再開するための永続化済み sessionId。
     // 変更時は onSessionId(id|null) で呼び出し側の永続化層へ通知する
     this.savedSessionId = initialSessionId ?? null;
@@ -66,6 +68,9 @@ export class AcpChat {
     this.busy = false;
     this.ready = false;
     this.error = null;
+    // ターン中の最終 session/update 受信時刻。停滞検知（checkStall）が参照する
+    this.lastActivityAt = 0;
+    this.stallTimer = null;
     // devin 認証のみ使用。copilot では読まないが欠落時も構築は失敗させない
     try {
       const creds = readFileSync(join(homedir(), 'AppData/Roaming/devin/credentials.toml'), 'utf8');
@@ -144,6 +149,9 @@ export class AcpChat {
       this.push('sys', '[セッション切断]');
       // savedSessionId は残す（次の送信で session/load による再開を試みる）
       this.proc = null; this.sessionId = null; this.ready = false; this.busy = false;
+      // 中断したプロセスの応答を待つ rpc は全て拒否（滞留しないようにする）
+      for (const p of this.pending.values()) p.rej(new Error('session closed'));
+      this.pending.clear();
     });
     this.proc.on('error', (e) => {
       this.error = e.message;
@@ -155,6 +163,7 @@ export class AcpChat {
 
   onUpdate(u) {
     if (!u) return;
+    this.lastActivityAt = Date.now();
     if (u.sessionUpdate === 'agent_message_chunk' && u.content?.text) {
       this.agentText(u.content.text);
     } else if (u.sessionUpdate === 'user_message_chunk' && u.content?.text) {
@@ -241,12 +250,51 @@ export class AcpChat {
     await this.ensureSession();
     this.push('user', text);
     this.busy = true;
+    this.lastActivityAt = Date.now();
+    this.armStallWatch();
     // 応答は session/update で流れる。prompt の完了は待たない（UIは busy で追跡）
     this.rpc('session/prompt', {
       sessionId: this.sessionId,
       prompt: [{ type: 'text', text }],
     }).then(() => { this.busy = false; })
       .catch((e) => { this.busy = false; this.push('sys', `[error] ${e.message}`); });
+  }
+
+  // ターン停滞検知: busy のまま session/update が chatStallMinutes 無応答なら
+  // ターンを中断する。prompt 応答・turn_complete・プロセス終了のいずれも来ない
+  // 停滞を検出する最終防衛（watcher 側のタイムアウトとは別系統）
+  armStallWatch() {
+    if (this.stallTimer) return;
+    this.stallTimer = setInterval(() => this.checkStall(), 30 * 1000);
+    this.stallTimer.unref?.();
+  }
+
+  checkStall() {
+    if (!this.busy) return;
+    const mins = +(this.getStallMinutes?.() ?? 30);
+    if (!(mins > 0)) return;
+    const idle = Date.now() - (this.lastActivityAt || 0);
+    if (idle < mins * 60 * 1000) return;
+    this.push('sys', `[応答なし ${Math.round(idle / 60000)}分] ターンを中断します`);
+    // busy を先に解放し、watchImpl 等の完了検出が gh 実状態で終端判定できるようにする
+    this.busy = false;
+    const last = this.messages.at(-1);
+    if (last?.role === 'agent') last.done = true;
+    this.abortTurn();
+  }
+
+  // session/cancel を試み、それでも止まらない場合はプロセスごと畳む。
+  // savedSessionId は残るため次回送信時に session/load で会話を再開できる
+  async abortTurn() {
+    try {
+      if (this.sessionId) {
+        await Promise.race([
+          this.rpc('session/cancel', { sessionId: this.sessionId }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('cancel timeout')), 10000)),
+        ]);
+      }
+    } catch { /* noop */ }
+    try { this.proc?.kill(); } catch { /* noop */ }
   }
 
   async setOption(id, value) {

@@ -59,3 +59,27 @@ export function isInFlight(key, { tasks = {}, running = new Set(), queued = new 
   return running.has(key) || queued.has(key) || runningLabel ||
     !!(t.inflight || t.chatDelegated || t.status === 'running');
 }
+
+// 委譲 impl/verify の終端判定。watchImpl の通常完了・recordWatchTimeout・
+// 起動時走査・dispatcher スイープの全経路で同じ規則を使う。
+// issue:  verify=closed→done / AI:impl-done→impl-done / 無→verify-ng
+//         impl  =AI:impl-done→impl-done / 無→needs-review
+// pr:     旧経路（常に done）
+export function resolveDelegatedStatus(delegated,
+  { state, labels = [], flag = 'AI:impl-done', isPr = false } = {}) {
+  if (isPr) return 'done';
+  if (delegated === 'verify') {
+    if (state === 'CLOSED') return 'done';
+    return labels.includes(flag) ? 'impl-done' : 'verify-ng';
+  }
+  return labels.includes(flag) ? 'impl-done' : 'needs-review';
+}
+
+// 委譲滞留判定: chatDelegated が残り chatResult が無いまま
+// delegatedAt から staleMs 超過した課題は回収対象（control 起動時走査・
+// dispatcher スイープ共通の条件）
+export function isDelegatedStale(task, { now = Date.now(), staleMs = 90 * 60 * 1000 } = {}) {
+  if (!task?.chatDelegated || task.chatResult || !task.delegatedAt) return false;
+  const at = new Date(task.delegatedAt).getTime();
+  return Number.isFinite(at) && now - at > staleMs;
+}

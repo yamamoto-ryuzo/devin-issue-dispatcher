@@ -2,7 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { escalateVerdict, verdictOverLimit, parseIssueRef,
-  labelsForResult, isInFlight } from '../core-logic.mjs';
+  labelsForResult, isInFlight, resolveDelegatedStatus,
+  isDelegatedStale } from '../core-logic.mjs';
 
 const L = { running: 'devin:running', done: 'devin:done', failed: 'devin:failed',
   needsReview: 'devin:needs-review', rejected: 'devin:rejected', implDone: 'AI:impl-done' };
@@ -82,4 +83,37 @@ test('inFlight: 清い課題は false・各種マーカーで true', () => {
   assert.equal(isInFlight(k, { running: new Set([k]) }), true);
   assert.equal(isInFlight(k, { queued: new Set([k]) }), true);
   assert.equal(isInFlight(k, { runningLabel: true }), true);
+});
+
+// ---- resolveDelegatedStatus: 委譲 impl/verify の終端判定 ----
+test('delegatedStatus: verify は close→done / flag→impl-done / 無→verify-ng', () => {
+  assert.equal(resolveDelegatedStatus('verify', { state: 'CLOSED' }), 'done');
+  assert.equal(resolveDelegatedStatus('verify', { state: 'OPEN', labels: ['AI:impl-done'] }), 'impl-done');
+  assert.equal(resolveDelegatedStatus('verify', { state: 'OPEN', labels: [] }), 'verify-ng');
+});
+test('delegatedStatus: impl は flag→impl-done / 無→needs-review', () => {
+  assert.equal(resolveDelegatedStatus('impl', { state: 'OPEN', labels: ['AI:impl-done'] }), 'impl-done');
+  assert.equal(resolveDelegatedStatus('impl', { state: 'OPEN', labels: ['devin:running'] }), 'needs-review');
+});
+test('delegatedStatus: pr 課題は常に done・フラグ名は差し替え可', () => {
+  assert.equal(resolveDelegatedStatus('verify', { isPr: true }), 'done');
+  assert.equal(resolveDelegatedStatus('impl', { isPr: true, labels: [] }), 'done');
+  assert.equal(resolveDelegatedStatus('impl',
+    { state: 'OPEN', labels: ['custom-flag'], flag: 'custom-flag' }), 'impl-done');
+});
+
+// ---- isDelegatedStale: 委譲滞留の回収対象判定 ----
+test('delegatedStale: 閾値超過の未解決委譲のみ true', () => {
+  const now = Date.now();
+  const old = new Date(now - 120 * 60 * 1000).toISOString();
+  const fresh = new Date(now - 10 * 60 * 1000).toISOString();
+  const opt = { now, staleMs: 90 * 60 * 1000 };
+  assert.equal(isDelegatedStale({ chatDelegated: 'impl', delegatedAt: old }, opt), true);
+  assert.equal(isDelegatedStale({ chatDelegated: 'verify', delegatedAt: old }, opt), true);
+  assert.equal(isDelegatedStale({ chatDelegated: 'impl', delegatedAt: fresh }, opt), false);
+  assert.equal(isDelegatedStale({ chatDelegated: 'impl', delegatedAt: old,
+    chatResult: { status: 'impl-done' } }, opt), false); // 終端解決済みは対象外
+  assert.equal(isDelegatedStale({ inflight: 'impl', inflightAt: old }, opt), false); // 委譲でない
+  assert.equal(isDelegatedStale({ chatDelegated: 'impl' }, opt), false); // delegatedAt 欠損
+  assert.equal(isDelegatedStale({ chatDelegated: 'impl', delegatedAt: 'bogus' }, opt), false);
 });

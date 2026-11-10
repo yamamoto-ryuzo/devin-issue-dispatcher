@@ -31,6 +31,7 @@ import { readFileSync, writeFileSync, existsSync, openSync, readSync, closeSync,
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { keyOf, discover, toCandidate, readIssueStore, ghJson } from './discover.mjs';
+import { resolveDelegatedStatus, isDelegatedStale } from './core-logic.mjs';
 import { AcpChat } from './acp-chat.mjs';
 import { computeMetrics } from './metrics.mjs';
 import { createHash } from 'node:crypto';
@@ -230,7 +231,8 @@ function makeChat(eng, restored = {}) {
         // 参照しないよう呼び出し時まで遅延させる
         getMcpServers: () => sessionMcpServers(),
         initialSessionId: restored.sessionId ?? null,
-        onSessionId: () => persistChats() })
+        onSessionId: () => persistChats(),
+        getStallMinutes: () => +(config.chatStallMinutes ?? 30) })
     : makeEngineShim(eng);
 }
 // チャットの id/ラベル/エンジン/ACP sessionId を chats.json へ永続化する。
@@ -658,10 +660,46 @@ function tailLines(path, n) {
 const assessWatchers = new Set();
 // watcher の 30 分タイムアウト記録。inflight が残っている（=完了検出できなかった）
 // 場合に state へ記録し issue/pr コメントでも通知する。完了済みは何もしない
+// 委譲 impl/verify の終端状態を gh の実状態から判定する共通経路
+// （watchImpl の通常完了・recordWatchTimeout・起動時走査で同じ規則を使う）
+async function queryDelegatedStatus(key, delegated) {
+  const m = key.match(/^(\S+)\s+(issue|pr)#(\d+)$/);
+  if (!m) return 'done'; // pr#N 課題（旧経路）
+  try {
+    const cur = await ghJson([m[2], 'view', m[3], '-R', m[1], '--json', 'state,labels']);
+    return resolveDelegatedStatus(delegated, {
+      state: cur.state,
+      labels: (cur.labels ?? []).map((l) => l.name ?? l),
+      flag: config.implDoneLabel ?? 'AI:impl-done',
+      isPr: m[2] === 'pr' });
+  } catch { return 'needs-review'; } // 確認失敗 → 人間へ回す
+}
+
+// 委譲 impl/verify の滞留タスクを gh 実状態で終端解決する。
+// マーカーを消すのではなく chatResult を書く方式に統一し、status 確定・
+// ラベル適用・verify-ng エスカレーションを dispatcher の消費経路へ一本化する
+async function resolveDelegatedEnd(key, via) {
+  const t = loadJson(STATE_PATH, { tasks: {} }).tasks[key];
+  if (!t?.chatDelegated || t.chatResult) return;
+  const status = await queryDelegatedStatus(key, t.chatDelegated);
+  const st = loadJson(STATE_PATH, { tasks: {} });
+  const cur = st.tasks[key];
+  if (!cur?.chatDelegated || cur.chatResult) return; // 競合時は既存結果優先
+  const at = new Date().toISOString();
+  st.tasks[key] = { ...cur,
+    chatResult: { status, at, via }, inflightClearedAt: at };
+  delete st.tasks[key].inflight;
+  delete st.tasks[key].inflightAt;
+  delete st.tasks[key].chatId;
+  writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+}
+
 function recordWatchTimeout(key, mode) {
   const st = loadJson(STATE_PATH, { tasks: {} });
   const t = st.tasks[key];
-  if (!t?.inflight || t?.chatResult || t?.splitTo) return;
+  // 委譲 impl/verify は chatDelegated が正マーカー（inflight は別経路で
+  // 途中解除されることがある）。どちらか残っていればタイムアウト処理する
+  if (!t || (!t.inflight && !t.chatDelegated) || t?.chatResult || t?.splitTo) return;
   const now = new Date().toISOString();
   st.tasks[key] = { ...t,
     watchTimeout: mode, watchTimeoutAt: now,
@@ -670,6 +708,12 @@ function recordWatchTimeout(key, mode) {
   delete st.tasks[key].inflight;
   delete st.tasks[key].inflightAt;
   writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+  // 委譲 impl/verify は「マーカー掃除」ではなく「終端解決」を行う。
+  // gh 実状態で chatResult を書き、dispatcher の消費経路（status 確定・
+  // ラベル適用）へ載せる。書かないと委譲マーカーが残り永久に SKIP される
+  if (t.chatDelegated === 'impl' || t.chatDelegated === 'verify') {
+    resolveDelegatedEnd(key, 'watch-timeout').catch(() => {});
+  }
   const m = key.match(/^([^ ]+) +(issue|pr)#([0-9]+)$/);
   if (m) {
     ghJson([m[2], 'comment', m[3], '-R', m[1], '--body',
@@ -808,25 +852,8 @@ function watchImpl(key, ch) {
     const st0 = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
     const delegated = st0.tasks[key]?.chatDelegated;
     if (delegated !== 'impl' && delegated !== 'verify') return;
-    const m = key.match(/^(\S+)\s+issue#(\d+)$/);
     (async () => {
-      let status = 'needs-review';
-      try {
-        if (m && delegated === 'verify') {
-          const cur = await ghJson(['issue', 'view', m[2], '-R', m[1], '--json', 'state,labels']);
-          const names = (cur.labels ?? []).map((l) => l.name ?? l);
-          const flag = config.implDoneLabel ?? 'AI:impl-done';
-          status = cur.state === 'CLOSED' ? 'done'
-            : names.includes(flag) ? 'impl-done' : 'verify-ng';
-        } else if (m) {
-          const cur = await ghJson(['issue', 'view', m[2], '-R', m[1], '--json', 'labels']);
-          const flag = config.implDoneLabel ?? 'AI:impl-done';
-          status = (cur.labels ?? []).some((l) => (l.name ?? l) === flag)
-            ? 'impl-done' : 'needs-review';
-        } else {
-          status = 'done'; // pr#N 課題（旧経路）
-        }
-      } catch { /* 確認失敗 → needs-review */ }
+      const status = await queryDelegatedStatus(key, delegated);
       const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
       const at = new Date().toISOString();
       st.tasks[key] = { ...st.tasks[key],
@@ -837,6 +864,8 @@ function watchImpl(key, ch) {
     })();
   }, 3000);
   const to = setTimeout(() => { clearInterval(iv); implWatchers.delete(key);
+    // 応答なしのまま放置された委譲セッションを止める（トークン垂れ流し防止）
+    try { ch.cancel?.(); } catch { /* noop */ }
     recordWatchTimeout(key, 'impl'); }, 30 * 60 * 1000).unref?.();
 }
 
@@ -1418,7 +1447,8 @@ const server = createServer(async (req, res) => {
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax',
           'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt', 'extraOrigins',
           'toolMaxSteps', 'apiModels', 'bridgeModels', 'acpOptions', 'plugins',
-          'mcpServers', 'apiProvider', 'apiVersion'];
+          'mcpServers', 'apiProvider', 'apiVersion',
+          'chatStallMinutes', 'delegatedSweepMinutes'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
         // apiProvider は実装済みアダプタの種別のみ受理
@@ -1957,12 +1987,33 @@ const server = createServer(async (req, res) => {
   json(404, { ok: false, error: 'not found' });
 });
 
+// control 再起動で消えた委譲 watcher の再武装。implWatchers はメモリ内のため
+// 再起動すると chatDelegated が残った課題が孤立し、dispatcher が
+// "delegated chat run in flight" で永久スキップする。復元チャットは
+// busy=false 固定（send しない限り busy に戻らない）のため、busy が立っている
+// 場合のみ watchImpl を再アームし、それ以外は stall 窓（chatStallMinutes）の
+// 残時間だけ孤児ターンの書込みを待ってから gh 実状態で終端解決する
+function resumeDelegatedWatches() {
+  const st = loadJson(STATE_PATH, { tasks: {} });
+  const stallMs = Math.max(+(config.chatStallMinutes ?? 30), 1) * 60 * 1000;
+  for (const [key, t] of Object.entries(st.tasks ?? {})) {
+    if (!t?.chatDelegated || t.chatResult) continue;
+    const ch = t.chatId != null ? chats.get(t.chatId)?.chat : null;
+    if (ch?.busy) { watchImpl(key, ch); continue; }
+    const wait = isDelegatedStale(t, { staleMs: stallMs }) ? 0
+      : Math.max(0, new Date(t.delegatedAt ?? 0).getTime() + stallMs - Date.now());
+    setTimeout(() => resolveDelegatedEnd(key, 'startup-sweep')
+      .catch(() => {}), wait).unref?.();
+  }
+}
+
 server.listen(PORT, HOST, () => {
   // dispatcher は常駐前提で自動起動（各自動化はトグルフラグで制御）
   {
     const r = startDispatcher('loop');
     console.log(`[control] auto-started dispatcher: ${JSON.stringify(r)}`);
   }
+  resumeDelegatedWatches();
   console.log(`[control] panel: http://${HOST}:${PORT}/`);
 });
 

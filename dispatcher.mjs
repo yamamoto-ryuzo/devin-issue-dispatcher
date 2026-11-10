@@ -19,7 +19,8 @@ import { fileURLToPath } from 'node:url';
 import { gh, ghJson, keyOf, discover, toCandidate, readIssueStore } from './discover.mjs';
 import { skillEnabled } from './engine.mjs';
 import { checkFailures } from './failure-watch.mjs';
-import { RISK_RANK, CAT_RANK, VERDICT_STEPS, escalateVerdict, parseIssueRef } from './core-logic.mjs';
+import { RISK_RANK, CAT_RANK, VERDICT_STEPS, escalateVerdict, parseIssueRef,
+  resolveDelegatedStatus, isDelegatedStale } from './core-logic.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
@@ -942,6 +943,42 @@ async function reclaimStale(state) {
   saveState(state);
 }
 
+// ---------- delegated sweep ----------
+
+// 委譲チャット課題の最終回収（セーフティネット）: control 側の watcher が
+// 全滅・または control 自体が停止して chatResult が書かれないまま
+// delegatedSweepMinutes を超えた委譲は、dispatcher が gh 実状態で終端判定した
+// chatResult を立て、syncShared の既存消費経路（status確定・ラベル適用・
+// verify-ng エスカレーション）へ載せる。マーカーを直接消さないのは消費経路の
+// 一本化のため（二重の状態遷移を防ぐ）
+async function sweepDelegatedStale(state) {
+  if (DRY_RUN) return;
+  const sweepMs = liveConfig('delegatedSweepMinutes', 90) * 60 * 1000;
+  const flag = config.implDoneLabel ?? 'AI:impl-done';
+  for (const [key, t] of Object.entries(state.tasks ?? {})) {
+    if (!isDelegatedStale(t, { staleMs: sweepMs })) continue;
+    const m = key.match(/^(\S+)\s+(issue|pr)#(\d+)$/);
+    if (!m) continue;
+    let status;
+    try {
+      const cur = await ghJson([m[2], 'view', m[3], '-R', m[1], '--json', 'state,labels']);
+      status = resolveDelegatedStatus(t.chatDelegated, {
+        state: cur.state,
+        labels: (cur.labels ?? []).map((l) => l.name ?? l),
+        flag, isPr: m[2] === 'pr' });
+    } catch { continue; } // gh 失敗は次サイクルで再試行
+    const at = new Date().toISOString();
+    state.tasks[key] = { ...t,
+      chatResult: { status, at, via: 'delegated-sweep' },
+      inflightClearedAt: at };
+    delete state.tasks[key].inflight;
+    delete state.tasks[key].inflightAt;
+    delete state.tasks[key].chatId;
+    saveState(state);
+    log(`delegated sweep resolved ${key} -> ${status}`);
+  }
+}
+
 // ---------- single task (--task) ----------
 
 async function runSingleTask(spec, state) {
@@ -1056,6 +1093,8 @@ function liveConfig(key, fallback) {
 async function cycle(state) {
   // control 側が進めた委譲タスクの完了・解除を先にメモリへ取り込む
   await syncShared(state);
+  // control 側の回収が全滅した委譲課題を gh 実状態で終端化（chatResult 経由）
+  await sweepDelegatedStale(state);
   // 委譲チャット課題への停止要求を転送（devin 経路分は spawnDevin が消費）
   await handleDelegatedKills(state);
   // エラー入力の自動取り込み（config.autoIssueOnFailure=true のときのみ）
