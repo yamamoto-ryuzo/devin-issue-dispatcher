@@ -1745,17 +1745,16 @@ const server = createServer(async (req, res) => {
         return json(200, { ok: true });
       }
       if (url.pathname === '/api/shot') {
-        // 課題整理タブの貼り付け画像を shots/ へ保存（抽出プロンプトへパスを添付する用）
-        const { data } = JSON.parse((await readBody(req, 25 * 1024 * 1024)) || '{}');
-        const m = /^data:image\/(png|jpe?g|gif|webp);base64,(.+)$/i.exec(data || '');
-        if (!m) return json(400, { ok: false, error: 'bad image data' });
-        const dir = join(ROOT, 'shots');
-        mkdirSync(dir, { recursive: true });
-        const fp = join(dir, 'shot_' + Date.now() + '_' +
-          Math.random().toString(36).slice(2, 7) +
-          '.' + (m[1].toLowerCase().startsWith('jp') ? 'jpg' : m[1].toLowerCase()));
-        writeFileSync(fp, Buffer.from(m[2], 'base64'));
-        return json(200, { ok: true, path: fp });
+        // 課題整理タブの貼り付け画像をアセットブランチへ格納しリンクを返す
+        // （ISSUE 登録の添付と同じ issueAssetLinks 経路に統一）
+        const { data, repo } = JSON.parse((await readBody(req, 25 * 1024 * 1024)) || '{}');
+        if (!config.repos?.some((r) => r.github === repo)) {
+          return json(400, { ok: false, error: 'repo not monitored: ' + repo });
+        }
+        try {
+          const links = await issueAssetLinks(repo, [{ name: 'shot', data }]);
+          return json(200, { ok: true, link: links[0] });
+        } catch (e) { return json(500, { ok: false, error: e.message }); }
       }
       if (url.pathname === '/api/issue') {
         // 課題整理タブからの Issue 起票（監視リポジトリ限定）
