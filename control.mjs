@@ -1745,6 +1745,10 @@ const server = createServer(async (req, res) => {
           return json(400, { ok: false, error: 'repo not monitored: ' + repo });
         }
         if (!title) return json(400, { ok: false, error: 'empty title' });
+        // 二重起票防止: 同一タイトルの open Issue が既にあれば作成せず既存を返す
+        const dup = Object.values(readIssueStore(ISSUES_PATH).issues ?? {})
+          .find((it) => it.repo === repo && it.type === 'issue' && it.title === title);
+        if (dup) return json(200, { ok: true, url: dup.url, dup: true });
         try {
           const out = await new Promise((res2, rej) => {
             execFile('gh', ['issue', 'create', '-R', repo,

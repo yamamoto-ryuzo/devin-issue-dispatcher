@@ -2382,45 +2382,77 @@ function pollIssues(id) {
   }, 5 * 60 * 1000);
 }
 function renderProps(list) {
+  // 再描画で登録状態が消えないよう、同一候補（title|body 一致）の登録状態を引き継ぐ
+  const prev = new Map();
+  for (const p of surveyProps) {
+    if (p.createdUrl || p.creating) prev.set((p.title || '') + '|' + (p.body || ''), p);
+  }
+  for (const p of list) {
+    const old = prev.get((p.title || '') + '|' + (p.body || ''));
+    if (old) { p.createdUrl = old.createdUrl; p.creating = old.creating; }
+  }
   surveyProps = list;
   document.getElementById('iss-proposals').innerHTML =
     '<div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px">抽出された Issue 候補（' +
     list.length + '件）' +
     (surveyRepo ? ' <span style="color:#b45309">起票先: ' + esc(surveyRepo) + '</span>' : '') +
     ' <button class="mini primary" style="margin-left:8px" onclick="issueCreateAll()">すべてISSUE登録</button></div>' +
-    list.map((p, i) =>
-      '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin-bottom:6px;background:#f8fafc">' +
-      '<input id="prop-t' + i + '" value="' + esc(p.title || '') + '" ' +
-      'style="width:100%;font-size:13px;padding:5px 8px;border:1px solid #d1d7e0;border-radius:6px;margin-bottom:4px">' +
-      '<textarea id="prop-b' + i + '" style="width:100%;height:80px;font-size:12px;font-family:inherit;' +
-      'padding:6px 8px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false">' + esc(p.body || '') + '</textarea>' +
-      '<button id="prop-btn-' + i + '" class="mini primary" style="margin-top:4px" onclick="issueCreateProp(' + i + ')">ISSUE登録</button>' +
-      '<span id="prop-res-' + i + '" style="font-size:12px;margin-left:8px"></span>' +
-      '</div>').join('');
+    list.map((p, i) => {
+      const btn = (p.createdUrl || p.creating)
+        ? '<button id="prop-btn-' + i + '" class="mini primary" style="margin-top:4px;opacity:.45" disabled>' +
+          (p.createdUrl ? '登録済み' : '登録中…') + '</button>'
+        : '<button id="prop-btn-' + i + '" class="mini primary" style="margin-top:4px" onclick="issueCreateProp(' + i + ')">ISSUE登録</button>';
+      const res = p.createdUrl
+        ? '<a href="' + esc(p.createdUrl) + '" target="_blank" rel="noopener">' + esc(p.createdUrl) + '</a>' : '';
+      return '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin-bottom:6px;background:#f8fafc">' +
+        '<input id="prop-t' + i + '" value="' + esc(p.title || '') + '" ' +
+        'style="width:100%;font-size:13px;padding:5px 8px;border:1px solid #d1d7e0;border-radius:6px;margin-bottom:4px">' +
+        '<textarea id="prop-b' + i + '" style="width:100%;height:80px;font-size:12px;font-family:inherit;' +
+        'padding:6px 8px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false">' + esc(p.body || '') + '</textarea>' +
+        btn +
+        '<span id="prop-res-' + i + '" style="font-size:12px;margin-left:8px">' + res + '</span>' +
+        '</div>';
+    }).join('');
 }
 async function issueCreateProp(i) {
   // 起票先は抽出時のリポジトリに固定（セレクト変更による誤登録を防止）
   const repo = surveyRepo || document.getElementById('sv-repo').value;
+  const p = surveyProps[i];
   const title = document.getElementById('prop-t' + i).value.trim();
   const body = document.getElementById('prop-b' + i).value;
   if (!repo || !title) return toast('リポジトリとタイトルは必須です');
+  if (!p || p.createdUrl || p.creating) return;
+  const btn = document.getElementById('prop-btn-' + i);
+  const res = document.getElementById('prop-res-' + i);
+  const markDone = (url) => {
+    p.creating = false; p.createdUrl = url;
+    if (btn) { btn.disabled = true; btn.style.opacity = '.45'; btn.textContent = '登録済み'; }
+    if (res) res.innerHTML = '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a>';
+  };
+  const markIdle = () => {
+    p.creating = false;
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.textContent = 'ISSUE登録'; }
+  };
+  // 同一タイトルの候補が登録済みなら新規起票せず登録済みに揃える
+  const dup = surveyProps.find((q, j) => j !== i && q.createdUrl &&
+    ((document.getElementById('prop-t' + j)?.value || q.title || '').trim() === title));
+  if (dup) { markDone(dup.createdUrl); return toast('同一タイトルが登録済みのためスキップ: ' + dup.createdUrl); }
+  p.creating = true;
+  if (btn) { btn.disabled = true; btn.style.opacity = '.45'; btn.textContent = '登録中…'; }
   try {
     const r = await fetch(API + '/api/issue', {
       method: 'POST', headers: H, body: JSON.stringify({ repo, title, body }),
     });
     const j = await r.json();
-    toast(j.ok ? 'Issue作成: ' + j.url : '失敗: ' + (j.error || ''));
     if (j.ok) {
-      const btn = document.getElementById('prop-btn-' + i);
-      if (btn) { btn.disabled = true; btn.style.opacity = '.45'; btn.textContent = '作成済み'; }
-      const res = document.getElementById('prop-res-' + i);
-      if (res) res.innerHTML = '<a href="' + esc(j.url) + '" target="_blank" rel="noopener">' + esc(j.url) + '</a>';
+      toast((j.dup ? '同名の既存Issue: ' : 'Issue作成: ') + j.url);
+      markDone(j.url);
       loadCandidates(true);
-    }
-  } catch (e) { toast('issue: ' + e.message); }
+    } else { markIdle(); toast('失敗: ' + (j.error || '')); }
+  } catch (e) { markIdle(); toast('issue: ' + e.message); }
 }
 
-// 全候補を順次登録（作成済みはスキップ）
+// 全候補を順次登録（登録済み・登録中はスキップ）
 async function issueCreateAll() {
   const n = surveyProps.length;
   if (!n) return toast('候補がありません');
@@ -2428,11 +2460,11 @@ async function issueCreateAll() {
   let done = 0;
   if (b) b.disabled = true;
   for (let i = 0; i < n; i++) {
-    const btn = document.getElementById('prop-btn-' + i);
-    if (btn && btn.disabled) { done++; continue; }
+    const p = surveyProps[i];
+    if (p.createdUrl || p.creating) { done++; continue; }
     if (b) b.textContent = 'Issue登録中… ' + (done + 1) + '/' + n;
     await issueCreateProp(i);
-    if (btn && btn.disabled) done++;
+    if (surveyProps[i].createdUrl) done++;
   }
   if (b) { b.textContent = '登録完了 ' + done + '/' + n; b.disabled = false; }
 }
@@ -2450,7 +2482,8 @@ async function issueCreate() {
     const j = await r.json();
     const res = document.getElementById('iss-result');
     if (j.ok && j.url) {
-      res.innerHTML = '<a href="' + esc(j.url) + '" target="_blank" rel="noopener">作成しました: ' + esc(j.url) + '</a>';
+      res.innerHTML = '<a href="' + esc(j.url) + '" target="_blank" rel="noopener">' +
+        (j.dup ? '同名の既存Issueがあります: ' : '作成しました: ') + esc(j.url) + '</a>';
       document.getElementById('iss-title').value = '';
       document.getElementById('iss-body').value = '';
       loadCandidates(true);
