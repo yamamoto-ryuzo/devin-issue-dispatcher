@@ -176,7 +176,7 @@ HTTP API 一覧（POST は `X-Panel: 1` 必須）:
 | POST | `/api/chat/send` `{text,id?}` | 内蔵チャットへ自由文送信（任意指示の実行） |
 | POST | `/api/chat/cancel|clear|reset|close` `{id}` | セッション操作 |
 | POST | `/api/steer` `{key,text}`・`/api/kill` `{key}` | 実行中セッションへ追加入力・停止 |
-| POST | `/api/issue` `{repo,title,body}`・`/api/close` `{key}` | Issue 起票・クローズ |
+| POST | `/api/issue` `{repo,title,body,attachments?}`・`/api/close` `{key}` | Issue 起票（添付は `devin-issue-assets` ブランチへ格納し本文へリンク埋め込み）・クローズ |
 | POST | `/api/verdict` `{key,category}` | 評価カテゴリ手動上書き |
 | POST | `/api/config` `{...}` | config.json の許可キー更新 |
 | POST | `/api/assess-all`・`/api/impl-all` | 候補一括評価・一括対応 |

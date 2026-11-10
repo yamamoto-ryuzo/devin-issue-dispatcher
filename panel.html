@@ -176,6 +176,8 @@ en: {
 'チャット':'Chat','スキル':'Skills','ログ':'Logs','ドキュメント':'Docs',
 '全評価 手動実行':'Assess All (Manual)','全課題対応 手動実行':'Implement All (Manual)',
 '課題抽出':'Extract Issues','中断':'Cancel','保存':'Save','削除':'Delete','ISSUE登録':'Create Issue',
+'添付':'Attach',
+'Ctrl+V で画像貼り付け／添付ボタンでファイル選択できます':'Paste images with Ctrl+V or pick files via the Attach button',
 '今すぐ取得':'Refresh Now','送信':'Send','クリア':'Clear','リセット':'Reset','編集':'Edit','表示':'View',
 '評価':'Assess','再評価':'Re-assess','対応':'Implement','再検証':'Re-verify','再実行':'Retry','詳細':'Details',
 '停止':'Stop','追加':'Add','dispatcher.log に戻す':'Back to dispatcher.log',
@@ -665,8 +667,12 @@ function setLang(v) {
     <div id="iss-proposals" style="margin-bottom:10px"></div>
     <div style="display:flex;flex-direction:column;gap:6px;max-width:720px">
       <input id="iss-title" data-i18n-ph="Issue タイトル" placeholder="Issue タイトル" style="font-size:13px;padding:6px 8px;border:1px solid #d1d7e0;border-radius:6px">
-      <textarea id="iss-body" data-i18n-ph="本文（機能追加・エラー修正の内容）" placeholder="本文（機能追加・エラー修正の内容）" style="height:140px;font-size:12px;font-family:inherit;padding:8px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false"></textarea>
+      <textarea id="iss-body" data-i18n-ph="本文（機能追加・エラー修正の内容）" placeholder="本文（機能追加・エラー修正の内容）" onpaste="onIssPaste(event)" style="height:140px;font-size:12px;font-family:inherit;padding:8px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false"></textarea>
+      <div id="iss-imgs"></div>
       <div class="row"><button class="mini primary" onclick="issueCreate()" data-i18n="ISSUE登録">ISSUE登録</button>
+        <button class="mini" onclick="document.getElementById('iss-file').click()" data-i18n="添付">添付</button>
+        <input id="iss-file" type="file" multiple style="display:none" onchange="onIssFiles(event)">
+        <span style="font-size:12px;color:#6b7280" data-i18n="Ctrl+V で画像貼り付け／添付ボタンでファイル選択できます">Ctrl+V で画像貼り付け／添付ボタンでファイル選択できます</span>
         <span id="iss-result" style="font-size:12px"></span></div>
     </div>
   </div>
@@ -2310,6 +2316,37 @@ function renderGoalImgs() {
     'width:16px;height:16px;font-size:12px;line-height:16px;text-align:center;cursor:pointer">×</span></span>'
   ).join('');
 }
+let issFiles = [];
+function addIssFiles(fs) {
+  for (const f of fs || []) {
+    const fr = new FileReader();
+    fr.onload = () => { issFiles.push({ name: f.name || '', data: fr.result }); renderIssImgs(); };
+    fr.readAsDataURL(f);
+  }
+}
+function onIssPaste(e) {
+  const fs = [];
+  for (const it of e.clipboardData?.items || []) {
+    if (it.kind !== 'file') continue;
+    const f = it.getAsFile();
+    if (f) fs.push(f);
+  }
+  if (fs.length) { e.preventDefault(); addIssFiles(fs); }
+}
+function onIssFiles(e) { addIssFiles(e.target.files); e.target.value = ''; }
+function renderIssImgs() {
+  document.getElementById('iss-imgs').innerHTML = issFiles.map((a, i) =>
+    '<span style="position:relative;display:inline-block;margin-right:8px;margin-bottom:4px">' +
+    (String(a.data).startsWith('data:image/')
+      ? '<img src="' + a.data + '" style="height:64px;border:1px solid #cbd5e1;border-radius:4px">'
+      : '<span style="display:inline-block;height:64px;line-height:64px;padding:0 8px;font-size:12px;' +
+        'border:1px solid #cbd5e1;border-radius:4px;box-sizing:border-box">' +
+        esc(a.name || 'file') + '</span>') +
+    '<span title="削除" onclick="issFiles.splice(' + i + ',1);renderIssImgs()" ' +
+    'style="position:absolute;top:-6px;right:-6px;background:#dc2626;color:#fff;border-radius:50%;' +
+    'width:16px;height:16px;font-size:12px;line-height:16px;text-align:center;cursor:pointer">×</span></span>'
+  ).join('');
+}
 function svClear() {
   document.getElementById('sv-goal').value = '';
   document.getElementById('iss-title').value = '';
@@ -2317,6 +2354,8 @@ function svClear() {
   document.getElementById('iss-result').textContent = '';
   goalImages = [];
   renderGoalImgs();
+  issFiles = [];
+  renderIssImgs();
 }
 function loadGoal() {
   const g = goals.find((x) => x.id === document.getElementById('sv-goal-sel').value);
@@ -2590,7 +2629,8 @@ async function issueCreate() {
   if (!repo || !title) return toast('リポジトリとタイトルは必須です');
   try {
     const r = await fetch(API + '/api/issue', {
-      method: 'POST', headers: H, body: JSON.stringify({ repo, title, body }),
+      method: 'POST', headers: H,
+      body: JSON.stringify({ repo, title, body, attachments: issFiles }),
     });
     const j = await r.json();
     const res = document.getElementById('iss-result');
@@ -2599,6 +2639,8 @@ async function issueCreate() {
         (j.dup ? '同名の既存Issueがあります: ' : '作成しました: ') + esc(j.url) + '</a>';
       document.getElementById('iss-title').value = '';
       document.getElementById('iss-body').value = '';
+      issFiles = [];
+      renderIssImgs();
       loadCandidates(true);
     } else { res.textContent = '失敗: ' + (j.error || ''); }
   } catch (e) { toast('issue: ' + e.message); }

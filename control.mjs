@@ -28,7 +28,7 @@ import { buildTaskPrompt } from './task-prompts.mjs';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
-import { readFileSync, writeFileSync, existsSync, openSync, readSync, closeSync, statSync, renameSync, readdirSync, mkdirSync, watch } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, openSync, readSync, closeSync, statSync, renameSync, readdirSync, mkdirSync, unlinkSync, watch } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { keyOf, discover, toCandidate, readIssueStore, ghJson } from './discover.mjs';
@@ -36,7 +36,7 @@ import { resolveDelegatedStatus, isDelegatedStale } from './core-logic.mjs';
 import { AcpChat } from './acp-chat.mjs';
 import { computeMetrics } from './metrics.mjs';
 import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(ROOT, 'config.json');
@@ -587,6 +587,53 @@ function taskPrompt(key, mode, skillFile) {
     implLoopMax: config.implLoopMax ?? 5 }) };
 }
 
+// Issue 添付を監視リポジトリ内のアセットブランチへ格納し、本文埋め込み用リンクを返す
+// （gh issue create は添付非対応のため contents API + raw URL を使う）
+const ISSUE_ASSETS_BRANCH = 'devin-issue-assets';
+const ghApi = (args) => new Promise((res, rej) => {
+  execFile('gh', ['api', ...args],
+    (e, so, se) => e ? rej(new Error(String(se || e.message).trim())) : res(so));
+});
+async function issueAssetLinks(repo, atts) {
+  try {
+    await ghApi(['repos/' + repo + '/git/ref/heads/' + ISSUE_ASSETS_BRANCH]);
+  } catch {
+    const def = JSON.parse(await ghApi(['repos/' + repo])).default_branch;
+    const sha = JSON.parse(
+      await ghApi(['repos/' + repo + '/git/ref/heads/' + def])).object.sha;
+    await ghApi(['repos/' + repo + '/git/refs',
+      '-f', 'ref=refs/heads/' + ISSUE_ASSETS_BRANCH, '-f', 'sha=' + sha]);
+  }
+  const EXT = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif',
+    'image/webp': '.webp', 'image/svg+xml': '.svg', 'application/pdf': '.pdf',
+    'text/plain': '.txt', 'text/markdown': '.md' };
+  const links = [];
+  for (const a of atts.slice(0, 10)) {
+    const m = /^data:([^;,]+)?;base64,(.+)$/s.exec(String(a?.data || ''));
+    if (!m) throw new Error('bad attachment data');
+    const mime = (m[1] || 'application/octet-stream').toLowerCase();
+    let base = String(a.name || '').split(/[\\/]/).pop()
+      .replace(/[^\w.+-]+/g, '_').replace(/^_+|_+$/g, '').slice(-80);
+    if (!base) base = 'file';
+    if (!/\.[A-Za-z0-9]{1,8}$/.test(base) && EXT[mime]) base += EXT[mime];
+    const fp = 'issue-assets/' + Date.now() + '_' +
+      Math.random().toString(36).slice(2, 7) + '_' + base;
+    // base64 はコマンド行上限を超え得るため --input の一時ファイルで渡す
+    const tmp = join(tmpdir(), 'issasset_' + process.pid + '_' + links.length + '.json');
+    writeFileSync(tmp, JSON.stringify({
+      message: 'chore: add issue attachment ' + base,
+      content: m[2].replace(/\s+/g, ''),
+      branch: ISSUE_ASSETS_BRANCH }));
+    try {
+      await ghApi(['repos/' + repo + '/contents/' + fp, '-X', 'PUT', '--input', tmp]);
+    } finally { try { unlinkSync(tmp); } catch { /* noop */ } }
+    const u = 'https://github.com/' + repo + '/raw/' + ISSUE_ASSETS_BRANCH + '/' + fp;
+    links.push(mime.startsWith('image/')
+      ? '![' + base + '](' + u + ')'
+      : '[' + base + '](' + u + ')');
+  }
+  return links;
+}
 const readBody = (req, limit = 64 * 1024) => new Promise((resolve, reject) => {
   let s = '';
   req.on('data', (c) => { s += c; if (s.length > limit) req.destroy(); });
@@ -1712,7 +1759,8 @@ const server = createServer(async (req, res) => {
       }
       if (url.pathname === '/api/issue') {
         // 課題整理タブからの Issue 起票（監視リポジトリ限定）
-        const { repo, title, body } = JSON.parse((await readBody(req)) || '{}');
+        const { repo, title, body, attachments } =
+          JSON.parse((await readBody(req, 25 * 1024 * 1024)) || '{}');
         if (!config.repos?.some((r) => r.github === repo)) {
           return json(400, { ok: false, error: 'repo not monitored: ' + repo });
         }
@@ -1722,9 +1770,14 @@ const server = createServer(async (req, res) => {
           .find((it) => it.repo === repo && it.type === 'issue' && it.title === title);
         if (dup) return json(200, { ok: true, url: dup.url, dup: true });
         try {
+          let bodyText = String(body ?? '');
+          if (Array.isArray(attachments) && attachments.length) {
+            bodyText += (bodyText.trim() ? '\n\n' : '') +
+              (await issueAssetLinks(repo, attachments)).join('\n');
+          }
           const out = await new Promise((res2, rej) => {
             execFile('gh', ['issue', 'create', '-R', repo,
-              '--title', title, '--body', String(body ?? '')],
+              '--title', title, '--body', bodyText],
               (e, so, se) => e ? rej(new Error(se || e.message)) : res2(so));
           });
           return json(200, { ok: true, url: String(out).trim() });
