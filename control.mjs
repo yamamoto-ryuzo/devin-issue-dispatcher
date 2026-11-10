@@ -224,7 +224,7 @@ async function devinConfigOptions() {
 
 function makeChat(eng, restored = {}) {
   return ACP_ENGINES.has(eng)
-    ? new AcpChat({ engine: eng, devinExe: config.devinExe, cwd: dirname(ROOT),
+    ? new AcpChat({ engine: eng, devinExe: config.devinExe, devinExtraArgs: config.devinExtraArgs ?? [], cwd: dirname(ROOT),
         getPersistedOptions: () => acpOptionsOf(config, eng),
         // const 宣言（本ブロックより後方）を restoreChats のモジュール初期化時に
         // 参照しないよう呼び出し時まで遅延させる

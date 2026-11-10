@@ -42,10 +42,11 @@ function copilotSpawnSpec() {
 }
 
 export class AcpChat {
-  constructor({ engine, devinExe, cwd, getPersistedOptions, saveOption, getMcpServers,
+  constructor({ engine, devinExe, devinExtraArgs = [], cwd, getPersistedOptions, saveOption, getMcpServers,
                 initialSessionId, onSessionId }) {
     this.engine = engine ?? 'devin';
     this.devinExe = devinExe;
+    this.devinExtraArgs = devinExtraArgs;
     this.cwd = cwd;
     this.getPersistedOptions = getPersistedOptions ?? (() => ({}));
     this.saveOption = saveOption ?? (() => {});
@@ -99,12 +100,13 @@ export class AcpChat {
   spawnSpec() {
     return this.engine === 'copilot'
       ? copilotSpawnSpec()
-      : { command: this.devinExe, args: ['acp'] };
+      : { command: this.devinExe, args: ['acp', ...(this.devinExtraArgs ?? [])] };
   }
 
   ensureProc() {
     if (this.proc) return;
     const spec = this.spawnSpec();
+    if ((this.devinExtraArgs ?? []).length) console.error('acp spawn extra args: ' + this.devinExtraArgs.join(' '));
     this.proc = spawn(spec.command, spec.args, {
       cwd: this.cwd, stdio: ['pipe', 'pipe', 'inherit'],
       windowsVerbatimArguments: spec.verbatim ?? false,

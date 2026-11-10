@@ -43,7 +43,9 @@ const repo = (config.repos ?? []).find((r) => r.github === key.split(' ')[0]);
     writeFileSync(join(ROOT, 'kill-requests.json'), JSON.stringify(k));
   }
 }
-const proc = spawn(config.devinExe, ['acp'], {
+const acpArgs = ['acp', ...(config.devinExtraArgs ?? [])];
+if (acpArgs.length > 1) console.error('acp spawn extra args: ' + acpArgs.slice(1).join(' '));
+const proc = spawn(config.devinExe, acpArgs, {
   cwd: repo?.path ?? ROOT,
   stdio: ['pipe', 'pipe', 'inherit'],
 });
