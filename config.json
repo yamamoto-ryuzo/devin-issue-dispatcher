@@ -92,5 +92,6 @@
     "copilot": {
       "allow_all": "off"
     }
-  }
+  },
+  "apiProvider": "openai"
 }

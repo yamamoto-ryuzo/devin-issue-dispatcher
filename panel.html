@@ -68,6 +68,9 @@
            font-size: 11px; cursor: pointer; background: #f8fafc; user-select: none; }
   .csess.active { background: #2563eb; color: #fff; border-color: #2563eb; }
   .csess.busy { border-color: #b45309; }
+  .csess.task { border-color: #ca8a04; background: #fef9e7; }
+  .csess.task.active { background: #ca8a04; color: #fff; }
+  .msg.tasklog { max-width: 100%; align-self: stretch; font-family: monospace; font-size: 11.5px; }
   .csess .x { margin-left: 6px; opacity: .55; }
   #chat-input { display: flex; gap: 8px; margin-top: 8px; }
   #chat-input input { flex: 1; }
@@ -1320,6 +1323,7 @@ function showTab(name) {
   }
   if (name === 'ai') aiMeta();
   if (name === 'tasks') loadMetrics();
+  if (name === 'chat') { loadSessions(); loadChat(); }
 }
 
 async function loadMetrics() {
@@ -1634,34 +1638,76 @@ async function saveSkill() {
 }
 
 let chatSel = null;
+// dispatcher 直起動の devin 課題セッションは chat 管理外のため、status.tasks の
+// running タスクを擬似セッション(id: "task:<key>")としてセッションチップに列挙する。
+// 選択時は /api/tasklog をチャット欄に表示し、送信は /api/steer（追加入力）・
+// 中断は /api/kill へ振り分ける（委譲チャット経路のタスクは実セッションとして出る）
+const isTaskSel = () => typeof chatSel === 'string' && chatSel.startsWith('task:');
+const taskSelKey = () => isTaskSel() ? chatSel.slice(5) : null;
+const taskShortLabel = (key) =>
+  key.split(' ')[0].split('/').pop() + ' ' + key.split(' ').slice(1).join(' ');
+const taskPhaseLabel = (ph) =>
+  ph === 'assess' ? t('(判定)') : ph === 'verify' ? t('(検証)') : t('(実装)');
 
 async function loadSessions() {
   try {
     const j = await (await fetch(API + '/api/chat/sessions')).json();
     const list = j.sessions || [];
     if (chatSel == null && list.length) chatSel = list[0].id;
+    const runTasks = (status?.tasks || []).filter((x) => x.status === 'running');
+    const taskChips = runTasks.map((x) => {
+      const id = 'task:' + x.key;
+      return '<span class="csess task busy' + (chatSel === id ? ' active' : '') + '"' +
+        ' title="' + esc(t('実行中タスクを選択するとログ表示・追加指示ができます')) + '"' +
+        " onclick='chatSelect(" + JSON.stringify(id) + ")'>▶ " +
+        esc(taskShortLabel(x.key)) + ' ' + esc(taskPhaseLabel(x.phase)) + '</span>';
+    }).join('');
+    // 選択中の擬似セッションが終了していてもチップを残す（ログ参照・追加指示の文脈維持）
+    const selKey = taskSelKey();
+    const selDone = selKey && !runTasks.some((x) => x.key === selKey)
+      ? "<span class=\"csess task active\" onclick='chatSelect(" + JSON.stringify(chatSel) + ")'>✓ " +
+        esc(taskShortLabel(selKey)) + '</span>' : '';
     document.getElementById('chat-sessions').innerHTML =
+      taskChips + selDone +
       list.map((s) => '<span class="csess' + (s.id === chatSel ? ' active' : '') +
         (s.busy ? ' busy' : '') + '"' +
         (s.resumable ? ' title="ACPセッション切断・次の送信で再開します"' : '') +
-        ' onclick="chatSelect(' + JSON.stringify(s.id) + ')">' +
+        " onclick='chatSelect(" + JSON.stringify(s.id) + ")'>" +
         ((s.engine && s.engine !== 'devin') ? '[' + esc(s.engine) + '] ' : '') +
         esc(s.label || 'session ' + s.id) + (s.busy ? ' ●' : (s.resumable ? ' ↺' : '')) +
-        '<span class="x" onclick="event.stopPropagation();chatClose(' + JSON.stringify(s.id) + ')">✕</span></span>'
+        "<span class=\"x\" onclick='event.stopPropagation();chatClose(" + JSON.stringify(s.id) + ")'>✕</span></span>"
       ).join('') +
       '<span class="csess" onclick="chatSelect(null)">＋新規</span>';
   } catch { /* noop */ }
 }
 function chatSelect(id) { chatSel = id; loadSessions(); loadChat(); }
 async function chatClose(id) {
-  await fetch(API + '/api/chat/close', { method: 'POST', headers: H, body: JSON.stringify({ id }) });
-  if (chatSel === id) chatSel = null;
+  if (typeof id === 'string' && id.startsWith('task:')) {
+    if (chatSel === id) chatSel = null;
+  } else {
+    await fetch(API + '/api/chat/close', { method: 'POST', headers: H, body: JSON.stringify({ id }) });
+    if (chatSel === id) chatSel = null;
+  }
   loadSessions(); loadChat();
 }
 async function chatSend() {
   const el = document.getElementById('chat-text');
   const text = el.value.trim();
   if (!text) return;
+  if (isTaskSel()) {
+    // 実行中課題への追加指示: steer-requests.json → acp-runner が session/prompt で注入
+    const key = taskSelKey();
+    const tsk = (status?.tasks || []).find((x) => x.key === key);
+    if (tsk && tsk.status !== 'running') { toast('このタスクは終了済みです'); loadChat(); return; }
+    el.value = '';
+    const r = await fetch(API + '/api/steer', {
+      method: 'POST', headers: H, body: JSON.stringify({ key, text }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.error) { toast('送信失敗: ' + j.error); el.value = text; return; }
+    setTimeout(loadChat, 2500); // runner が [steer] をログへ転記するまでの猶予
+    return;
+  }
   el.value = '';
   const r = await fetch(API + '/api/chat/send', {
     method: 'POST', headers: H, body: JSON.stringify({ id: chatSel, text }),
@@ -1679,19 +1725,44 @@ async function chatOption(id, value) {
   if (!j.ok) toast('設定変更失敗: ' + (j.error || ''));
 }
 async function chatClear() {
+  if (isTaskSel()) return;
   await fetch(API + '/api/chat/clear', { method: 'POST', headers: H, body: JSON.stringify({ id: chatSel }) });
   loadChat();
 }
 async function chatCancel() {
+  if (isTaskSel()) {
+    await fetch(API + '/api/kill', { method: 'POST', headers: H, body: JSON.stringify({ key: taskSelKey() }) });
+    toast('停止要求を送信しました');
+    return;
+  }
   await fetch(API + '/api/chat/cancel', { method: 'POST', headers: H, body: JSON.stringify({ id: chatSel }) });
   loadChat();
 }
 async function chatReset() {
+  if (isTaskSel()) return;
   await fetch(API + '/api/chat/reset', { method: 'POST', headers: H, body: JSON.stringify({ id: chatSel }) });
   loadChat();
 }
 async function loadChat() {
   try {
+    if (isTaskSel()) {
+      // 実行中課題のセッションログ（/api/tasklog 末尾）をチャット欄へ表示
+      const key = taskSelKey();
+      const tsk = (status?.tasks || []).find((x) => x.key === key);
+      document.getElementById('chat-status').textContent =
+        tsk?.status === 'running' ? '（' + t('実行中') + '…）' : '（' + t('終了') + '）';
+      document.getElementById('chat-opts').innerHTML = '';
+      const lg = await (await fetch(API + '/api/tasklog?key=' +
+        encodeURIComponent(key) + '&n=300')).json();
+      const box = document.getElementById('chat-box');
+      const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+      box.innerHTML = lg.log
+        ? '<div class="msg sys">' + t('セッションログ: ') + esc(lg.file || key) + '</div>' +
+          '<div class="msg agent tasklog">' + esc(lg.log) + '</div>'
+        : '<div class="msg sys">(ログなし)</div>';
+      if (atBottom) box.scrollTop = box.scrollHeight;
+      return;
+    }
     const j = await (await fetch(API + '/api/chat?id=' + (chatSel || 0))).json();
     document.getElementById('chat-status').textContent =
       j.busy ? '（実行中…）' :
@@ -1705,12 +1776,14 @@ async function loadChat() {
         o.options.map(v => '<option value="' + esc(v.value) + '"' +
           (v.value === o.currentValue ? ' selected' : '') + '>' + esc(v.name) + '</option>').join('') +
         '</select></label>').join('');
-    }
+    } else opts.innerHTML = '';
     const box = document.getElementById('chat-box');
     const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
     box.innerHTML = (j.messages || []).map(m =>
       '<div class="msg ' + esc(m.role) + '">' + esc(m.text) + '</div>').join('') ||
-      '<div class="msg sys">「評価」「対応」ボタンでプロンプトを自動送信できます</div>';
+      '<div class="msg sys">「評価」「対応」ボタンでプロンプトを自動送信できます</div>' +
+      ((status?.tasks || []).some((x) => x.status === 'running')
+        ? '<div class="msg sys">' + esc(t('実行中タスクを選択するとログ表示・追加指示ができます')) + '</div>' : '');
     if (atBottom) box.scrollTop = box.scrollHeight;
   } catch { /* noop */ }
 }
@@ -2618,6 +2691,9 @@ try {
   const sse = new EventSource(API + '/api/events');
   sse.onmessage = (ev) => {
     refresh();
+    // state.json 変化 = タスク開始/終了も含むため、チャットタブ表示中は
+    // 擬似セッションチップ・ログ表示も即時追従させる
+    if (document.getElementById('tab-chat').classList.contains('active')) { loadSessions(); loadChat(); }
     try {
       const d = JSON.parse(ev.data);
       if (d.file === 'candidates.json' || d.file === 'issues.json') loadCandidates(false);
