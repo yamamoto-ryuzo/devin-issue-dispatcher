@@ -143,6 +143,19 @@ proc.on('error', (e) => { out(`[spawn error] ${e.message}`); finish(1); });
     const s = await rpc('session/new', { cwd: repo?.path ?? ROOT, mcpServers });
     sessionId = s.sessionId;
     out(`[session started] ${sessionId} key=${key}`);
+    // 永続化したモデル/モード選択を再適用（config.acpOptions.devin）
+    {
+      const ao = config.acpOptions;
+      const opts = ao && Object.values(ao).some((v) => typeof v === 'string')
+        ? ao : (ao?.devin ?? {});
+      for (const [oid, v] of Object.entries(opts)) {
+        try {
+          await rpc('session/set_config_option',
+            { sessionId, configId: oid, value: v });
+          out(`[option] ${oid} -> ${v}`);
+        } catch (e) { out(`[option失敗] ${oid}: ${e.message}`); }
+      }
+    }
     const res = await rpc('session/prompt', {
       sessionId,
       prompt: [{ type: 'text', text: readFileSync(promptFile, 'utf8') }],

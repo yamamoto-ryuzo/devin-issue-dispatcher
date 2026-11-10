@@ -34,6 +34,7 @@ import { keyOf, discover, toCandidate, readIssueStore, ghJson } from './discover
 import { AcpChat } from './acp-chat.mjs';
 import { computeMetrics } from './metrics.mjs';
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(ROOT, 'config.json');
@@ -172,6 +173,55 @@ function acpOptionsOf(cfg, eng) {
     ? (eng === 'devin' ? o : {})
     : (o[eng] ?? {});
 }
+// devin ACP の configOptions を一時セッションで取得するウォームアップ
+// （session/new まで行うが prompt は送らず即終了。モデル一覧取得用）
+async function devinConfigOptions() {
+  const creds = readFileSync(
+    join(homedir(), 'AppData/Roaming/devin/credentials.toml'), 'utf8');
+  const apiKey = creds.match(/windsurf_api_key[ ]*=[ ]*['"]([^'"]+)['"]/)?.[1];
+  if (!apiKey) throw new Error('windsurf_api_key が credentials.toml にありません');
+  const proc = spawn(config.devinExe, ['acp'],
+    { cwd: ROOT, stdio: ['pipe', 'pipe', 'inherit'] });
+  let seq = 0;
+  const pending = new Map();
+  const rpc = (method, params) => {
+    const id = ++seq;
+    proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params })  + String.fromCharCode(10));
+    return new Promise((res, rej) => pending.set(id, { res, rej }));
+  };
+  let buf = '';
+  proc.stdout.on('data', (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf(String.fromCharCode(10))) >= 0) {
+      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+      if (!line) continue;
+      let msg;
+      try { msg = JSON.parse(line); } catch { continue; }
+      if (msg.id != null && pending.has(msg.id)) {
+        const p = pending.get(msg.id); pending.delete(msg.id);
+        msg.error
+          ? p.rej(new Error(msg.error.message || JSON.stringify(msg.error)))
+          : p.res(msg.result);
+      }
+    }
+  });
+  const timer = setTimeout(() => {
+    for (const p of pending.values()) p.rej(new Error('devin acp timeout'));
+    pending.clear();
+    proc.kill();
+  }, 45000);
+  try {
+    await rpc('initialize', { protocolVersion: 1,
+      clientCapabilities:
+        { fs: { readTextFile: false, writeTextFile: false }, terminal: false } });
+    await rpc('authenticate',
+      { methodId: 'devin-browser', _meta: { api_key: apiKey } });
+    const s = await rpc('session/new', { cwd: ROOT, mcpServers: [] });
+    return s.configOptions ?? [];
+  } finally { clearTimeout(timer); proc.kill(); }
+}
+
 function makeChat(eng, restored = {}) {
   return ACP_ENGINES.has(eng)
     ? new AcpChat({ engine: eng, devinExe: config.devinExe, cwd: dirname(ROOT),
@@ -1394,6 +1444,23 @@ const server = createServer(async (req, res) => {
           writeFileSync(SECRETS_PATH, JSON.stringify(sec, null, 2) + '\n');
           secrets = sec;
         }
+        // acpOptions はエンジン別マップをマージ。値 '' は削除（既定へ戻す）
+        if (patch.acpOptions !== undefined) {
+          const base = fresh.acpOptions &&
+            !Object.values(fresh.acpOptions).some((v) => typeof v === 'string')
+            ? fresh.acpOptions : { devin: fresh.acpOptions ?? {} };
+          const merged = { ...base };
+          for (const [e2, opts] of Object.entries(patch.acpOptions)) {
+            const m = { ...(base[e2] ?? {}) };
+            for (const [oid, v] of Object.entries(opts ?? {})) {
+              if (v === '') delete m[oid]; else m[oid] = String(v);
+            }
+            merged[e2] = m;
+          }
+          fresh.acpOptions = merged;
+          applied.acpOptions = patch.acpOptions;
+          delete patch.acpOptions;
+        }
         for (const k of allowed) {
           if (patch[k] !== undefined) { fresh[k] = patch[k]; applied[k] = patch[k]; }
         }
@@ -1533,6 +1600,20 @@ const server = createServer(async (req, res) => {
           return json(200, { ok: true,
             models: j.models.map((m) => m.id ?? m).filter(Boolean),
             fallback: !!j.fallback });
+        }
+        if (provider === 'devin') {
+          // devin.exe acp session/new の configOptions からモデル系を取り出す
+          try {
+            const opts = await devinConfigOptions();
+            const mo = opts.find((o) => o && o.category === 'model') ||
+              opts.find((o) => o && /model/i.test(String(o.id)));
+            if (!mo) return json(502,
+              { ok: false, error: 'configOptions にモデル選択がありません' });
+            return json(200, { ok: true, optionId: mo.id,
+              current: acpOptionsOf(config, 'devin')[mo.id] ?? mo.currentValue ?? '',
+              models: (mo.options ?? [])
+                .map((v) => ({ value: v.value, name: v.name ?? v.value })) });
+          } catch (e) { return json(502, { ok: false, error: e.message }); }
         }
         const u = (config.apiUrl || '').replace(/\/+$/, '');
         if (!u) return json(400, { ok: false, error: 'apiUrl 未設定' });

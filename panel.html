@@ -968,12 +968,13 @@ const ENG_DESC = {
 };
 let apiModels = {};   // エンドポイント別の最終選択モデル（config.apiModels）
 let bridgeModels = {}; // ブリッジプロバイダ別の選択モデル（config.bridgeModels）
+let bridgeOptIds = {}; // プロバイダ別のモデル optionId（configOptions 由来）
 function engFields() {
   const v = document.getElementById('set-engine').value;
   document.getElementById('eng-desc').textContent = ENG_DESC[v] || '';
   document.getElementById('eng-api').style.display = v === 'api' ? 'block' : 'none';
   const br = document.getElementById('eng-bridge');
-  const isBridge = v === 'copilot' || v === 'antigravity';
+  const isBridge = v === 'devin' || v === 'copilot' || v === 'antigravity';
   br.style.display = isBridge ? 'block' : 'none';
   if (isBridge) loadBridgeModels(v);
 }
@@ -986,10 +987,13 @@ async function loadBridgeModels(provider) {
       body: JSON.stringify({ provider }) });
     const j = await r.json();
     if (!j.ok) { note.textContent = '取得失敗: ' + (j.error || ''); return; }
-    const cur = bridgeModels[provider] || '';
+    if (j.optionId) bridgeOptIds[provider] = j.optionId;
+    const cur = provider === 'devin'
+      ? (j.current || '') : (bridgeModels[provider] || '');
     sel.innerHTML = '<option value="">（既定）</option>' +
-      j.models.map((m) => '<option value="' + esc(m) + '"' +
-        (m === cur ? ' selected' : '') + '>' + esc(m) + '</option>').join('');
+      j.models.map((m) => '<option value="' + esc(m.value ?? m) + '"' +
+        ((m.value ?? m) === cur ? ' selected' : '') + '>' +
+        esc(m.name ?? m) + '</option>').join('');
     note.textContent = j.fallback ? '固定一覧（CLI 未ログインの可能性）' : '';
   } catch (e) { note.textContent = '取得失敗: ' + e.message; }
 }
@@ -1478,6 +1482,10 @@ async function saveCfg() {
     bridgeModels: { ...bridgeModels,
       [document.getElementById('set-engine').value]:
         document.getElementById('set-bridgemodel')?.value || '' },
+    ...(document.getElementById('set-engine').value === 'devin' && bridgeOptIds.devin
+      ? { acpOptions: { devin: { [bridgeOptIds.devin]:
+          document.getElementById('set-bridgemodel')?.value || '' } } }
+      : {}),
     extraPrompt: document.getElementById('set-extraprompt').value,
     ...(document.getElementById('set-apikey').value ? { apiKey: document.getElementById('set-apikey').value } : {}),
     assessMaxAgeHours: +document.getElementById('set-assess-age').value || undefined,
