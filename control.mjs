@@ -12,6 +12,7 @@
  *   GET  /              管理パネル HTML
  *   GET  /api/status    状態 { running, pid, startedAt, desired, config, tasks }
  *   GET  /api/log?n=200 dispatcher.log の末尾 n 行
+ *   GET  /api/metrics?days=7  state.json tasks の期間集計（件数・判定分布・所要時間）
  *   POST /api/start     dispatcher 起動（desired.enabled=true を永続化）
  *   POST /api/stop      dispatcher 停止（desired.enabled=false）
  *   POST /api/once      dispatcher が停止中のとき 1サイクルだけ実行
@@ -31,6 +32,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { keyOf, discover, toCandidate, readIssueStore, ghJson } from './discover.mjs';
 import { AcpChat } from './acp-chat.mjs';
+import { computeMetrics } from './metrics.mjs';
 import { createHash } from 'node:crypto';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -1773,6 +1775,10 @@ const server = createServer(async (req, res) => {
           .map((f) => ({ name: f, content: readFileSync(join(dir, f), 'utf8') }));
       } catch { /* noop */ }
       return json(200, { files });
+    }
+    if (url.pathname === '/api/metrics') {
+      const days = Math.min(Math.max(parseInt(url.searchParams.get('days') ?? '7', 10) || 7, 1), 365);
+      return json(200, { ok: true, ...computeMetrics(loadJson(STATE_PATH, { tasks: {} }), days) });
     }
     if (url.pathname === '/api/log') {
       const n = Math.min(parseInt(url.searchParams.get('n') ?? '200', 10) || 200, 2000);

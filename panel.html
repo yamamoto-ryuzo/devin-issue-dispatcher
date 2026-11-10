@@ -178,7 +178,7 @@ en: {
 '保存済みの目的':'Saved goals','リポジトリごとに保存し、選択して再編集できます':'Saved per repo; select to re-edit',
 'どのようなことをしたいか（目的・要望）':'What do you want to do? (goal / request)',
 'スクリーンショットを貼り付けできます（Ctrl+V）。課題抽出時に画像パスをプロンプトへ添付します':'Paste screenshots (Ctrl+V); image paths are attached to the extraction prompt',
-'処理履歴（state.json）':'History (state.json)','PR処理（プルリクエスト課題を集約）':'PR tasks (pull requests)',
+'処理履歴（state.json）':'History (state.json)','処理実績（期間集計）':'Metrics (period)','PR処理（プルリクエスト課題を集約）':'PR tasks (pull requests)',
 '設定（config.json の有効値）':'Settings (effective config.json)',
 '概要':'Overview','監視・共通':'Monitor & Common','ポーリング周期 (秒)':'Poll interval (s)',
 '候補キャッシュ有効 (秒)':'Candidate cache TTL (s)','新規候補の上限/回':'Max new per poll',
@@ -679,6 +679,13 @@ function setLang(v) {
   </div>
 
   <div id="tab-tasks" class="tabpanel">
+    <div class="h3" style="display:flex;align-items:center;gap:8px"><span data-i18n="処理実績（期間集計）">処理実績（期間集計）</span>
+      <select id="mx-days" onchange="loadMetrics()" style="font-size:12px">
+        <option value="7" selected>7日</option><option value="14">14日</option>
+        <option value="30">30日</option><option value="90">90日</option></select>
+      <button class="mini" onclick="loadMetrics()" data-i18n="今すぐ取得">今すぐ取得</button>
+      <span id="mx-meta" style="color:#9ca3af;font-weight:400;font-size:12px"></span></div>
+    <div id="metrics" style="margin-bottom:10px"></div>
     <div class="h3" data-i18n="処理履歴（state.json）">処理履歴（state.json）</div>
     <table>
       <thead><tr><th data-i18n="課題">課題</th><th data-i18n="状態">状態</th><th data-i18n="評価">評価</th><th data-i18n="開始">開始</th><th data-i18n="終了">終了</th><th>exit</th><th data-i18n="エンジン">エンジン</th><th></th></tr></thead>
@@ -1296,6 +1303,36 @@ function showTab(name) {
     pre.scrollTop = pre.scrollHeight;
   }
   if (name === 'ai') aiMeta();
+  if (name === 'tasks') loadMetrics();
+}
+
+async function loadMetrics() {
+  const el = document.getElementById('metrics');
+  if (!el) return;
+  const days = document.getElementById('mx-days').value;
+  try {
+    const j = await (await fetch(API + '/api/metrics?days=' + days)).json();
+    if (!j.ok) { el.textContent = j.error || 'error'; return; }
+    document.getElementById('mx-meta').textContent =
+      `対象 ${j.tasks.total} 件 / ${j.days}日（${j.since.slice(0, 10)}〜）`;
+    el.innerHTML = renderMetrics(j);
+  } catch (e) { el.textContent = e.message; }
+}
+
+function renderMetrics(m) {
+  const chips = (o) => Object.entries(o).sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `<span style="display:inline-block;background:#eef2f7;border:1px solid #d1d7e0;border-radius:10px;padding:1px 8px;margin:1px 3px 1px 0">${esc(k)}: ${v}</span>`).join('') || '—';
+  const dur = (d) => d ? `${d.count}件 平均${d.avgMin}分（中央${d.medianMin} / ${d.minMin}〜${d.maxMin}分）` : '—';
+  const row = (name, s) => `<tr><td>${name}</td><td>${s.attempted}</td><td>${s.ok}</td><td>${s.ng}</td><td>${s.failed}</td><td>${s.running}</td></tr>`;
+  return `<table style="font-size:12px">
+    <thead><tr><th></th><th data-i18n="実施">実施</th><th>OK</th><th>NG</th><th>failed</th><th data-i18n="実行中">実行中</th></tr></thead>
+    <tbody>${row('assess', m.assess)}${row('impl', m.impl)}${row('verify', m.verify)}</tbody></table>
+    <div style="margin:6px 0 2px"><b>category</b>: ${chips(m.assess.category)}
+      <b style="margin-left:10px">risk</b>: ${chips(m.assess.risk)}
+      <b style="margin-left:10px">feasible</b>: ${chips(m.assess.feasible)}</div>
+    <div style="margin:4px 0 2px"><b data-i18n="検出→完了">検出→完了</b>: ${dur(m.durations.detectToDone)}</div>
+    <div style="margin:2px 0"><b>impl session</b>: ${dur(m.durations.implSession)}
+      <b style="margin-left:10px">verify session</b>: ${dur(m.durations.verifySession)}</div>`;
 }
 
 function toast(msg) {

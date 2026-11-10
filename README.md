@@ -151,6 +151,7 @@ HTTP API 一覧（POST は `X-Panel: 1` 必須）:
 |---|---|---|
 | GET | `/api/status` | 稼働状態・設定・最近タスク・実行中セッション |
 | GET | `/api/candidates` | 対応候補一覧（`?force=1` でキャッシュ無視） |
+| GET | `/api/metrics?days=7` | state.json tasks の期間集計（assess/impl/verify 件数・判定分布・所要時間。パネル「処理履歴」タブで表示） |
 | GET | `/api/log?n=50` | dispatcher ログ末尾 |
 | GET | `/api/chat?id=N`・`/api/chat/sessions` | チャットセッション履歴・一覧 |
 | GET | `/api/skills`・`/api/prompts` | skills/*.md（enabled 付き）・prompts/*.md の一覧（読み取り専用） |
