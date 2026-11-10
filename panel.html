@@ -610,8 +610,8 @@ function setLang(v) {
   <div id="tab-survey" class="tabpanel">
     <div class="h3" data-i18n="課題整理（目的 → Issue 化）">課題整理（目的 → Issue 化）</div>
     <div class="row" style="margin-bottom:10px">
-      <label style="font-size:12px"><span data-i18n="対象リポジトリ">対象リポジトリ</span>
-        <select id="sv-repo" style="font-size:12px;min-width:240px" onchange="document.getElementById('sv-goal-sel').value='';loadGoal();loadGoals();svReset()"></select></label>
+      <label style="font-size:13px;font-weight:700"><span data-i18n="対象リポジトリ">対象リポジトリ</span>
+        <select id="sv-repo" style="font-size:15px;font-weight:700;min-width:240px;padding:6px 10px;border:2px solid #2563eb;border-radius:6px;background:#eff6ff;color:#1e3a8a" onchange="document.getElementById('sv-goal-sel').value='';loadGoal();loadGoals();svReset()"></select></label>
       <select id="sv-level" style="font-size:12px" title="抽出レベル: 目的・要望の文言に対する解釈の広さ&#10;Lv1 入力文言をそのまま整理（追加提案なし）&#10;Lv2 拡大解釈せず忠実に抽出&#10;Lv3 関連機能・周辺改善も含めて抽出">
         <option value="1" data-i18n="Lv1 文言の整理のみ">Lv1 文言の整理のみ</option>
         <option value="2" selected data-i18n="Lv2 忠実に抽出">Lv2 忠実に抽出</option>
@@ -1973,7 +1973,7 @@ async function loadCandidates(force) {
       [...new Set(list.map(c => c.key.split(' ')[0]))];
     const svRepo = document.getElementById('sv-repo');
     if (svRepo && !svRepo.options.length) {
-      svRepo.innerHTML = order.map((r) => '<option value="' + esc(r) + '">' + esc(r) + '</option>').join('');
+      svRepo.innerHTML = order.map((r) => '<option value="' + esc(r) + '">' + esc(r.split('/').pop()) + '</option>').join('');
       loadGoals();
     }
     candGroups = new Map(order.map(r => [r, []]));
