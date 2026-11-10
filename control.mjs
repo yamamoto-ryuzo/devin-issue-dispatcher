@@ -590,6 +590,36 @@ function taskPrompt(key, mode, skillFile) {
 // Issue 添付を監視リポジトリ内のアセットブランチへ格納し、本文埋め込み用リンクを返す
 // （gh issue create は添付非対応のため contents API + raw URL を使う）
 const ISSUE_ASSETS_BRANCH = 'devin-issue-assets';
+// 添付ファイル名へ補完する拡張子（拡張子なしの貼付画像等用）
+const ATTACH_EXT = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif',
+  'image/webp': '.webp', 'image/svg+xml': '.svg', 'application/pdf': '.pdf',
+  'text/plain': '.txt', 'text/markdown': '.md' };
+// 添付 data URL のデコードとファイル名のサニタイズ（issue 添付・chat 添付で共通）
+function decodeAttachment(a) {
+  const m = /^data:([^;,]+)?;base64,(.+)$/s.exec(String(a?.data || ''));
+  if (!m) throw new Error('bad attachment data');
+  const mime = (m[1] || 'application/octet-stream').toLowerCase();
+  let base = String(a.name || '').split(/[\\/]/).pop()
+    .replace(/[^\w.+-]+/g, '_').replace(/^_+|_+$/g, '').slice(-80);
+  if (!base) base = 'file';
+  if (!/\.[A-Za-z0-9]{1,8}$/.test(base) && ATTACH_EXT[mime]) base += ATTACH_EXT[mime];
+  return { mime, base, buf: Buffer.from(m[2].replace(/\s+/g, ''), 'base64') };
+}
+// チャット添付を chat-uploads/ へ保存し {name, path} を返す。
+// ACP エージェント（cwd=ROOT の親）がローカルファイルとして読めるよう絶対パスで返し、
+// 送信テキスト側が [添付] name → path 行を付記する（steer 経路も同仕組み）
+const CHAT_UPLOADS_DIR = join(ROOT, 'chat-uploads');
+function saveChatAttachments(atts) {
+  if (!Array.isArray(atts) || !atts.length) return [];
+  mkdirSync(CHAT_UPLOADS_DIR, { recursive: true });
+  return atts.slice(0, 10).map((a) => {
+    const { base, buf } = decodeAttachment(a);
+    const fp = join(CHAT_UPLOADS_DIR, Date.now() + '_' +
+      Math.random().toString(36).slice(2, 7) + '_' + base);
+    writeFileSync(fp, buf);
+    return { name: base, path: fp };
+  });
+}
 const ghApi = (args) => new Promise((res, rej) => {
   execFile('gh', ['api', ...args],
     (e, so, se) => e ? rej(new Error(String(se || e.message).trim())) : res(so));
@@ -604,25 +634,16 @@ async function issueAssetLinks(repo, atts) {
     await ghApi(['repos/' + repo + '/git/refs',
       '-f', 'ref=refs/heads/' + ISSUE_ASSETS_BRANCH, '-f', 'sha=' + sha]);
   }
-  const EXT = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif',
-    'image/webp': '.webp', 'image/svg+xml': '.svg', 'application/pdf': '.pdf',
-    'text/plain': '.txt', 'text/markdown': '.md' };
   const links = [];
   for (const a of atts.slice(0, 10)) {
-    const m = /^data:([^;,]+)?;base64,(.+)$/s.exec(String(a?.data || ''));
-    if (!m) throw new Error('bad attachment data');
-    const mime = (m[1] || 'application/octet-stream').toLowerCase();
-    let base = String(a.name || '').split(/[\\/]/).pop()
-      .replace(/[^\w.+-]+/g, '_').replace(/^_+|_+$/g, '').slice(-80);
-    if (!base) base = 'file';
-    if (!/\.[A-Za-z0-9]{1,8}$/.test(base) && EXT[mime]) base += EXT[mime];
+    const { mime, base, buf } = decodeAttachment(a);
     const fp = 'issue-assets/' + Date.now() + '_' +
       Math.random().toString(36).slice(2, 7) + '_' + base;
     // base64 はコマンド行上限を超え得るため --input の一時ファイルで渡す
     const tmp = join(tmpdir(), 'issasset_' + process.pid + '_' + links.length + '.json');
     writeFileSync(tmp, JSON.stringify({
       message: 'chore: add issue attachment ' + base,
-      content: m[2].replace(/\s+/g, ''),
+      content: buf.toString('base64'),
       branch: ISSUE_ASSETS_BRANCH }));
     try {
       await ghApi(['repos/' + repo + '/contents/' + fp, '-X', 'PUT', '--input', tmp]);
@@ -1562,6 +1583,15 @@ const server = createServer(async (req, res) => {
         mkdirSync(join(ROOT, 'skills'), { recursive: true });
         writeFileSync(join(ROOT, 'skills', name), String(content ?? ''));
         return json(200, { ok: true });
+      }
+      if (url.pathname === '/api/chat/attach') {
+        // チャット添付を chat-uploads/ へ保存し {files:[{name,path}]} を返す。
+        // 送信本体は /api/chat/send・/api/steer 共通でテキスト中の
+        // [添付] パス行をエージェントへ渡す（パネル側が付記する）
+        const { attachments } =
+          JSON.parse((await readBody(req, 25 * 1024 * 1024)) || '{}');
+        try { return json(200, { ok: true, files: saveChatAttachments(attachments) }); }
+        catch (e) { return json(400, { ok: false, error: e.message }); }
       }
       if (url.pathname === '/api/chat/send') {
         const { id, text } = JSON.parse((await readBody(req)) || '{}');

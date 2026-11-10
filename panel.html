@@ -938,9 +938,12 @@ function setLang(v) {
     <div id="chat-sessions"></div>
     <div id="chat-opts" style="display:flex;gap:8px;margin:4px 0 8px;flex-wrap:wrap"></div>
     <div id="chat-box"><div class="msg sys" data-i18n="「評価」「対応」ボタンを押すとプロンプトが自動送信されます">「評価」「対応」ボタンを押すとプロンプトが自動送信されます</div><div class="msg sys" data-i18n="※ 個別「対応」ボタンは評価（assess）をスキップして直接実装します">※ 個別「対応」ボタンは評価（assess）をスキップして直接実装します</div></div>
+    <div id="chat-imgs" style="margin-top:6px"></div>
     <div id="chat-input">
+      <input type="file" id="chat-file" multiple style="display:none" onchange="onChatFiles(this)">
+      <button class="mini" title="ファイルを添付" onclick="document.getElementById('chat-file').click()">📎</button>
       <input id="chat-text" data-i18n-ph="指示を入力（Enter で送信 / 実行中の追加指示も可）" placeholder="指示を入力（Enter で送信 / 実行中の追加指示も可）"
-             onkeydown="if(event.key==='Enter')chatSend()">
+             onkeydown="if(event.key==='Enter')chatSend()" onpaste="onChatPaste(event)">
       <button class="primary" onclick="chatSend()" data-i18n="送信">送信</button>
     </div>
   </div>
@@ -1801,15 +1804,61 @@ async function chatClose(id) {
   }
   loadSessions(); loadChat();
 }
+// チャット添付: /api/chat/attach で chat-uploads/ へ保存し、
+// エージェントが読める絶対パスを [添付] 行として本文へ付記する
+let chatFiles = [];
+function addChatFiles(fs) {
+  for (const f of fs || []) {
+    const fr = new FileReader();
+    fr.onload = () => { chatFiles.push({ name: f.name || '', data: fr.result }); renderChatImgs(); };
+    fr.readAsDataURL(f);
+  }
+}
+function onChatPaste(e) {
+  const fs = [];
+  for (const it of e.clipboardData?.items || []) {
+    if (it.kind !== 'file') continue;
+    const f = it.getAsFile();
+    if (f) fs.push(f);
+  }
+  if (fs.length) { e.preventDefault(); addChatFiles(fs); }
+}
+function onChatFiles(inp) { addChatFiles(inp.files); inp.value = ''; }
+function renderChatImgs() {
+  document.getElementById('chat-imgs').innerHTML = chatFiles.map((a, i) =>
+    '<span style="position:relative;display:inline-block;margin-right:8px;margin-bottom:4px">' +
+    (String(a.data).startsWith('data:image/')
+      ? '<img src="' + a.data + '" style="height:48px;border:1px solid #cbd5e1;border-radius:4px">'
+      : '<span style="display:inline-block;height:48px;line-height:48px;padding:0 8px;font-size:12px;' +
+        'border:1px solid #cbd5e1;border-radius:4px;box-sizing:border-box">' +
+        esc(a.name || 'file') + '</span>') +
+    '<span title="削除" onclick="chatFiles.splice(' + i + ',1);renderChatImgs()" ' +
+    'style="position:absolute;top:-6px;right:-6px;background:#dc2626;color:#fff;border-radius:50%;' +
+    'width:16px;height:16px;font-size:12px;line-height:16px;text-align:center;cursor:pointer">×</span></span>'
+  ).join('');
+}
 async function chatSend() {
   const el = document.getElementById('chat-text');
-  const text = el.value.trim();
-  if (!text) return;
+  let text = el.value.trim();
+  if (!text && !chatFiles.length) return;
   if (isTaskSel()) {
     // 実行中課題への追加指示: steer-requests.json → acp-runner が session/prompt で注入
-    const key = taskSelKey();
-    const tsk = (status?.tasks || []).find((x) => x.key === key);
+    const tsk = (status?.tasks || []).find((x) => x.key === taskSelKey());
     if (tsk && tsk.status !== 'running') { toast('このタスクは終了済みです'); loadChat(); return; }
+  }
+  if (chatFiles.length) {
+    const ar = await fetch(API + '/api/chat/attach', {
+      method: 'POST', headers: H, body: JSON.stringify({ attachments: chatFiles }),
+    });
+    const aj = await ar.json().catch(() => ({}));
+    if (!aj.ok) { toast('添付失敗: ' + (aj.error || ar.status)); return; }
+    text += (text ? '\n' : '') +
+      (aj.files || []).map((f) => '[添付] ' + f.name + ' → ' + f.path).join('\n');
+    chatFiles = [];
+    renderChatImgs();
+  }
+  if (isTaskSel()) {
+    const key = taskSelKey();
     el.value = '';
     const r = await fetch(API + '/api/steer', {
       method: 'POST', headers: H, body: JSON.stringify({ key, text }),

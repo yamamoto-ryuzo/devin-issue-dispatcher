@@ -15,5 +15,6 @@ goals.json
 secrets.json
 config.local.json
 shots/
+chat-uploads/
 bridge-hub.exe
 *.out
