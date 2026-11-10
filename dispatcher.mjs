@@ -208,7 +208,7 @@ ${t.body || '(本文なし)'}
 2. \`git status\` で作業ツリーを確認。未コミット変更は絶対に上書き・巻き戻ししない
 3. 既定ブランチ（main/master）で \`git pull --ff-only\` して最新化する。**ブランチは切らない**
 4. Issue の要求を実装し、リポジトリの検証手順（lint/test/build）を通す
-5. 変更を**ローカルコミット**する（push 禁止。コミットはこの issue の変更のみ含める）
+5. 変更を**ローカルコミット**する（push 禁止。コミットはこの issue の変更のみ含める）。コミットメッセージ末尾に Issue: #${t.number} トレーラーを必ず付ける（verify の帰属判定に使用）
 6. \`gh issue edit ${t.number} -R ${t.repo.github} --add-label AI:impl-done\` で処理済みフラグを立て、実施内容を issue コメントで報告する
 7. 最終報告として「実施内容 / 未解決事項」を簡潔に出力する
 
@@ -237,13 +237,14 @@ ${t.body || '(本文なし)'}
    未 push が空の場合は他課題の再検証が一括 push 済み。自分のコミットは push 済み履歴に含まれるため、手順4の帰属確認をスキップして検証へ進む
 3. 追加スキル指示に従い、完了時スキル（_done）の確認項目を実装時とは違う視点で、この課題の変更のみを再検証する
 4. 未 push コミットの帰属確認（混在チェック）:
-   - 各コミットメッセージ中の課題番号（\`(#N)\` 等）を特定し、\`gh issue view N -R ${t.repo.github} --json state,labels\` で状態を確認する
+   - 各コミットメッセージ中の課題番号（(#N) または末尾 Issue: #N トレーラー）を特定し、gh issue view N -R ${t.repo.github} --json state,labels で状態を確認する
    - **open の監視対象 issue に帰属**（別課題として抽出・管理済み）→ 混在とはみなさず push 可。
      他課題分の検証・クローズは各課題の再検証が行うため、ここでは帰属確認だけでよい
    - **closed または \`devin:rejected\` の課題に帰属** → 断念済み作業。\`git revert --no-edit <sha>\` で
      そのコミットのみ打ち消してから push し、revert した旨をコメントに明記（revert が衝突したら push せず報告）。
      なお \`Revert "..."\` 形式の既存コミットは掃除済みの記録なので帰属確認をスキップしてよい（revert を重ねない）
    - 課題番号を特定できないコミットが混在する場合のみ push せず、その旨をコメントで報告
+（不明コミットは sha+subject を必ず列挙してコメントに含める）
 5. 判定:
    - **OK** → \`git push\` でリモートへ反映（帰属確認済みの他課題コミットも一緒に push される旨をコメントに明記）→
      \`gh issue edit ${t.number} -R ${t.repo.github} --add-label devin:done --remove-label AI:impl-done\` →
@@ -828,6 +829,23 @@ function unpushedCommits(repoPath) {
   } catch { return 0; }
 }
 
+// 未 push コミットの帰属課題番号を最古->最新の順で返す（(#N) と Issue: #N トレーラー双方を解釈）
+function unpushedIssueOrder(repoPath) {
+  try {
+    const br = execFileSync('git', ['-C', repoPath, 'branch', '--show-current'],
+      { encoding: 'utf8', timeout: 10000 }).trim() || 'main';
+    const out = execFileSync('git', ['-C', repoPath, 'log', '--reverse',
+      '--format=%B%x00', 'origin/' + br + '..HEAD'],
+      { encoding: 'utf8', timeout: 10000 });
+    const order = new Map();
+    for (const msg of out.split(String.fromCharCode(0))) {
+      const m = msg.match(/[(]#([0-9]+)[)]/) || msg.match(/Issue:[ ]*#([0-9]+)/);
+      if (m && !order.has(+m[1])) order.set(+m[1], order.size);
+    }
+    return order;
+  } catch { return new Map(); }
+}
+
 const queue = [];
 let draining = false;
 function drainQueue(state) {
@@ -835,8 +853,9 @@ function drainQueue(state) {
   draining = true;
   // 起動可能なタスクを全て起動して抜ける（await しない）。
   // 各タスクの完了時に再度 drainQueue が呼ばれ、空いた枠で次が起動される
+  const ordCache = new Map(); // verify 優先順位用: repo -> Map(issue番号->順位)
   for (;;) {
-    const idx = queue.findIndex((t) => {
+    const elig = (t) => {
       const dest = t.verify ? 'verify' : t.assessOnly ? 'assess' : 'impl';
       const isPr = dest === 'impl' && t.type === 'pr';
       // 同時起動数はフェーズ別（パネル変更を即時反映するため都度 config を読む）
@@ -861,7 +880,23 @@ function drainQueue(state) {
       // 別課題の未検証コミットが再検証の push に巻き込まれるのを防ぐ
       const gated = dest === 'impl' && t.type === 'issue' && unpushedCommits(t.repo.path) > 0;
       return busy < max && !repoBusy && !gated;
-    });
+    };
+    let idx = queue.findIndex(elig);
+    // 同リポジトリの verify が複数起動可能なら未 push コミットの最古帰属を優先
+    // （未検証コミットが他課題 verify の push に同乗する機会を減らす）
+    if (idx >= 0 && queue[idx].verify) {
+      const ordOf = (t) => {
+        if (!ordCache.has(t.repo.github))
+          ordCache.set(t.repo.github, unpushedIssueOrder(t.repo.path));
+        const m = ordCache.get(t.repo.github);
+        return m.has(t.number) ? m.get(t.number) : 1e9;
+      };
+      for (let k = idx + 1; k < queue.length; k++) {
+        const q = queue[k];
+        if (q.verify && q.repo.github === queue[idx].repo.github &&
+            elig(q) && ordOf(q) < ordOf(queue[idx])) idx = k;
+      }
+    }
     if (idx < 0) break;
     const task = queue.splice(idx, 1)[0];
     const key = keyOf(task.repo.github, task.type, task.number);

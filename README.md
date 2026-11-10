@@ -320,6 +320,8 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
   `devin:rejected` で停止。同じ判定での無限再試行を防ぎ、繰り返し NG になる課題は
   段階的に人間確認へ収束する。
 
+- **未検証コミットの同乗 push リスク（#37、2026-11-10 緩和）**: impl は既定ブランチへ直接ローカルコミットし verify が一括 push する設計のため、他課題の未検証コミットが verify 成功に同乗して公開される可能性が残る。緩和策として (1) 未 push コミットが残るリポジトリでは新規 impl を起動しないゲート、(2) 複数 verify 待機時は未 push コミットの最古帰属課題から消化（drainQueue で git log 順位付け）、(3) コミットメッセージ末尾の Issue: #N トレーラーを impl 側で必須化し verify は (#N) と双方を解釈、を導入済み。帰属不能なコミット混入時は push せず sha+subject 付きで報告する。完全な排除には per-commit の cherry-pick 配布等が必要で、現状は確率低減に留まる
+
 ## エンジン別の動作検証（非 devin エンジン E2E）
 
 `config.engine` に `copilot` / `antigravity` / `api` を指定すると、control.mjs の
