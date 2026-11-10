@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { gh, ghJson, keyOf, discover, toCandidate, readIssueStore } from './discover.mjs';
 import { skillEnabled } from './engine.mjs';
 import { checkFailures } from './failure-watch.mjs';
+import { RISK_RANK, CAT_RANK, VERDICT_STEPS, escalateVerdict, parseIssueRef } from './core-logic.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
@@ -317,24 +318,7 @@ ${policy ? `\n## このリポジトリ固有の対応指針（評価基準に含
 // ---------- runner ----------
 
 const running = new Map(); // key -> { proc, startedAt }
-const RISK_RANK = { low: 0, medium: 1, high: 2 };
-const MAX_RISK = () => RISK_RANK[config.maxAutoRisk ?? 'medium'] ?? 1;
-const CAT_RANK = ['auto', 'review', 'human', 'reject'];
-const MAX_CAT = () => CAT_RANK.indexOf(config.autoCategory ?? 'review');
-
-// verify NG（差し戻し）時に保存済み verdict の category/risk を1ランク引き上げる。
-// 同じ判定の再利用で impl → verify-ng が無限に繰り返されるのを防ぎ、
-// 再試行のたびに needs-review / reject 側へ収束させる。NG 内容は reason へ引き継ぐ
-const VERDICT_STEPS = { risk: ['low', 'medium', 'high'], category: CAT_RANK };
-function escalateVerdict(assess, why) {
-  if (!assess || assess.error) return assess;
-  const up = (steps, v) =>
-    steps[Math.min(Math.max(steps.indexOf(v), 0) + 1, steps.length - 1)];
-  return { ...assess,
-    risk: up(VERDICT_STEPS.risk, assess.risk),
-    category: up(VERDICT_STEPS.category, assess.category),
-    reason: `${assess.reason ?? ''} [verify-ng差し戻し: ${why}]`.trim() };
-}
+// RISK_RANK / CAT_RANK / VERDICT_STEPS / escalateVerdict は core-logic.mjs へ分離（テスト可能な純粋関数）
 // verdict が自動処理範囲を超えたか（引き上げ後の判定に使用）
 const verdictOverLimit = (a) => !a || a.category === 'reject'
   || (RISK_RANK[a.risk] ?? 2) > MAX_RISK()
@@ -840,8 +824,8 @@ function unpushedIssueOrder(repoPath) {
       { encoding: 'utf8', timeout: 10000 });
     const order = new Map();
     for (const msg of out.split(String.fromCharCode(0))) {
-      const m = msg.match(/[(]#([0-9]+)[)]/) || msg.match(/Issue:[ ]*#([0-9]+)/);
-      if (m && !order.has(+m[1])) order.set(+m[1], order.size);
+      const n = parseIssueRef(msg);
+      if (n != null && !order.has(n)) order.set(n, order.size);
     }
     return order;
   } catch { return new Map(); }
