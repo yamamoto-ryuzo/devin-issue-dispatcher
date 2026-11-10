@@ -18,6 +18,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gh, ghJson, keyOf, discover, toCandidate, readIssueStore } from './discover.mjs';
 import { skillEnabled } from './engine.mjs';
+import { checkFailures } from './failure-watch.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
@@ -1073,6 +1074,16 @@ async function cycle(state) {
   await syncShared(state);
   // 委譲チャット課題への停止要求を転送（devin 経路分は spawnDevin が消費）
   await handleDelegatedKills(state);
+  // エラー入力の自動取り込み（config.autoIssueOnFailure=true のときのみ）
+  if (!DRY_RUN) {
+    try {
+      await checkFailures({
+        config: { ...config,
+          autoIssueOnFailure: liveConfig('autoIssueOnFailure', false),
+          failureDedupeHours: liveConfig('failureDedupeHours', 24) },
+        state, saveState, gh, ghJson, log });
+    } catch (e) { log('failure-watch error: ' + e.message); }
+  }
   // autoDiscover OFF なら検出自体をスキップ（gh を叩かない・candidates.json も更新しない）
   if (!DRY_RUN && liveConfig('autoDiscover', true) === false) {
     return;
