@@ -223,6 +223,10 @@ function spawnDevin(prompt, task, logPath, key, phase = 'impl') {
     proc.stdout.on('data', (d) => appendFileSync(logPath, d));
     proc.stderr.on('data', (d) => appendFileSync(logPath, d));
     proc.on('error', (e) => { appendFileSync(logPath, `\n[spawn error] ${e.message}\n`); done(1); });
+    // セッションが残した孤児プロセス（検証サーバ・ブラウザ等）が stdio を
+    // 握り続けると 'close' は永久に発火せずキューが停止する（実績あり）。
+    // セッション終了＝プロセス本体の 'exit' とし、'close' は保険として併用
+    proc.on('exit', (code) => done(code ?? 1));
     proc.on('close', (code) => done(code ?? 1));
   });
 }
@@ -429,6 +433,28 @@ async function handleDelegatedKills(state) {
 
 async function runTask(task, state, { skipAssess = false } = {}) {
   const key = keyOf(task.repo.github, task.type, task.number);
+  // キュー滞留中に close された課題は起動しない。/api/close・GitHub 上の
+  // 直接 close はメモリ内キュー要素を除去しないため、起動時に open 状態を
+  // 再確認する（verify は closed 課題のコミット掃除を担うので対象外）
+  if (task.type === 'issue' && !task.verify) {
+    let closed = state.tasks[key]?.status === 'closed';
+    if (!closed) {
+      try {
+        const cur = await ghJson(['issue', 'view', String(task.number),
+          '-R', task.repo.github, '--json', 'state']);
+        closed = cur.state === 'CLOSED';
+      } catch { /* 判定不能なら続行（gh 一時障害で起動を止めない） */ }
+    }
+    if (closed) {
+      state.tasks[key] = { ...(state.tasks[key] ?? {}), status: 'closed', phase: null,
+        closedAt: state.tasks[key]?.closedAt ?? new Date().toISOString() };
+      delete state.tasks[key].queued; delete state.tasks[key].queuedAt;
+      delete state.tasks[key].waitReason;
+      saveState(state);
+      log(`SKIP ${key}: issue closed`);
+      return;
+    }
+  }
   // control 側のチャット経路（評価の自動連鎖・パネル操作・MCP キュー）が
   // 先行して委譲/実行中の課題は二重起動しない。手動 dispatch（skipAssess）は
   // 人間の明示操作としてこのガードを通す
@@ -763,11 +789,43 @@ function unpushedIssueOrder(repoPath) {
 
 const queue = [];
 let draining = false;
+// 再判定ループの不死性を保証するラッパー。本体（drainQueueBody）内の例外
+// （saveState 書込競合・ゲート判定の予期しない throw 等）で draining が
+// true 固着すると以後全呼出が早期 return してキューが無言で永久停止する
+// （実績あり）。必ずフラグを戻し、例外はログへ残して次サイクルへ委ねる
 function drainQueue(state) {
   if (draining) return;
   draining = true;
+  try {
+    drainQueueBody(state);
+  } catch (e) {
+    log(`drainQueue error: ${e.message}`);
+  } finally {
+    draining = false;
+  }
+}
+function drainQueueBody(state) {
   // 起動可能なタスクを全て起動して抜ける（await しない）。
   // 各タスクの完了時に再度 drainQueue が呼ばれ、空いた枠で次が起動される
+  // キュー滞留中に close された課題を除去（closed は終端で再判定の対象外。
+  // state.tasks.status は /api/close・syncShared の gh 実状態で更新される。
+  // verify は closed 課題のコミット掃除を担うため残す）
+  let purged = false;
+  for (let i = queue.length - 1; i >= 0; i--) {
+    const q = queue[i];
+    if (q.verify) continue;
+    const k = keyOf(q.repo.github, q.type, q.number);
+    if (state.tasks[k]?.status !== 'closed') continue;
+    queue.splice(i, 1);
+    if (state.tasks[k]?.queued || state.tasks[k]?.waitReason) {
+      state.tasks[k] = { ...state.tasks[k] };
+      delete state.tasks[k].queued; delete state.tasks[k].queuedAt;
+      delete state.tasks[k].waitReason;
+      purged = true;
+    }
+    log(`dequeue ${k}: issue closed`);
+  }
+  if (purged) saveState(state);
   const ordCache = new Map(); // verify 優先順位用: repo -> Map(issue番号->順位)
   for (;;) {
     const elig = (t) => {
@@ -830,7 +888,6 @@ function drainQueue(state) {
       .catch((e) => log(`runTask error ${key}: ${e.message}`))
       .finally(() => { running.delete(key); drainQueue(state); });
   }
-  draining = false;
 }
 
 // ---------- reclaim stale ----------
@@ -1081,7 +1138,7 @@ async function cycle(state) {
     for (const t of found) {
       const k = keyOf(t.repo.github, t.type, t.number);
       const st = state.tasks[k]?.status ?? 'new';
-      const how = t.verify ? 'impl-done' : (t.auto ? 'auto-new' : 'label');
+      const how = t.verify ? 'impl-done' : t.active ? 'active' : (t.auto ? 'auto-new' : 'label');
       const runningLabel = t.labels.includes(LABEL.running) ? ' [running-label]' : '';
       console.log(`${k}  "${t.title}"  trigger=${how}  state=${st}${runningLabel}`);
     }
@@ -1093,6 +1150,8 @@ async function cycle(state) {
   if (liveConfig('autoAssess', AUTO_ASSESS)) {
     let qd = false;
     for (const t of found) {
+      // active 候補（実行中・待機中の表示維持用）は評価キューへ積まない
+      if (t.active) continue;
       const key = keyOf(t.repo.github, t.type, t.number);
       const assessedAt = state.tasks[key]?.assessedAt;
       const stale = !assessedAt
@@ -1119,6 +1178,9 @@ async function cycle(state) {
     return;
   }
   for (const t of found) {
+    // active 候補（実行中・待機中の表示維持用）は自動起動の対象外。
+    // 起動可否は既存の running/inflight/ラベルガードが別途判定する
+    if (t.active) continue;
     const key = keyOf(t.repo.github, t.type, t.number);
     // 起票者ゲート: autoTriggerMode=trusted で非信頼 author の課題は自動起動しない
     // （候補一覧には出す。手動 dispatch・devin ラベル経路は別途起動可）

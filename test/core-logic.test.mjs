@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { escalateVerdict, verdictOverLimit, parseIssueRef,
-  labelsForResult, isInFlight, resolveDelegatedStatus,
+  labelsForResult, isInFlight, isLifecycleActive, resolveDelegatedStatus,
   isDelegatedStale } from '../core-logic.mjs';
 
 const L = { running: 'devin:running', done: 'devin:done', failed: 'devin:failed',
@@ -83,6 +83,23 @@ test('inFlight: 清い課題は false・各種マーカーで true', () => {
   assert.equal(isInFlight(k, { running: new Set([k]) }), true);
   assert.equal(isInFlight(k, { queued: new Set([k]) }), true);
   assert.equal(isInFlight(k, { runningLabel: true }), true);
+});
+
+// ---- isLifecycleActive: 候補一覧の表示維持（クローズまで表示） ----
+test('lifecycleActive: 実行中・キュー待ち・委譲中は true', () => {
+  assert.equal(isLifecycleActive({ status: 'running' }), true);
+  assert.equal(isLifecycleActive({ status: 'running', phase: 'impl' }), true);
+  assert.equal(isLifecycleActive({ queued: 'assess' }), true);
+  assert.equal(isLifecycleActive({ inflight: 'assess' }), true);
+  assert.equal(isLifecycleActive({ chatDelegated: 'impl' }), true);
+});
+test('lifecycleActive: 未処理・終端状態は false', () => {
+  assert.equal(isLifecycleActive(undefined), false);
+  assert.equal(isLifecycleActive({}), false);
+  assert.equal(isLifecycleActive({ status: 'impl-done' }), false);
+  assert.equal(isLifecycleActive({ status: 'needs-review' }), false);
+  assert.equal(isLifecycleActive({ status: 'failed' }), false);
+  assert.equal(isLifecycleActive({ status: 'closed' }), false);
 });
 
 // ---- resolveDelegatedStatus: 委譲 impl/verify の終端判定 ----

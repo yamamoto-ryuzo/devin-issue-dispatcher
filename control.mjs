@@ -1060,6 +1060,9 @@ async function candidates(force) {
         phase: t?.phase ?? null, inflight: t?.inflight ?? null,
         chatDelegated: t?.chatDelegated ?? null,
         queued: t?.queued ?? null,
+        queuedAt: t?.queuedAt ?? null,
+        // dispatcher の待機キュー滞留理由（concurrency/repo-serial/unpushed）
+        waitReason: t?.waitReason ?? null,
         createdPr, openPr,
         engineReq: t?.engineReq ?? null,
         engineIssue: issueEngine(key, issuesAll),
@@ -1443,7 +1446,10 @@ const server = createServer(async (req, res) => {
         let n = 0;
         for (const c of cands) {
           const key = c.key ?? `${c.repo} ${c.type}#${c.number}`;
-          if (!st[key]?.assess?.category && !chatWait.some((w) => w.key === key)) {
+          const t = st[key] ?? {};
+          // 実行中・委譲中・キュー待ちの課題（active 表示維持分を含む）は積まない
+          if (t.status === 'running' || t.inflight || t.chatDelegated || t.queued) continue;
+          if (!t.assess?.category && !chatWait.some((w) => w.key === key)) {
             chatWait.push({ key, mode: 'assess' });
             markQueued(key, 'assess');
             n++;

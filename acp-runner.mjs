@@ -125,6 +125,10 @@ const iv = setInterval(async () => {
 }, 2000);
 
 const finish = (code) => { clearInterval(iv); out(`\n[session closed exit=${code}]`); process.exit(code ?? 0); };
+// 孫プロセスが stdio を握り続けると 'close' は発火しない（孤児化した検証
+// サーバ・ブラウザ等で dispatcher 全体が永久待機した実績）。セッション終了
+// ＝プロセス本体の 'exit' とし、'close' は保険として併用する
+proc.on('exit', (c) => finish(c));
 proc.on('close', (c) => finish(c));
 proc.on('error', (e) => { out(`[spawn error] ${e.message}`); finish(1); });
 

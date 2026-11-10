@@ -60,6 +60,13 @@ export function isInFlight(key, { tasks = {}, running = new Set(), queued = new 
     !!(t.inflight || t.chatDelegated || t.status === 'running');
 }
 
+// 候補一覧の表示維持判定: 実行中・キュー待ち・委譲中の open 課題は
+// 「新規」条件から外れてもクローズまで候補一覧に残す（skills/_all.md の
+// ライフサイクル表示用。起動経路は active 候補を除外する＝表示専用）
+export function isLifecycleActive(t) {
+  return !!t && (t.status === 'running' || !!(t.queued || t.inflight || t.chatDelegated));
+}
+
 // 委譲 impl/verify の終端判定。watchImpl の通常完了・recordWatchTimeout・
 // 起動時走査・dispatcher スイープの全経路で同じ規則を使う。
 // issue:  verify=closed→done / AI:impl-done→impl-done / 無→verify-ng

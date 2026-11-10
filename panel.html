@@ -1655,37 +1655,37 @@ function mdToHtml(src) {
 // コンテナが可視になるまで描画を遅延する
 // mermaid 図内の【状態】語を選択言語へ翻訳（元の日本語は dataset.mmSrc に保持）
 const MM_TERMS = {
-  en: { '課題抽出': 'Extracted', '評価待機中': 'Waiting (assess)', '実装待機中': 'Waiting (impl)', '検証待機中': 'Waiting (verify)', '評価中': 'Assessing', '要人間確認': 'Needs human',
+  en: { '停滞': 'Stalled', '課題抽出': 'Extracted', '評価待機中': 'Waiting (assess)', '実装待機中': 'Waiting (impl)', '検証待機中': 'Waiting (verify)', '評価中': 'Assessing', '要人間確認': 'Needs human',
     '人力・クローズ': 'Manual close', '対応困難・クローズ': 'Rejected+closed', '実装困難・クローズ': 'Split+closed',
     '評価完了': 'Assessed', '実装中': 'Implementing', '検証中': 'Verifying', '実装完了・検証前': 'Impl done (unverified)',
     '上限到達・クローズ': 'Gave up+closed', '異常終了・クローズ': 'Aborted+closed', '検証不合格': 'Verify NG',
     '帰属不明・クローズ': 'Unattributed+closed', '差し戻し': 'Returned', '完了・クロース': 'Done+closed',
     '完了': 'Done', 'クローズ': 'Closed' },
-  zh: { '課題抽出': '已提取', '評価待機中': '等待评估', '実装待機中': '等待实现', '検証待機中': '等待验证', '評価中': '评估中', '要人間確認': '需人工确认',
+  zh: { '停滞': '停滞', '課題抽出': '已提取', '評価待機中': '等待评估', '実装待機中': '等待实现', '検証待機中': '等待验证', '評価中': '评估中', '要人間確認': '需人工确认',
     '人力・クローズ': '人工关闭', '対応困難・クローズ': '已拒绝+关闭', '実装困難・クローズ': '已拆分+关闭',
     '評価完了': '评估完成', '実装中': '实现中', '検証中': '验证中', '実装完了・検証前': '实现完成(未验证)',
     '上限到達・クローズ': '放弃+关闭', '異常終了・クローズ': '异常结束+关闭', '検証不合格': '验证失败',
     '帰属不明・クローズ': '来源不明+关闭', '差し戻し': '打回', '完了・クロース': '完成+关闭',
     '完了': '完成', 'クローズ': '已关闭' },
-  ko: { '課題抽出': '추출 완료', '評価待機中': '평가 대기', '実装待機中': '구현 대기', '検証待機中': '검증 대기', '評価中': '평가 중', '要人間確認': '사람 확인 필요',
+  ko: { '停滞': '정체', '課題抽出': '추출 완료', '評価待機中': '평가 대기', '実装待機中': '구현 대기', '検証待機中': '검증 대기', '評価中': '평가 중', '要人間確認': '사람 확인 필요',
     '人力・クローズ': '수동 종료', '対応困難・クローズ': '거절+종료', '実装困難・クローズ': '분리+종료',
     '評価完了': '평가 완료', '実装中': '구현 중', '検証中': '검증 중', '実装完了・検証前': '구현 완료(미검증)',
     '上限到達・クローズ': '포기+종료', '異常終了・クローズ': '비정상 종료+종료', '検証不合格': '검증 실패',
     '帰属不明・クローズ': '귀속 불명+종료', '差し戻し': '되돌림', '完了・クロース': '완료+종료',
     '完了': '완료', 'クローズ': '종료됨' },
-  es: { '課題抽出': 'Extraído', '評価待機中': 'Espera (eval.)', '実装待機中': 'Espera (impl.)', '検証待機中': 'Espera (verif.)', '評価中': 'Evaluando', '要人間確認': 'Revisión humana',
+  es: { '停滞': 'Estancado', '課題抽出': 'Extraído', '評価待機中': 'Espera (eval.)', '実装待機中': 'Espera (impl.)', '検証待機中': 'Espera (verif.)', '評価中': 'Evaluando', '要人間確認': 'Revisión humana',
     '人力・クローズ': 'Cierre manual', '対応困難・クローズ': 'Rechazado+cerrado', '実装困難・クローズ': 'Dividido+cerrado',
     '評価完了': 'Evaluado', '実装中': 'Implementando', '検証中': 'Verificando', '実装完了・検証前': 'Impl. hecha (sin verif.)',
     '上限到達・クローズ': 'Abandonado+cerrado', '異常終了・クローズ': 'Anómalo+cerrado', '検証不合格': 'Verif. fallida',
     '帰属不明・クローズ': 'Sin atribuir+cerrado', '差し戻し': 'Devuelto', '完了・クロース': 'Hecho+cerrado',
     '完了': 'Hecho', 'クローズ': 'Cerrado' },
-  fr: { '課題抽出': 'Extrait', '評価待機中': 'Attente (éval.)', '実装待機中': 'Attente (impl.)', '検証待機中': 'Attente (vérif.)', '評価中': 'Évaluation', '要人間確認': 'Validation humaine',
+  fr: { '停滞': 'Bloqué', '課題抽出': 'Extrait', '評価待機中': 'Attente (éval.)', '実装待機中': 'Attente (impl.)', '検証待機中': 'Attente (vérif.)', '評価中': 'Évaluation', '要人間確認': 'Validation humaine',
     '人力・クローズ': 'Clôture manuelle', '対応困難・クローズ': 'Rejeté+clos', '実装困難・クローズ': 'Découpé+clos',
     '評価完了': 'Évalué', '実装中': 'Implémentation', '検証中': 'Vérification', '実装完了・検証前': 'Impl. faite (non vérifiée)',
     '上限到達・クローズ': 'Abandon+clos', '異常終了・クローズ': 'Échec+clos', '検証不合格': 'Vérif. échouée',
     '帰属不明・クローズ': 'Non attribué+clos', '差し戻し': 'Renvoyé', '完了・クロース': 'Terminé+clos',
     '完了': 'Terminé', 'クローズ': 'Clos' },
-  de: { '課題抽出': 'Extrahiert', '評価待機中': 'Warten (Bewertung)', '実装待機中': 'Warten (Impl.)', '検証待機中': 'Warten (Verif.)', '評価中': 'Bewertung', '要人間確認': 'Mensch nötig',
+  de: { '停滞': 'Blockiert', '課題抽出': 'Extrahiert', '評価待機中': 'Warten (Bewertung)', '実装待機中': 'Warten (Impl.)', '検証待機中': 'Warten (Verif.)', '評価中': 'Bewertung', '要人間確認': 'Mensch nötig',
     '人力・クローズ': 'Manuell geschlossen', '対応困難・クローズ': 'Abgelehnt+geschlossen', '実装困難・クローズ': 'Geteilt+geschlossen',
     '評価完了': 'Bewertet', '実装中': 'Implementierung', '検証中': 'Verifizierung', '実装完了・検証前': 'Impl. fertig (ungeprüft)',
     '上限到達・クローズ': 'Aufgegeben+geschlossen', '異常終了・クローズ': 'Abbruch+geschlossen', '検証不合格': 'Verif. fehlgeschlagen',
@@ -2753,11 +2753,13 @@ function renderCandBody() {
       if (fCat === 'none' && a?.category) return false;
       if (fCat && fCat !== 'none' && a?.category !== fCat) return false;
       if (fRisk && a?.risk !== fRisk) return false;
+      // 実行中判定は全経路統一（チャット経路＋dispatcher 直接起動の phase/inflight/委譲）
       const ph = (status.chatBusy || []).some((l) => l.startsWith(c.key + ' ')) ||
-        [...localBusy.keys()].some((l) => l.startsWith(c.key + ' '));
+        [...localBusy.keys()].some((l) => l.startsWith(c.key + ' ')) ||
+        !!(c.phase || c.inflight || c.chatDelegated);
       const qued = (status.chatWaiting || []).includes(c.key + ' assess') ||
         (status.chatWaiting || []).includes(c.key + ' impl') ||
-        localWait.has(c.key + ' assess') || localWait.has(c.key + ' impl');
+        localWait.has(c.key + ' assess') || localWait.has(c.key + ' impl') || !!c.queued;
       if (fStat === 'busy' && !ph) return false;
       if (fStat === 'queued' && !qued) return false;
       if (fStat === 'idle' && (ph || qued)) return false;
@@ -2785,8 +2787,26 @@ function renderCandBody() {
         chatQueued ? ' style="background:#eef1f5;color:#94a3b8"' :
         (a?.feasible === 'no' || a?.category === 'reject' || a?.risk === 'high') ? ' class="row-no"' : '';
       const ph = chatPh || localPh;
-      const badge = (bg, t) =>
-        '<span class="badge" style="background:' + bg + ';color:#fff">' + t + '</span>';
+      const badge = (bg, t, tip) =>
+        '<span class="badge" style="background:' + bg + ';color:#fff"' +
+        (tip ? ' title="' + esc(tip) + '"' : '') + '>' + t + '</span>';
+      // dispatcher の待機キュー滞留理由（state.waitReason 由来。candidates API が同梱）
+      const WAIT_TIP = {
+        concurrency: '同時起動数の上限に達しているため待機中（空き次第自動実行）',
+        'repo-serial': '同一リポジトリで対応/検証が実行中のため待機中（直列実行）',
+        unpushed: '未 push コミットがあり同リポジトリの再検証（PR処理）完了を待機中',
+      };
+      // フロー上の待機（評価/実装/検証待機中）と、フローにない異常滞留を区別する。
+      // waitReason 未記録のままポーリング2.5周期を超えて滞留＝起動可否ゲートの
+      // 再判定自体が実行されていない（drainQueue 停滞）ため「停滞」で異常表示する
+      const waitBadge = (q, label) => {
+        const pollMs = Math.max(+(status?.config?.pollIntervalSec ?? 120), 30) * 2500;
+        const age = q.queuedAt ? Date.now() - new Date(q.queuedAt).getTime() : 0;
+        if (q.queuedAt && !q.waitReason && age > pollMs)
+          return badge('#dc2626', tr('停滞'), '待機キューの再判定が実行されていません' +
+            '（理由未記録のままポーリング周期を超えて滞留）。dispatcher 再起動で復旧します');
+        return badge('#6b7280', tr(label), WAIT_TIP[q.waitReason]);
+      };
       const CAT_TIP = {
         auto: 'auto（即対応可）: 仕様が明確・リスク低で自動実装に進める判定',
         review: 'review（検討の上対応）: 人間の確認・判断が望ましい判定（devin:needs-review で保留）',
@@ -2815,7 +2835,7 @@ function renderCandBody() {
         : ph?.endsWith(' impl') || c.phase === 'impl' || c.inflight === 'impl' || c.chatDelegated === 'impl' ? 'impl'
         : ph?.endsWith(' assess') || c.phase === 'assess' || c.inflight === 'assess' ? 'assess' : null;
       const assessCell = runKind === 'assess' ? badge('#b45309', tr('評価中'))
-        : quedAssess || c.queued === 'assess' ? badge('#6b7280', tr('待機中'))
+        : quedAssess || c.queued === 'assess' ? waitBadge(c, '評価待機中')
         : '<button class="mini" ' + (busy ? 'disabled' : '') +
           ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? tr('再評価') : tr('評価')) + '</button>';
       const prM = c.openPr ? String(c.openPr).match(/^(\S+)\s+pr#(\d+)$/) : null;
@@ -2823,7 +2843,8 @@ function renderCandBody() {
       const remPr = prM || crM;
       const implCell = runKind === 'verify' ? badge('#b45309', tr('再検証中'))
         : runKind === 'impl' ? badge('#b45309', tr('対応中'))
-        : quedImpl || c.queued === 'impl' || c.queued === 'verify' ? badge('#6b7280', tr('待機中'))
+        : quedImpl || c.queued === 'impl' || c.queued === 'verify'
+          ? waitBadge(c, c.queued === 'verify' ? '検証待機中' : '実装待機中')
         : prM
           ? '<a class="badge" style="background:#6b7280;color:#fff;text-decoration:none" ' +
             'href="https://github.com/' + esc(prM[1]) + '/pull/' + prM[2] +
@@ -2845,8 +2866,8 @@ function renderCandBody() {
       '<td style="white-space:nowrap">' + assessCell + '</td>' +
       '<td style="white-space:normal;min-width:220px;max-width:560px;word-break:break-all"><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener">' + esc(c.title) + '</a></td>' +
-      '<td class="' + (c.trigger === 'auto-new' || c.trigger === 'impl-done' ? 'trig-auto' : 'trig-label') + '">' +
-        (c.trigger === 'auto-new' ? tr('自動(新規)') : c.trigger === 'impl-done' ? tr('処理済み(要再検証)') : tr('devin ラベル')) + (c.autoBlocked ? ' <span class="badge" style="background:#b45309;color:#fff" title="author: ' + esc(c.author || '') + '">' + tr('自動対象外（起票者）') + '</span>' : '') + '</td>' +
+      '<td class="' + (c.trigger === 'auto-new' || c.trigger === 'impl-done' || c.trigger === 'active' ? 'trig-auto' : 'trig-label') + '">' +
+        (c.trigger === 'auto-new' ? tr('自動(新規)') : c.trigger === 'impl-done' ? tr('処理済み(要再検証)') : c.trigger === 'active' ? tr('実行中') : tr('devin ラベル')) + (c.autoBlocked ? ' <span class="badge" style="background:#b45309;color:#fff" title="author: ' + esc(c.author || '') + '">' + tr('自動対象外（起票者）') + '</span>' : '') + '</td>' +
       '<td>' + implCell + '</td>' +
       '<td>' + judge + '</td>' +
       '<td>' + fmt(c.createdAt) + '</td>' +
@@ -2861,7 +2882,7 @@ function renderCandBody() {
       '<th title="課題の種別（issue / PR）と番号">' + tr('種別') + '</th>' +
       '<th title="評価: チャットで対応可否だけを評価（変更しない）">' + tr('操作') + '</th>' +
       '<th title="GitHub の課題タイトル（クリックで GitHub を開く）">' + tr('タイトル') + '</th>' +
-      '<th title="候補になった経路&#10;自動(新規): 起点以降に作成された未処理課題&#10;devin ラベル: 明示的にラベル指定">' + tr('トリガー') + '</th>' +
+      '<th title="候補になった経路&#10;自動(新規): 起点以降に作成された未処理課題&#10;devin ラベル: 明示的にラベル指定&#10;実行中: 処理中のためクローズまで表示を維持">' + tr('トリガー') + '</th>' +
       '<th title="対応: 実装の実行指示を送信（評価 assess はスキップして直接実装）&#10;PR中#N: 対応が PR へ移行し PR 側で継続中（クリックで PR を開く）">' + tr('対応') + '</th>' +
       '<th title="評価セッションの判定結果&#10;auto: 即対応可 / review: 検討の上対応 / human: 人的判断必須（ユーザー選択）/ reject: 不可・危険&#10;risk: low/medium/high&#10;ホバーで理由も表示">' + tr('判定') + '</th>' +
       '<th title="課題が作成された日時">' + tr('作成日時') + '</th>' +

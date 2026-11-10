@@ -8,6 +8,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { isLifecycleActive } from './core-logic.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -149,8 +150,17 @@ export async function discover({ config, labels, state, autoTrigger, maxNewPerPo
     // needs-review/rejected の履歴がある課題はラベル除去後に再候補化できる
     const isNew = autoTrigger && (!st || st === 'needs-review' || st === 'rejected' || st === 'verify-ng')
       && new Date(it.createdAt).getTime() >= sinceMs;
-    if (!isNew) continue;
-    if (newCount >= maxNewPerPoll) continue;
+    if (!isNew || newCount >= maxNewPerPoll) {
+      // 実行中・キュー待ち・委譲中の課題は「新規」条件・取得上限から外れても
+      // クローズまで候補一覧に残す（skills/_all.md のライフサイクル表示を
+      // パネルで追えるようにする。表示専用で、起動経路は active を除外する）
+      if (isLifecycleActive(state.tasks?.[key])) {
+        found.push({ repo: r, type: it.type, number: it.number, title: it.title,
+          body: it.body, url: it.url, labels: names,
+          createdAt: it.createdAt, updatedAt: it.updatedAt, author: it.author, active: true });
+      }
+      continue;
+    }
     newCount++;
     found.push({ repo: r, type: it.type, number: it.number, title: it.title,
       body: it.body, url: it.url, labels: names,
@@ -171,10 +181,11 @@ export const toCandidate = (t, labels) => ({
   number: t.number,
   title: t.title,
   url: t.url,
-  trigger: t.verify ? 'impl-done' : 'auto-new',
+  trigger: t.verify ? 'impl-done' : t.active ? 'active' : 'auto-new',
   createdAt: t.createdAt,
   author: t.author ?? null,
   ...(t.autoBlocked ? { autoBlocked: t.autoBlocked } : {}),
   runningLabel: t.labels.includes(labels.running),
+  ...(t.active ? { active: true } : {}),
   ...(t.verify ? { verify: true } : {}),
 });
