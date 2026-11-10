@@ -106,6 +106,9 @@ function saveState(state) {
       delete merged.delegatedAt;
     }
     if (!('engineReq' in dt)) delete merged.engineReq;
+    // queued は dispatcher が起動管理用に立てる揮発マーカー（メモリ内キューが正）。
+    // メモリ側に無ければディスク側の残存も消す（キュー消化・再起動後の幽霊化防止）
+    if (!('queued' in cur)) { delete merged.queued; delete merged.queuedAt; }
     out.tasks[k] = merged;
   }
   const tmp = STATE_PATH + '.tmp';
@@ -862,6 +865,12 @@ function drainQueue(state) {
     if (idx < 0) break;
     const task = queue.splice(idx, 1)[0];
     const key = keyOf(task.repo.github, task.type, task.number);
+    // キュー待ちマーカーを解除（runTask が task エントリを spread 更新する前に
+    // 消さないと実行中エントリへ queued が残ってしまう）
+    if (state.tasks[key]?.queued) {
+      delete state.tasks[key].queued; delete state.tasks[key].queuedAt;
+      saveState(state);
+    }
     // running.set は runTask/doAssess 内で非同期に行われるため、ここで先行登録して
     // 続く findIndex の busy/repoBusy 判定へ即時反映する
     running.set(key, { proc: null, logPath: null,
@@ -1048,6 +1057,7 @@ async function cycle(state) {
   saveCandidates(found);
   // 初期検出時の自動評価: 未評価 or 判定が古い候補を評価キューへ（表示用。実装はしない）
   if (liveConfig('autoAssess', AUTO_ASSESS)) {
+    let qd = false;
     for (const t of found) {
       const key = keyOf(t.repo.github, t.type, t.number);
       const assessedAt = state.tasks[key]?.assessedAt;
@@ -1057,8 +1067,13 @@ async function cycle(state) {
       if (running.has(key) || queue.some((q) => keyOf(q.repo.github, q.type, q.number) === key)
         || state.tasks[key]?.inflight) continue;
       queue.push({ ...t, assessOnly: true });
+      // パネルの「待機中」表示・SSE 即時反映用に state へキュー待ちを記録する
+      state.tasks[key] = { ...(state.tasks[key] ?? {}),
+        queued: 'assess', queuedAt: new Date().toISOString() };
+      qd = true;
       log(`queued assess ${key} "${t.title}"`);
     }
+    if (qd) saveState(state);
   }
   // 自動起動の可否も毎サイクル読み直す
   const autoTrigger = liveConfig('autoTrigger', AUTO_TRIGGER);
@@ -1083,12 +1098,19 @@ async function cycle(state) {
       // verify へ進めず永久滞留する
       if (!!queue[qi].verify !== !!t.verify) {
         queue.splice(qi, 1, t);
+        state.tasks[key] = { ...(state.tasks[key] ?? {}),
+          queued: t.verify ? 'verify' : 'impl' };
+        saveState(state);
         log(`requeue ${key}: kind changed -> ${t.verify ? 'verify' : 'impl'}`);
       }
       continue;
     }
     if (t.labels.includes(LABEL.running) && !running.has(key)) continue; // reclaimStale が処理
     queue.push(t);
+    // パネルの「待機中」表示・SSE 即時反映用に state へキュー待ちを記録する
+    state.tasks[key] = { ...(state.tasks[key] ?? {}),
+      queued: t.verify ? 'verify' : 'impl', queuedAt: new Date().toISOString() };
+    saveState(state);
     log(`queued ${key} "${t.title}"`);
   }
   drainQueue(state);
@@ -1105,6 +1127,11 @@ async function main() {
     log(`WARN: devin exe not found: ${config.devinExe}（devin 解決の課題は起動失敗します）`);
   }
   const state = loadState();
+  // 前回プロセスが残したキュー待ちマーカーを掃除（queued はメモリ内キューと
+  // 連動する揮発状態。再起動直後はキューが空なので全て陳腐）
+  for (const t of Object.values(state.tasks ?? {})) {
+    delete t.queued; delete t.queuedAt;
+  }
   state.deployedAt ??= new Date().toISOString();
   saveState(state);
   if (TASK_SPEC) {

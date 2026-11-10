@@ -1967,7 +1967,7 @@ async function loadCandidates(force) {
     const list = j.candidates || [];
     // dispatcher が自動起動した実行中課題を候補側で検出したらポーリングを開始
     // （常時ポーリングはしないため、気付きは候補一覧の更新周期に従う）
-    if (list.some((c) => c.phase || c.inflight || c.chatDelegated || c.runningLabel)) ensurePolling();
+    if (list.some((c) => c.phase || c.inflight || c.chatDelegated || c.runningLabel || c.queued)) ensurePolling();
     // 監視リポジトリごとにグルーピング（config の並び順を維持）
     const order = (status?.config?.repos) ||
       [...new Set(list.map(c => c.key.split(' ')[0]))];
@@ -2448,7 +2448,7 @@ function renderCandBody() {
         localWait.has(c.key + ' impl') || localWait.has(c.key + ' pr');
       const chatQueued = quedAssess || quedImpl;
       const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key) || !!chatPh || !!localPh || chatQueued
-        || !!(c.phase || c.inflight || c.chatDelegated);
+        || !!(c.phase || c.inflight || c.chatDelegated || c.queued);
       const a = c.assess;
       const rowBg = (chatPh || localPh) ? ' style="background:#fef3e2"' :
         chatQueued ? ' style="background:#eef1f5;color:#94a3b8"' :
@@ -2484,7 +2484,7 @@ function renderCandBody() {
         : ph?.endsWith(' impl') || c.phase === 'impl' || c.inflight === 'impl' || c.chatDelegated === 'impl' ? 'impl'
         : ph?.endsWith(' assess') || c.phase === 'assess' || c.inflight === 'assess' ? 'assess' : null;
       const assessCell = runKind === 'assess' ? badge('#b45309', tr('評価中'))
-        : quedAssess ? badge('#6b7280', tr('待機中'))
+        : quedAssess || c.queued === 'assess' ? badge('#6b7280', tr('待機中'))
         : '<button class="mini" ' + (busy ? 'disabled' : '') +
           ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? tr('再評価') : tr('評価')) + '</button>';
       const prM = c.openPr ? String(c.openPr).match(/^(\S+)\s+pr#(\d+)$/) : null;
@@ -2492,7 +2492,7 @@ function renderCandBody() {
       const remPr = prM || crM;
       const implCell = runKind === 'verify' ? badge('#b45309', tr('再検証中'))
         : runKind === 'impl' ? badge('#b45309', tr('対応中'))
-        : quedImpl ? badge('#6b7280', tr('待機中'))
+        : quedImpl || c.queued === 'impl' || c.queued === 'verify' ? badge('#6b7280', tr('待機中'))
         : prM
           ? '<a class="badge" style="background:#6b7280;color:#fff;text-decoration:none" ' +
             'href="https://github.com/' + esc(prM[1]) + '/pull/' + prM[2] +
@@ -2591,6 +2591,19 @@ refresh();
 loadSkills();
 loadSessions();
 loadChat();
+// 状態変化はサーバ push（SSE /api/events: state/candidates/issues.json の
+// fs.watch）で即時反映する。接続不可・切断中は ensurePolling/candTimer の
+// 周期取得がフォールバックとして継続する（EventSource は自動再接続）
+try {
+  const sse = new EventSource(API + '/api/events');
+  sse.onmessage = (ev) => {
+    refresh();
+    try {
+      const d = JSON.parse(ev.data);
+      if (d.file === 'candidates.json' || d.file === 'issues.json') loadCandidates(false);
+    } catch { /* noop */ }
+  };
+} catch { /* EventSource 非対応時は周期取得のみ */ }
 // 常時ポーリングはしない。アクション・候補取得でアクティブを検出した時だけ
 // ensurePolling() が 3秒周期を開始し、全て完了したら自動停止する
 ensurePolling();

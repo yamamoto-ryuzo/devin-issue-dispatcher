@@ -10,7 +10,7 @@ GitHub Issue/PR を監視し、エージェントが評価・実装・再検証�
 ### 原則
 
 - `state.json` / `candidates.json` / `config.json` などのサーバ側状態を変更する処理を追加・変更した場合、**その状態が表示に使われる全箇所で即時反映されることを確認**する
-- パネルは**常時ポーリングしない**。アクション（評価/対応/一括実行等）または候補取得でアクティブ課題を検出した時だけ `ensurePolling()` が 3秒周期の `refresh()` を開始し、全て完了したら自動停止する。`refresh()` はタスク状態のシグネチャ変化で `loadCandidates(false)` を呼び即時反映する。**表示用フィールドを追加したら `/api/candidates`（または `/api/status`）の応答にも必ず含めること**
+- パネルは**常時ポーリングしない**。状態変化の即時反映は **SSE（`GET /api/events`）の push** が担う: control.mjs が `state.json`/`candidates.json`/`issues.json`/`desired.json` をディレクトリ `fs.watch` し、変化を 400ms デバウンスで配信 → パネルは `refresh()`（＋candidates/issues 変化時は `loadCandidates(false)`）を呼ぶ。SSE 未接続時のフォールバックとして、アクション（評価/対応/一括実行等）または候補取得でアクティブ課題を検出した時だけ `ensurePolling()` が 3秒周期の `refresh()` を開始し、全て完了したら自動停止する。`refresh()` はタスク状態のシグネチャ変化で `loadCandidates(false)` を呼び即時反映する。**表示用フィールドを追加したら `/api/candidates`（または `/api/status`）の応答にも必ず含めること**（`queued` 等の state.tasks 由来フィールドも同様）
 - 「実行中」表示は **全実行経路を統一的に扱う**（dispatcher 直接起動の devin セッション・チャット経路・委譲セッション・手動 dispatch）。`chatBusy`/`chatWaiting` だけを見ると dispatcher 起動分が抜け落ちるため、`phase`/`inflight`/`chatDelegated`/`manualRuns`/`runningLabel` を併用する
 - ユーザー操作（dispatch/評価/停止/設定変更等）の後は、**サーバ応答を待たずに即リロード or ポーリングで追従**させる設計とし、「ボタンを押したのに画面が変わらない」状態を作らない
 - `panel.html` 編集はブラウザリロードで即反映されるが、`control.mjs`（候補 API・status API）の変更は control 再起動が必要。dispatcher.mjs 変更は dispatcher 再起動が必要

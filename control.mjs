@@ -27,7 +27,7 @@ import { engineSendCore, injectExtraPrompt, ASSESS_RE, SPLIT_RE, skillEnabled,
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
-import { readFileSync, writeFileSync, existsSync, openSync, readSync, closeSync, statSync, renameSync, readdirSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, openSync, readSync, closeSync, statSync, renameSync, readdirSync, mkdirSync, watch } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { keyOf, discover, toCandidate, readIssueStore, ghJson } from './discover.mjs';
@@ -919,6 +919,7 @@ async function candidates(force) {
         // 実行フェーズをパネル表示用にそのまま出す（対応列の「○○中」表示に使う）
         phase: t?.phase ?? null, inflight: t?.inflight ?? null,
         chatDelegated: t?.chatDelegated ?? null,
+        queued: t?.queued ?? null,
         createdPr, openPr,
         engineReq: t?.engineReq ?? null,
         engineIssue: issueEngine(key, issuesAll),
@@ -1191,6 +1192,35 @@ async function handleMcp(req, res, acao, readOnly = false) {
     }
   }
   return error(-32601, `method not found: ${method}`);
+}
+
+// ---- SSE: 状態変化の push 配信 ----
+// パネルの常時ポーリングを避けつつ「状態変化→即時反映」を実現するため、
+// state.json 等の書き込みを fs.watch で検出して GET /api/events へ配信する。
+// dispatcher.mjs は別プロセスだが同一ファイルを書き換えるため監視で捕捉できる
+const sseClients = new Set();
+let stateWatcher = null, sseTimer = null;
+const SSE_WATCH_FILES = new Set(
+  ['state.json', 'candidates.json', 'issues.json', 'desired.json']);
+function sseBroadcast(obj) {
+  const data = 'data: ' + JSON.stringify(obj) + '\n\n';
+  for (const res of sseClients) { try { res.write(data); } catch { /* noop */ } }
+}
+function ensureStateWatcher() {
+  if (stateWatcher) return;
+  try {
+    // 監視対象はファイル単位ではなくディレクトリ: state.json は tmp+rename の
+    // 原子書き換えのため、ファイル監視だと rename 後に監視が外れる
+    stateWatcher = watch(ROOT, { persistent: false }, (_ev, filename) => {
+      if (!filename || !SSE_WATCH_FILES.has(filename)) return;
+      if (sseTimer) clearTimeout(sseTimer);
+      sseTimer = setTimeout(() => {
+        sseTimer = null;
+        sseBroadcast({ type: 'state', file: filename, at: new Date().toISOString() });
+      }, 400);
+    });
+    stateWatcher.on('error', () => { stateWatcher = null; });
+  } catch { /* 監視不可環境では無イベントのまま（パネル側は周期取得へフォールバック） */ }
 }
 
 const server = createServer(async (req, res) => {
@@ -1723,6 +1753,24 @@ const server = createServer(async (req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         return res.end(html);
       } catch { return json(404, { ok: false, error: 'docs not found' }); }
+    }
+    if (url.pathname === '/api/events') {
+      // SSE: state.json 等の変化を push。GET かつ読み取り専用なので X-Panel 不要
+      // （EventSource はカスタムヘッダを送れないため POST 系の CSRF 措置とは別経路）
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+        ...(acao ? { 'Access-Control-Allow-Origin': acao } : {}),
+      });
+      res.write('retry: 3000\n\n');
+      sseClients.add(res);
+      ensureStateWatcher();
+      // アイドル切断対策のハートビート（コメント行 = イベント扱いされない）
+      const hb = setInterval(() => { try { res.write(':hb\n\n'); } catch { /* noop */ } }, 25000);
+      req.on('close', () => { clearInterval(hb); sseClients.delete(res); });
+      return;
     }
     if (url.pathname === '/api/status') return json(200, status());
     if (url.pathname === '/api/auth') {
