@@ -67,15 +67,20 @@
 **既定ブランチ上の未 push コミットを別視点で再検証**する。
 
 ```
-git log origin/<既定ブランチ>..HEAD で未 push コミット（= その課題の実装）を確認
+git log origin/<既定ブランチ>..HEAD で未 push コミットを確認し、
+各コミットの課題番号（(#N)）から帰属先 issue の状態を確認する
    │
-   └─ 完了時スキル (_done) を「違う視点」でもう一度実施
+   ├─ 全て open の監視対象 issue に帰属 → 混在とはみなさず検証へ進む
+   ├─ closed / devin:rejected の課題に帰属 → 断念済み作業として
+   │      git revert で除去してから push する
+   └─ 課題番号を特定できない → 未管理の変更。push せず報告
+   │
+   └─ 完了時スキル (_done) を「違う視点」でもう一度実施（自課題分のみ）
           ├─ OK → git push でリモートへ反映 → 結果をコメント →
           │      devin:done 付与＋AI:impl-done 除去 → gh issue close
-          └─ NG → git reset --hard origin/<既定ブランチ> で未検証コミットを
-                  破棄 → AI:impl-done を除去＋NG 内容をコメント
-                  （保存済み評価の category/risk は dispatcher が1ランク
-                    引き上げ、課題は自動で再対応キューへ戻る）
+          └─ NG → git 操作はせず AI:impl-done のみ除去＋NG 内容をコメント
+                  （課題は自動で再対応キューへ戻り、修正は新規コミットで行う。
+                    保存済み評価の category/risk は dispatcher が1ランク引き上げる）
 ```
 
 ## 常に守ること

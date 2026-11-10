@@ -31,8 +31,11 @@ flowchart TD
         NG["`devin:failed` ラベル<br/>＋ 失敗コメント(ログパス)"]
         VF["`AI:impl-done` 付き課題を検出<br/>→ Phase3: 再検証セッション起動"]
         VO{"別視点の検証結果"}
-        VOK["git push → `devin:done` 付与<br/>→ issue クローズ"]
-        VNG["未検証コミットを reset で破棄<br/>→ `AI:impl-done` 除去で差し戻し<br/>→ 判定ランク1段引上げ"]
+        AT{"帰属チェック<br/>全未pushコミットの #N → issue 状態"}
+        VOK["一括 push → `devin:done` 付与<br/>→ issue クローズ"]
+        VRV["closed/rejected 課題分を `git revert` 除去<br/>→ push → `devin:done`+close"]
+        VBL["帰属先を特定できない変更あり<br/>→ push せず人間へ報告"]
+        VNG["git操作なしで `AI:impl-done` 除去＋コメント<br/>→ 判定ランク1段引上げ<br/>→ fix-forward で再実装"]
         ST["起動時: `running` のまま残り<br/>180分超の取り残しを検出<br/>→ `failed` へ回収"]
     end
 
@@ -51,7 +54,10 @@ flowchart TD
     V -- "no / needs-human / high" --> NR
     SP2 --> P1 --> P2 --> P3 --> F
     F -- "0" --> OK --> VF --> VO
-    VO -- "OK" --> VOK
+    VO -- "OK" --> AT
+    AT -- "全て open 課題に帰属" --> VOK
+    AT -- "断念課題あり" --> VRV
+    AT -- "帰属不明あり" --> VBL -.-> R
     VO -- "NG" --> VNG -.-> R
     F -- "非0 / spawn失敗" --> NG
     NG -.-> R
@@ -67,7 +73,7 @@ stateDiagram-v2
     open --> devin_running: dispatcher が検出・評価セッション起動
     devin_running --> impl_done: 評価OK→実装→ローカルコミット＋`AI:impl-done` 付与
     impl_done --> devin_done: 再検証 OK → push＋`devin:done` 付与＋クローズ
-    impl_done --> open: 再検証 NG → 未検証コミット破棄＋`AI:impl-done` 除去＋判定ランク引上げで再候補化
+    impl_done --> open: 再検証 NG → `AI:impl-done` 除去のみ（git操作なし）＋判定ランク引上げで再候補化・fix-forward
     devin_running --> devin_failed: 実装 exit 非0 / spawn失敗 / stale回収
     devin_running --> devin_needs_review: feasible=no/needs-human または risk=high
     devin_failed --> open: `devin:failed` ラベルを外す<br/>or パネルの「再実行」
@@ -278,6 +284,10 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 - `issues.json` — open 課題のローカルストア（自動生成。title/body/labels/日時を保持。
   `--task`・将来の消費者が gh 再取得せず使える）
 - `desired.json` — 「起動」状態の永続化（自動生成）
+- `chats.json` — パネル内蔵チャットの一覧と ACP `sessionId`（自動生成）。devin/copilot の
+  ACP セッションは切断・control 再起動後も次の送信で `session/load` を試みて会話を再開する
+  （エージェント非対応・失敗時は `session/new` へフォールバック。`close` は devin 側の
+  セッションへ `session/close` を通知してから畳む。shim＝単発応答は対象外）
 - `logs/dispatcher.log` — ディスパッチャー自身のログ
 - `logs/<repo>_<type><N>_<ts>.log` — 各 devin セッションの stdout/stderr
 - `register-task.ps1` — タスクスケジューラ登録スクリプト

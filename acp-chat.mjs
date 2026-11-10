@@ -42,7 +42,8 @@ function copilotSpawnSpec() {
 }
 
 export class AcpChat {
-  constructor({ engine, devinExe, cwd, getPersistedOptions, saveOption, getMcpServers }) {
+  constructor({ engine, devinExe, cwd, getPersistedOptions, saveOption, getMcpServers,
+                initialSessionId, onSessionId }) {
     this.engine = engine ?? 'devin';
     this.devinExe = devinExe;
     this.cwd = cwd;
@@ -50,6 +51,11 @@ export class AcpChat {
     this.saveOption = saveOption ?? (() => {});
     // session/new の mcpServers を都度解決する（config 変更を新セッションへ反映）
     this.getMcpServers = getMcpServers ?? (() => []);
+    // 切断・再起動後に ACP session/load で再開するための永続化済み sessionId。
+    // 変更時は onSessionId(id|null) で呼び出し側の永続化層へ通知する
+    this.savedSessionId = initialSessionId ?? null;
+    this.onSessionId = onSessionId ?? (() => {});
+    this.agentCaps = null;
     this.proc = null;
     this.sessionId = null;
     this.buf = '';
@@ -81,6 +87,13 @@ export class AcpChat {
     const last = this.messages.at(-1);
     if (last?.role === 'agent' && !last.done) last.text += t;
     else this.messages.push({ role: 'agent', text: t, ts: new Date().toISOString() });
+  }
+
+  // session/load 時の履歴再送（user_message_chunk）を表示へ反映する
+  userText(t) {
+    const last = this.messages.at(-1);
+    if (last?.role === 'user' && !last.done) last.text += t;
+    else this.messages.push({ role: 'user', text: t, ts: new Date().toISOString() });
   }
 
   spawnSpec() {
@@ -127,6 +140,7 @@ export class AcpChat {
     });
     this.proc.on('close', () => {
       this.push('sys', '[セッション切断]');
+      // savedSessionId は残す（次の送信で session/load による再開を試みる）
       this.proc = null; this.sessionId = null; this.ready = false; this.busy = false;
     });
     this.proc.on('error', (e) => {
@@ -141,13 +155,15 @@ export class AcpChat {
     if (!u) return;
     if (u.sessionUpdate === 'agent_message_chunk' && u.content?.text) {
       this.agentText(u.content.text);
+    } else if (u.sessionUpdate === 'user_message_chunk' && u.content?.text) {
+      this.userText(u.content.text);
     } else if (u.sessionUpdate === 'tool_call') {
       const title = u.title ?? 'tool';
       this.push('tool', `${title}: ${JSON.stringify(u.rawInput ?? '').slice(0, 120)}`);
     } else if (u.sessionUpdate === 'turn_complete') {
       this.busy = false;
       const last = this.messages.at(-1);
-      if (last?.role === 'agent') last.done = true;
+      if (last?.role === 'agent' || last?.role === 'user') last.done = true;
     } else if (u.sessionUpdate === 'config_option_update' && u.configOptions) {
       this.options = u.configOptions;
     }
@@ -176,10 +192,32 @@ export class AcpChat {
       // 未実装のまま応答が返らずターンが停止する。エージェント側のツールに任せる。
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     });
+    this.agentCaps = init?.agentCapabilities ?? null;
     await this.authenticate(init);
+    // 既存セッションの再開: 保持済み sessionId があってエージェントが
+    // loadSession 対応なら session/load を試し、失敗・非対応時は新規へ
+    if (this.savedSessionId && this.agentCaps?.loadSession) {
+      try {
+        const s = await this.rpc('session/load',
+          { sessionId: this.savedSessionId, cwd: this.cwd,
+            mcpServers: this.getMcpServers() });
+        this.sessionId = this.savedSessionId;
+        this.ready = true;
+        this.options = s?.configOptions ?? this.options ?? [];
+        this.modes = s?.modes ?? this.modes ?? null;
+        this.push('sys', `セッション再開 [${this.engine}] (${this.sessionId})`);
+        return;
+      } catch (e) {
+        this.push('sys', `[再開失敗] ${e.message} → 新規セッションを開始します`);
+        this.savedSessionId = null;
+        this.onSessionId(null);
+      }
+    }
     const s = await this.rpc('session/new',
       { cwd: this.cwd, mcpServers: this.getMcpServers() });
     this.sessionId = s.sessionId;
+    this.savedSessionId = s.sessionId;
+    this.onSessionId(s.sessionId);
     this.ready = true;
     // Canvas AIチャット風: モデル/モード選択肢を保持（config_option_update で更新）
     this.options = s.configOptions ?? [];
@@ -236,14 +274,35 @@ export class AcpChat {
   async reset() {
     try { this.proc?.kill(); } catch { /* noop */ }
     this.proc = null; this.sessionId = null; this.ready = false;
+    if (this.savedSessionId) {
+      this.savedSessionId = null;
+      this.onSessionId(null);
+    }
     this.push('sys', 'セッションをリセットしました');
+  }
+
+  // セッションを閉じる（パネル「✕」）。devin 側のセッション一覧を掃除するため
+  // session/close を best-effort で通知してからローカルを畳む
+  async close() {
+    if (this.proc && this.sessionId && this.agentCaps?.sessionCapabilities?.close) {
+      try {
+        await Promise.race([
+          this.rpc('session/close', { sessionId: this.sessionId }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000)),
+        ]);
+      } catch { /* noop */ }
+    }
+    await this.reset();
   }
 
   snapshot() {
     return {
       ready: this.ready, busy: this.busy, error: this.error,
       live: !!this.proc,
-      sessionId: this.sessionId, messages: this.messages,
+      // sessionId 未接続でも savedSessionId があれば再開可能として返す
+      sessionId: this.sessionId ?? this.savedSessionId,
+      resumable: !this.proc && !!this.savedSessionId,
+      messages: this.messages,
       options: this.options ?? [], modes: this.modes,
     };
   }

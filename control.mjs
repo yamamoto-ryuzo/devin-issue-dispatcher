@@ -40,6 +40,7 @@ const STATE_PATH = join(ROOT, 'state.json');
 const CANDS_PATH = join(ROOT, 'candidates.json');
 const GOALS_PATH = join(ROOT, 'goals.json');
 const ISSUES_PATH = join(ROOT, 'issues.json');
+const CHATS_PATH = join(ROOT, 'chats.json'); // チャットのラベル・エンジン・ACP sessionId（再開用）
 const SECRETS_PATH = join(ROOT, 'secrets.json'); // apiKey・MCP トークン等（gitignore 済。config.json へは書かない）
 const LOG_PATH = join(ROOT, 'logs', 'dispatcher.log');
 const PANEL_PATH = join(ROOT, 'panel.html');
@@ -125,6 +126,7 @@ function sessionsList() {
   return [...chats.entries()].map(([id, s]) => ({
     id, label: s.label, busy: s.chat.busy, ready: s.chat.ready,
     live: !!s.chat.proc, sessionId: s.chat.sessionId,
+    resumable: !s.chat.proc && !!s.chat.savedSessionId,
     engine: s.chat.engine ?? 'devin',
   }));
 }
@@ -154,6 +156,7 @@ function makeEngineShim(eng, onError) {
     clear() { shim.messages.length = 0; },
     async cancel() { shim.busy = false; },
     async reset() { shim.messages.length = 0; },
+    async close() { shim.messages.length = 0; },
     async setOption() { throw new Error(eng + ' エンジンはオプション非対応'); },
   };
   return shim;
@@ -167,26 +170,57 @@ function acpOptionsOf(cfg, eng) {
     ? (eng === 'devin' ? o : {})
     : (o[eng] ?? {});
 }
-function makeChat(eng) {
+function makeChat(eng, restored = {}) {
   return ACP_ENGINES.has(eng)
     ? new AcpChat({ engine: eng, devinExe: config.devinExe, cwd: dirname(ROOT),
         getPersistedOptions: () => acpOptionsOf(config, eng),
-        getMcpServers: sessionMcpServers })
+        // const 宣言（本ブロックより後方）を restoreChats のモジュール初期化時に
+        // 参照しないよう呼び出し時まで遅延させる
+        getMcpServers: () => sessionMcpServers(),
+        initialSessionId: restored.sessionId ?? null,
+        onSessionId: () => persistChats() })
     : makeEngineShim(eng);
+}
+// チャットの id/ラベル/エンジン/ACP sessionId を chats.json へ永続化する。
+// ACP エンジンは切断・control 再起動後も session/load で会話を再開できる。
+// shim（単発応答）には再開すべきセッションが無いので sessionId は保持しない
+function persistChats() {
+  const o = {};
+  for (const [id, s] of chats) {
+    const acp = ACP_ENGINES.has(s.chat.engine ?? 'devin');
+    o[id] = { label: s.label, engine: s.chat.engine ?? 'devin',
+      sessionId: acp ? (s.chat.savedSessionId ?? s.chat.sessionId ?? null) : null };
+  }
+  const tmp = CHATS_PATH + '.tmp';
+  writeFileSync(tmp, JSON.stringify(o, null, 2));
+  renameSync(tmp, CHATS_PATH);
 }
 // 空きセッションはエンジン一致時のみ再利用（設定切替後に旧エンジンへ
 // 誤送信しない）。不一致なら新規セッションを作る
 function pickChatId(label, eng = 'devin') {
   for (const [id, s] of chats) {
     if (!s.chat.busy && (s.chat.engine ?? 'devin') === eng) {
-      if (label) s.label = label;
+      if (label && s.label !== label) { s.label = label; persistChats(); }
       return id;
     }
   }
   const id = ++chatSeq;
   chats.set(id, { chat: makeChat(eng), label: label ?? `session ${id}` });
+  persistChats();
   return id;
 }
+// 前回プロセスのチャットを復元。ACP エンジンは savedSessionId を保持するため
+// 次の送信で session/load による会話再開が試みられる（非対応/失敗時は新規）
+(function restoreChats() {
+  const saved = loadJson(CHATS_PATH, {});
+  for (const [id, s] of Object.entries(saved)) {
+    const nid = +id;
+    if (!nid || !s?.engine) continue;
+    chats.set(nid, { chat: makeChat(s.engine, { sessionId: s.sessionId }),
+      label: s.label ?? `session ${nid}` });
+    if (nid > chatSeq) chatSeq = nid;
+  }
+})();
 // フェーズ別の上限（maxConcurrentAssess/Impl）を超えた送信は待機キューへ
 const chatWait = []; // {key, mode, skill}
 function busyCount(mode, isPr) {
@@ -309,6 +343,20 @@ async function dispatchChatTask(key, mode, skill, engine) {
     }
     delete next.engineError;
     delete next.engineErrorAt;
+    // dispatcher の自動起動と二重化しないよう飛行/委譲マーカーを立てる。
+    // 完了は watchAssess（inflightClearedAt）/ watchImpl（chatResult）が
+    // 確定して解除する（dispatcher の saveState 併合・syncShared が追従）
+    if (mode === 'assess') {
+      next.inflight = 'assess';
+      next.inflightAt = next.engineUsedAt;
+    } else if (mode === 'impl' || mode === 'pr') {
+      next.inflight = mode;
+      next.inflightAt = next.engineUsedAt;
+      next.status = 'running';
+      next.startedAt = next.engineUsedAt;
+      next.chatDelegated = mode === 'pr' ? 'verify' : 'impl';
+      next.delegatedAt = next.engineUsedAt;
+    }
     st.tasks[key] = next;
     writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
   }
@@ -317,6 +365,13 @@ async function dispatchChatTask(key, mode, skill, engine) {
     const st0 = loadJson(STATE_PATH, { tasks: {} });
     st0.tasks[key] = { ...(st0.tasks[key] ?? {}),
       note: 'api エンジンは評価専用のため ' + mode + ' を起動しませんでした' };
+    // 起動しないため直前に立てた委譲/飛行マーカーを巻き戻し、dispatcher 側へ即開放する
+    delete st0.tasks[key].chatDelegated;
+    delete st0.tasks[key].delegatedAt;
+    delete st0.tasks[key].inflight;
+    delete st0.tasks[key].inflightAt;
+    st0.tasks[key].inflightClearedAt = new Date().toISOString();
+    if (st0.tasks[key].status === 'running') delete st0.tasks[key].status;
     writeFileSync(STATE_PATH, JSON.stringify(st0, null, 2));
     const e = new Error('api エンジンは評価(assess)専用です。impl/split は起動できません（devin/ブリッジ系を指定してください）');
     e.fatal = true;
@@ -342,22 +397,85 @@ async function dispatchChatTask(key, mode, skill, engine) {
           engineError: 'engine error (' + mode + '): ' + e.message,
           engineErrorAt: now };
       }
+      // 失敗した委譲/飛行マーカーは解除し、再試行や dispatcher 経路を開放する
+      delete st.tasks[key].chatDelegated;
+      delete st.tasks[key].delegatedAt;
+      delete st.tasks[key].chatId;
+      delete st.tasks[key].inflight;
+      delete st.tasks[key].inflightAt;
+      st.tasks[key].inflightClearedAt = now;
       writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
     });
     chats.set(id, { chat: shim, label: key + ' ' + mode });
     shim.busy = true;
     shim.send(p.text).catch(() => {});
+    if (mode === 'impl' || mode === 'pr') recordChatId(key, id);
     if (mode === 'assess') watchAssess(key, shim);
     if (mode === 'split') watchSplit(key, shim);
     if (mode === 'impl' || mode === 'pr') watchImpl(key, shim);
     return id;
   }
   const id = pickChatId(key + ' ' + mode, eng);
-  await chats.get(id).chat.send(p.text);
+  try {
+    await chats.get(id).chat.send(p.text);
+  } catch (e) {
+    unmarkDelegated(key); // 未起動のまま委譲マーカーを残さない
+    throw e;
+  }
+  if (mode === 'impl' || mode === 'pr') recordChatId(key, id);
   if (mode === 'assess') watchAssess(key, chats.get(id).chat);
   if (mode === 'split') watchSplit(key, chats.get(id).chat);
   if (mode === 'impl' || mode === 'pr') watchImpl(key, chats.get(id).chat);
   return id;
+}
+
+// 委譲実行への停止要求（kill-requests → /api/chat/cancel）転送用に、
+// 起動したセッション id を state へ記録する
+function recordChatId(key, id) {
+  const st = loadJson(STATE_PATH, { tasks: {} });
+  if (!st.tasks[key]?.chatDelegated) return;
+  st.tasks[key].chatId = id;
+  writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+}
+
+// chatWait 投入時点で立てる飛行マーカー。投入→起動の隙間に dispatcher が
+// 同一課題を自動起動するのを防ぐ（委譲本体は dispatchChatTask 起動時に立つ）
+function markQueued(key, mode) {
+  const st = loadJson(STATE_PATH, { tasks: {} });
+  const t = st.tasks[key] ?? {};
+  if (t.inflight || t.chatDelegated || t.status === 'running') return;
+  st.tasks[key] = { ...t, inflight: mode, inflightAt: new Date().toISOString() };
+  writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+}
+
+// 起動不能（fatal）で飛行マーカーだけ残った場合の巻き戻し。
+// 委譲起動済み（chatDelegated）なら完了監視・滞留回収側へ委ねる
+function unmarkQueued(key) {
+  const st = loadJson(STATE_PATH, { tasks: {} });
+  const t = st.tasks[key];
+  if (!t?.inflight || t.chatDelegated) return;
+  delete t.inflight;
+  delete t.inflightAt;
+  t.inflightClearedAt = new Date().toISOString();
+  writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+}
+
+// dispatch 自体の失敗（送信不可等）で立てた委譲/飛行マーカーを巻き戻す。
+// status/startedAt は今回の dispatch が立てたもの（engineUsedAt と一致）のみ解除し、
+// 既存の dispatcher 実行中タスクの running 表示は壊さない
+function unmarkDelegated(key) {
+  const st = loadJson(STATE_PATH, { tasks: {} });
+  const t = st.tasks[key];
+  if (!t) return;
+  const ownRun = t.status === 'running' && t.startedAt && t.startedAt === t.engineUsedAt;
+  delete t.chatDelegated;
+  delete t.delegatedAt;
+  delete t.chatId;
+  delete t.inflight;
+  delete t.inflightAt;
+  t.inflightClearedAt = new Date().toISOString();
+  if (ownRun) { delete t.status; delete t.startedAt; }
+  writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
 }
 setInterval(() => {
   // busy が立つ前に同じチャットを再選択しないよう await し、失敗時はキューへ戻す
@@ -366,7 +484,10 @@ setInterval(() => {
       if (!chatCapacity(chatWait[i].mode, chatWait[i].key)) continue;
       const { key, mode, skill, engine } = chatWait.splice(i, 1)[0];
       try { await dispatchChatTask(key, mode, skill, engine); }
-      catch (e) { if (!e?.fatal) chatWait.push({ key, mode, skill, engine }); }
+      catch (e) {
+        if (!e?.fatal) { chatWait.push({ key, mode, skill, engine }); markQueued(key, mode); }
+        else unmarkQueued(key); // 起動不能 → 待機時の飛行マーカーを戻す
+      }
     }
   })();
 }, 3000).unref?.();
@@ -419,14 +540,20 @@ function taskPrompt(key, mode, skillFile) {
         : mode === 'pr'
         // AI:impl-done 付き issue の再検証（PR処理=リモートへのコミット）
         ? `この課題は実装済み（AI:impl-done フラグ付き）です。既定ブランチ上の未 push コミットを別視点で再検証してください。\n` +
-          `1. git status と git log origin/<既定ブランチ>..HEAD --oneline で未 push コミットを確認\n` +
-          `2. 完了時スキル（_done）の確認項目を違う視点で再検証\n` +
-          `3. OK → git push でリモートへ反映 → 検証内容をコメント → ` +
+          `1. git status と git log origin/<既定ブランチ>..HEAD --oneline で未 push コミットを確認（空なら他課題が一括 push 済み。手順3へ）\n` +
+          `2. 完了時スキル（_done）の確認項目を違う視点で、この課題の変更のみ再検証\n` +
+          `3. 混在チェック: 未 push コミットの課題番号（(#N)等）を特定し gh issue view で確認。` +
+          `open の監視対象 issue への帰属のみは混在とみなさず push 可（他課題の検証は各課題が行う）。` +
+          `closed・devin:rejected 課題のコミットは断念済み作業として git revert --no-edit で除去してから push` +
+          `（revert 衝突時は push せず報告。既存の "Revert ..." コミットは掃除済み記録として帰属確認をスキップ）。` +
+          `課題番号を特定できないコミットがあれば push せず報告\n` +
+          `4. OK → git push でリモートへ反映（他課題コミットも一括 push される旨をコメント明記）→ 検証内容をコメント → ` +
           `gh issue edit ${m[3]} -R ${m[1]} --add-label devin:done --remove-label AI:impl-done → ` +
           `gh issue close ${m[3]} -R ${m[1]}\n` +
-          `   NG → git reset --hard origin/<既定ブランチ> で未検証コミットを破棄 → ` +
-          `gh issue edit ${m[3]} -R ${m[1]} --remove-label AI:impl-done → NG 内容をコメント\n` +
-          `コード修正・新規コミット・ブランチ/PR 作成・force push は禁止。\n`
+          `   NG → git 操作はしない（混在時の reset は他課題コミットを破壊するため禁止）→ ` +
+          `gh issue edit ${m[3]} -R ${m[1]} --remove-label AI:impl-done → NG 内容をコメント（課題は実装キューへ戻る）\n` +
+          `コード修正・ブランチ/PR 作成・force push・git reset は禁止` +
+          `（断念コミット除去の git revert のみ新規コミットとして許可）。\n`
         : `既定ブランチで git pull --ff-only してから実装→検証→ローカルコミット（push 禁止。コミットはこの課題の変更のみ）→\n` +
           `gh issue edit ${m[3]} -R ${m[1]} --add-label AI:impl-done で処理済みフラグを立て、実施内容を issue コメントで報告。\n` +
           `ブランチ作成・PR 作成・push・force push は禁止。\n` +
@@ -511,16 +638,22 @@ function watchAssess(key, ch) {
             // 解除時刻を残し、dispatcher がメモリ上のマーカーへ新しさで追従できるようにする
             delete st.tasks[key].inflight;
             st.tasks[key].inflightClearedAt = new Date().toISOString();
-            writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
             // 自動連鎖: issue課題は autoTrigger、pr課題は autoPr が ON のとき
-            // 判定・リスクが自動処理範囲内なら対応（impl）へ投入
+            // 判定・リスクが自動処理範囲内なら対応（impl）へ投入。
+            // dispatcher が同一課題を別途自動起動しないよう、同一書き込みで
+            // 飛行マーカーを立ててから待機キューへ入れる
             const autoOk = key.includes(' pr#')
               ? (config.autoPr ?? false) : (config.autoTrigger ?? false);
-            if (autoOk && catAllowed(v.category) && riskAllowed(v.risk) &&
+            const chainImpl = autoOk && catAllowed(v.category) && riskAllowed(v.risk) &&
                 !['running', 'done', 'failed', 'needs-review', 'rejected'].includes(st.tasks[key]?.status) &&
-                !chatWait.some((w) => w.key === key)) {
-              chatWait.push({ key, mode: 'impl' });
+                !st.tasks[key]?.chatDelegated &&
+                !chatWait.some((w) => w.key === key);
+            if (chainImpl) {
+              st.tasks[key].inflight = 'impl';
+              st.tasks[key].inflightAt = new Date().toISOString();
             }
+            writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+            if (chainImpl) chatWait.push({ key, mode: 'impl' });
           } catch { /* malformed JSON */ }
         }
       }
@@ -627,6 +760,7 @@ function watchImpl(key, ch) {
       st.tasks[key] = { ...st.tasks[key],
         chatResult: { status, at }, inflightClearedAt: at };
       delete st.tasks[key].inflight;
+      delete st.tasks[key].chatId;
       writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
     })();
   }, 3000);
@@ -779,6 +913,10 @@ async function candidates(force) {
           : prToIssue.get(key) ?? null)
         : null;
       return { key, ...c, state: t?.status ?? null, assess: t?.assess ?? null,
+        // dispatcher 直接起動の devin セッションは chatBusy に載らないため、
+        // 実行フェーズをパネル表示用にそのまま出す（対応列の「○○中」表示に使う）
+        phase: t?.phase ?? null, inflight: t?.inflight ?? null,
+        chatDelegated: t?.chatDelegated ?? null,
         createdPr, openPr,
         engineReq: t?.engineReq ?? null,
         engineIssue: issueEngine(key, issuesAll),
@@ -1135,6 +1273,7 @@ const server = createServer(async (req, res) => {
           const key = c.key ?? `${c.repo} ${c.type}#${c.number}`;
           if (!st[key]?.assess?.category && !chatWait.some((w) => w.key === key)) {
             chatWait.push({ key, mode: 'assess' });
+            markQueued(key, 'assess');
             n++;
           }
         }
@@ -1154,6 +1293,7 @@ const server = createServer(async (req, res) => {
           if (s === 'running' || s === 'done' || s === 'needs-review' || s === 'rejected') continue;
           if (chatWait.some((w) => w.key === key)) continue;
           chatWait.push({ key, mode: 'impl' });
+          markQueued(key, 'impl');
           n++;
         }
         return json(200, { ok: true, queued: n });
@@ -1307,7 +1447,12 @@ const server = createServer(async (req, res) => {
       if (url.pathname === '/api/chat/close') {
         const { id } = JSON.parse((await readBody(req)) || '{}');
         const s = chats.get(id);
-        if (s) { try { await s.chat.reset(); } catch { /* noop */ } chats.delete(id); }
+        if (s) {
+          // close は session/close 通知付きの畳み込み（無ければ reset に相当）
+          try { await (s.chat.close?.() ?? s.chat.reset()); } catch { /* noop */ }
+          chats.delete(id);
+          persistChats();
+        }
         return json(200, { ok: true });
       }
       if (url.pathname === '/api/close') {
@@ -1459,6 +1604,7 @@ const server = createServer(async (req, res) => {
         try {
           if (!chatCapacity(mode, key)) {
             chatWait.push({ key, mode, skill, engine });
+            markQueued(key, mode);
             return json(202, { ok: true, queued: true });
           }
           const id = await dispatchChatTask(key, mode, skill, engine);

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Devin Agent Dispatcher — システムドキュメント</title>
+<title>課題エージェント ディスパッチャー — システムドキュメント</title>
 <style>
   body{font-family:'Segoe UI',system-ui,sans-serif;max-width:960px;margin:0 auto;padding:24px;line-height:1.6;color:#1f2937}
   h1{border-bottom:2px solid #e5e7eb;padding-bottom:8px}
@@ -23,12 +23,12 @@
 </style>
 </head>
 <body>
-<h1>Devin Agent Dispatcher — システムドキュメント</h1>
+<h1>課題エージェント ディスパッチャー — システムドキュメント</h1>
 <p>GitHub Issue/PR を監視し、Devin エージェント（<code>devin -p</code> / ACP チャット）が課題の評価・実装・PR対応を自動で行う常駐システム。管理パネル <code>http://127.0.0.1:8585</code> から全体を制御する。</p>
 
 <nav>
 <b>目次:</b> <a href="#arch">構成</a> · <a href="#flow">全体フロー</a> · <a href="#panel">管理パネル</a> ·
-<a href="#skills">スキル</a> · <a href="#verdict">4段階判定</a> · <a href="#config">設定項目</a> · <a href="#safety">安全設計</a>
+<a href="#skills">スキル</a> · <a href="#verdict">4段階判定</a> · <a href="#config">設定項目</a> · <a href="#ide">他IDE連携</a> · <a href="#safety">安全設計</a>
 </nav>
 
 <h2 id="arch">構成</h2>
@@ -60,9 +60,13 @@ flowchart TD
   LP --> S2
   D -->|OK| FLG["AI:impl-done フラグ検出"]
   FLG --> S3["ステップ3: PR処理=再検証 (_pr)<br/>未 push コミットを確認 → 違う視点で再検証"]
-  S3 --> D2{"_done を「違う視点」で再検証"}
-  D2 -->|OK| MG["git push → devin:done 付与<br/>→ gh issue close"]
-  D2 -->|NG| RO["git reset --hard で未検証コミット破棄<br/>→ AI:impl-done 除去＋コメントで差し戻し"]
+  S3 --> D2{"_done を「違う視点」で再検証<br/>（自課題の変更のみ）"}
+  D2 -->|OK| AT{"未pushコミットの帰属チェック<br/>（#N → issue 状態）"}
+  AT -->|全て open 課題に帰属| MG["一括 push → devin:done 付与<br/>→ gh issue close"]
+  AT -->|closed/rejected 課題に帰属| RV["git revert で断念作業を除去<br/>→ push → devin:done+close"]
+  AT -->|帰属先を特定できない| BL["push せず人間へ報告"]
+  D2 -->|NG| RO["AI:impl-done 除去＋コメントで差し戻し<br/>（git操作なし → 実装キューへ自動復帰・fix-forward）"]
+  RO --> S2
 </pre>
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
@@ -90,7 +94,7 @@ flowchart TD
 <tr><td><code>_all.md</code></td><td>全モード共通: ステップ0〜3の全体フロー・常に守ること</td></tr>
 <tr><td><code>_assess.md</code></td><td>評価のみ。4段階判定・risk・partial・出力ブロック形式</td></tr>
 <tr><td><code>_impl.md</code></td><td>実装。既定ブランチでローカルコミットまで（push 禁止）・AI:impl-done 付与・禁止事項・検証ループ・公開データ機密チェック</td></tr>
-<tr><td><code>_pr.md</code></td><td>再検証。未 push コミットを違う視点で検証 → OK: push＋クローズ / NG: reset＋差し戻し</td></tr>
+<tr><td><code>_pr.md</code></td><td>再検証。未 push コミットを違う視点で検証 → OK: 帰属チェック後 push＋クローズ（open課題のコミットは一括push可・closed/rejected課題分はrevert除去）/ NG: フラグ剥がしで差し戻し（git操作なし・fix-forward）</td></tr>
 <tr><td><code>_split.md</code></td><td>切り分け。実装済み部分の完了化＋残課題の issue 分割</td></tr>
 <tr><td><code>_done.md</code></td><td>完了確認。実動作検証・スクリーンショット・DOCS 整備・クローズ時コメント</td></tr>
 </table>
@@ -117,6 +121,51 @@ flowchart TD
 <tr><td><code>repos</code></td><td>—</td><td>監視リポジトリ（path + github）</td></tr>
 <tr><td><code>permissionMode</code></td><td>dangerous</td><td>devin -p の権限モード</td></tr>
 </table>
+
+<h2 id="ide">他 IDE / エージェントからの接続</h2>
+<p>本システムは <b>IDE 非依存</b>で利用できる。共通の顔はブラウザの管理パネルで、IDE との接続は MCP の2面で行う。</p>
+<table>
+<tr><th>面</th><th>エンドポイント</th><th>役割</th></tr>
+<tr><td><b>管理</b>（Streamable HTTP）</td><td><code>POST http://127.0.0.1:8585/mcp</code></td><td>候補一覧・dispatch・assess・impl_all・ログ参照など管理系26ツール。<code>secrets.panelToken</code> 設定時のみ認証必須</td></tr>
+<tr><td><b>実行</b>（stdio）</td><td><code>node C:\devin\agent\mcp-server.mjs</code></td><td>作業キューの pull 型受け渡し（issue-queue）。<code>queue_list</code> / <code>queue_claim</code> / <code>queue_done</code> の3ツール</td></tr>
+</table>
+
+<h3>実行方式は2経路</h3>
+<table>
+<tr><th>経路</th><th>投入方法</th><th>実行者</th></tr>
+<tr><td><b>チャット経路</b>（内蔵・push 型）</td><td>パネルの評価/対応/再検証ボタン・impl_all・autoTrigger</td><td>control.mjs が spawn・所有するローカルエージェントセッション。devin=<code>devin.exe acp</code>＋IDE資格(credentials.toml) / copilot=<code>copilot --acp --stdio</code>（ともに ACP）/ antigravity=bridge-hub / api=汎用LLM（評価のみ）。実行者は config/ラベルで固定され、外部 IDE のエージェントは参加できない</td></tr>
+<tr><td><b>work-queue 経路</b>（pull 型）</td><td><code>POST /api/dispatch</code>・<code>POST /api/assess</code>（X-Panel 必須）または管理 MCP の <code>dispatch</code>・<code>assess</code> ツール</td><td>issue-queue MCP を登録した<b>任意の IDE エージェント</b></td></tr>
+</table>
+
+<h3>work-queue プロトコル（pull 型の実行契約）</h3>
+<p>投入された課題は <code>work-queue.json</code> に以下の形で蓄積される:</p>
+<pre>{
+  "key": "owner/repo issue#N",       // 課題キー（一意）
+  "mode": "impl" | "assess",          // impl=実装 / assess=評価のみ
+  "repo": { "github": "owner/repo", "path": "C:\\devin\\..." },
+  "type": "issue" | "pr",
+  "number": 65, "title": "...", "url": "...", "body": "...",
+  "status": "pending" | "in-progress",
+  "queuedAt": "ISO8601", "claimedAt": "ISO8601"
+}</pre>
+<p>エージェント側の手順:</p>
+<ol>
+<li><code>queue_list</code> で pending 一覧を取得</li>
+<li><code>queue_claim({key})</code> — status が in-progress になり <code>{task, instructions}</code> が返る（instructions に作業手順・リポジトリ指針・禁止事項を同梱。<b>claim した側が instructions に従うことが契約の本体</b>）</li>
+<li>指示に従い実行。impl は<b>既定ブランチでローカルコミット＋ <code>AI:impl-done</code> ラベル付与まで</b>（push・PR・ブランチ作成は禁止。リモート反映は別経路の再検証が行う）</li>
+<li><code>queue_done({key, status, note})</code> で完了記録。status = <code>done</code> / <code>failed</code> / <code>needs-review</code>。assess 課題は note に <code>{"category":..,"risk":..,"reason":..}</code> 形式の JSON を入れると判定として state.json に記録される</li>
+</ol>
+<p>完了時はキューから除去され <code>state.json</code> の <code>tasks[key]</code> に <code>{status, note, finishedAt, engine:"ide"}</code>（assess は判定も）が記録される。<b>注意:</b> in-progress のまま放棄された項目は pending へ自動復帰しない（現状は手動で再投入）。</p>
+
+<h3>各 IDE での登録例</h3>
+<table>
+<tr><th>IDE / クライアント</th><th>管理 (/mcp) の登録</th><th>実行 (issue-queue) の登録</th></tr>
+<tr><td>Devin CLI/IDE</td><td colspan="2"><code>devin mcp add -s user dispatcher http://127.0.0.1:8585/mcp</code> ／ issue-queue はユーザー設定に登録済み</td></tr>
+<tr><td>Cursor・Windsurf 系<br><code>mcp.json</code></td><td><code>{"mcpServers":{"dispatcher":{"url":"http://127.0.0.1:8585/mcp"}}}</code></td><td><code>{"mcpServers":{"issue-queue":{"command":"node","args":["C:/devin/agent/mcp-server.mjs"]}}}</code></td></tr>
+<tr><td>VS Code<br><code>.vscode/mcp.json</code></td><td><code>{"servers":{"dispatcher":{"type":"http","url":"http://127.0.0.1:8585/mcp"}}}</code></td><td><code>{"servers":{"issue-queue":{"type":"stdio","command":"node","args":["C:/devin/agent/mcp-server.mjs"]}}}</code></td></tr>
+<tr><td>Claude Code</td><td><code>claude mcp add --transport http dispatcher http://127.0.0.1:8585/mcp</code></td><td><code>claude mcp add issue-queue -- node C:/devin/agent/mcp-server.mjs</code></td></tr>
+</table>
+<p><b>前提:</b> 両エンドポイントとも <code>127.0.0.1</code> バインドのため<b>同一マシン限定</b>。work-queue の実行はローカル <code>C:\devin</code> ワークスペースへのアクセスが前提（実装・コミットを行うため）。</p>
 
 <h2 id="safety">安全設計</h2>
 <ul>

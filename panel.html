@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Devin Agent Dispatcher</title>
+<title>課題エージェント ディスパッチャー</title>
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
@@ -158,21 +158,400 @@
   .cnt.zero { background: #f1f4f9; color: #9ca3af; }
   .repo-empty { color: #9ca3af; font-size: 12px; padding: 2px 8px 4px; }
 </style>
+<script>
+// ---- i18n: 日本語キー → 言語別辞書（未登録キーは日本語のまま表示）----
+const I18N = {
+en: {
+'課題エージェント ディスパッチャー':'Issue Agent Dispatcher',
+'エンジン':'Engine','マニュアル':'Manual','言語':'Language',
+'GitHub Issue/PR を監視し、エージェントが自動対応する管理パネル':'GitHub Issue/PR monitoring & agent auto-response panel',
+'課題整理':'Organize','課題処理':'Issues','PR処理':'PRs','処理履歴':'History','設定':'Settings',
+'チャット':'Chat','スキル':'Skills','ログ':'Logs','ドキュメント':'Docs',
+'全評価 手動実行':'Assess All (Manual)','全課題対応 手動実行':'Implement All (Manual)',
+'課題抽出':'Extract Issues','中断':'Cancel','保存':'Save','削除':'Delete','ISSUE登録':'Create Issue',
+'今すぐ取得':'Refresh Now','送信':'Send','クリア':'Clear','リセット':'Reset','編集':'Edit','表示':'View',
+'評価':'Assess','再評価':'Re-assess','対応':'Implement','再検証':'Re-verify','再実行':'Retry','詳細':'Details',
+'停止':'Stop','追加':'Add','dispatcher.log に戻す':'Back to dispatcher.log',
+'課題整理（目的 → Issue 化）':'Issue planning (goal → issue)',
+'対象リポジトリ':'Target repo','Lv1 文言の整理のみ':'Lv1 Tidy text only','Lv2 忠実に抽出':'Lv2 Extract faithfully','Lv3 関連機能も含む':'Lv3 Incl. related',
+'抽出はチャットセッションで実行（結果はチャットタブに表示）':'Extraction runs in a chat session (results shown in Chat tab)',
+'保存済みの目的':'Saved goals','リポジトリごとに保存し、選択して再編集できます':'Saved per repo; select to re-edit',
+'どのようなことをしたいか（目的・要望）':'What do you want to do? (goal / request)',
+'スクリーンショットを貼り付けできます（Ctrl+V）。課題抽出時に画像パスをプロンプトへ添付します':'Paste screenshots (Ctrl+V); image paths are attached to the extraction prompt',
+'処理履歴（state.json）':'History (state.json)','PR処理（プルリクエスト課題を集約）':'PR tasks (pull requests)',
+'設定（config.json の有効値）':'Settings (effective config.json)',
+'概要':'Overview','監視・共通':'Monitor & Common','ポーリング周期 (秒)':'Poll interval (s)',
+'候補キャッシュ有効 (秒)':'Candidate cache TTL (s)','新規候補の上限/回':'Max new per poll',
+'評価 同時起動数':'Concurrent assess','判定の鮮度 (時間)':'Verdict freshness (h)',
+'対応 同時起動数':'Concurrent impl','PR/再検証 同時起動数':'Concurrent PR/verify','検証ループ上限 (回)':'Verify loop max',
+'自動処理の判定範囲':'Auto verdict range','自動処理のリスク上限':'Auto risk limit',
+'auto のみ':'auto only','review まで':'up to review','human まで':'up to human','reject まで(全て)':'up to reject (all)',
+'low のみ':'low only','medium まで':'up to medium','high まで(全て)':'up to high (all)',
+'※ config.json を直接書き換えます（APIキーは secrets.json へ）。permissionMode・repos は編集不可':'* Rewrites config.json directly (API key goes to secrets.json). permissionMode & repos are read-only',
+'チャット (AI)':'Chat (AI)','ブリッジ設定':'Bridge','データソース':'Data Sources','プラグイン':'Plugins',
+'AI プロバイダ':'AI Provider','モデル':'Model','プロバイダ種別':'Provider type','プリセット':'Preset','（カスタム）':'(custom)',
+'エンドポイント':'Endpoint','APIキー / トークン':'API key / token','モデル一覧を取得':'Fetch models','ツール往復上限 (回)':'Tool round-trips max',
+'bridge-hub インストール':'Install bridge-hub','疎通確認':'Ping','CLI を自動インストール':'Auto-install CLI','CLI ログイン':'CLI login',
+'全タスク共通の追加指示':'Extra instructions (all tasks)','監視リポジトリ':'Watched repos','プラグイン（スキル）':'Plugins (skills)','スキルタブで編集':'Edit in Skills tab',
+'AI チャット（設定の AIプロバイダで実行 / devin・copilot=ACPセッション、その他=単発応答）':'AI chat (runs on configured provider; devin/copilot = ACP session, others = single-shot)',
+'「評価」「対応」ボタンを押すとプロンプトが自動送信されます':'The Assess/Implement buttons auto-send prompts here',
+'AI アシスタント（管理ツール対応・OpenAI 互換 API）':'AI assistant (management tools, OpenAI-compatible API)',
+'apiUrl/apiModel/キーは設定タブ「AI」で指定。課題一覧・評価/対応のディスパッチ・ログ参照などをツール経由で実行できます':'Set apiUrl/apiModel/key in Settings > AI. Can list issues, dispatch assess/impl, read logs via tools',
+'スキル（skills/*.md — プロンプト末尾に注入される追加指示）':'Skills (skills/*.md — extra instructions appended to prompts)',
+'_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別':'_all=all modes / _done=on completion / _assess/_impl/_split=per mode',
+'dispatcher.log（末尾）':'dispatcher.log (tail)','(ログなし)':'(no log)','（ログ未生成）':'(log not created)',
+'手動のみ':'Manual','30秒ごと':'every 30s','1分ごと':'every 1m','2分ごと':'every 2m','5分ごと':'every 5m','10分ごと':'every 10m',
+'自動更新周期':'Auto-refresh interval',
+'フィルター:':'Filter:','判定:すべて':'Verdict: all','未評価':'Unassessed','リスク:すべて':'Risk: all','状態:すべて':'Status: all',
+'実行中':'Running','待機中':'Queued','非実行':'Idle','読み込み中…':'Loading…',
+'候補なし':'No candidates','監視リポジトリなし':'No watched repos',
+'評価中':'Assessing','対応中':'Implementing','再検証中':'Verifying','評価失敗':'Assess failed','PR中#':'In PR #',
+'評価専用(api)':'Assess only (api)','自動(新規)':'Auto (new)','処理済み(要再検証)':'Impl-done (needs verify)','devin ラベル':'devin label',
+'running ラベル付き(起動中/取残し)':'running label present (active/stale)',
+'種別':'Type','操作':'Ops','タイトル':'Title','トリガー':'Trigger','判定':'Verdict','作成日時':'Created','備考':'Notes',
+'課題':'Task','状態':'Status','開始':'Started','終了':'Finished','履歴なし':'No history',
+'ポーリング中':'Polling','ポーリング未起動':'Polling stopped','(判定)':'(assess)','(実装)':'(impl)','▶ 実行中: ':'▶ Running: ',
+'ポーリング間隔':'Poll interval','同時起動(評価/対応/PR)':'Concurrency (assess/impl/PR)',
+'セッションログ: ':'Session log: ',
+'指示を入力（Enter で送信 / 実行中の追加指示も可）':'Enter instructions (Enter to send; also steers running tasks)',
+'指示を入力（Enter で送信）':'Enter instructions (Enter to send)',
+'Issue タイトル':'Issue title','本文（機能追加・エラー修正の内容）':'Body (feature / fix details)',
+'例: ◯◯機能を追加したい、△△のエラーを直したい、□□を改善したい（空欄なら現状から課題候補を抽出）':'e.g. add feature X, fix error Y, improve Z (empty = extract candidates from current state)',
+'（必要時）':'(if needed)','モデル名':'model name','（既定）':'(default)',
+},
+zh: {
+'課題エージェント ディスパッチャー':'Issue 智能体 Dispatcher',
+'エンジン':'引擎','マニュアル':'手册','言語':'语言',
+'GitHub Issue/PR を監視し、エージェントが自動対応する管理パネル':'监视 GitHub Issue/PR 并由智能体自动处理的管理面板',
+'課題整理':'课题整理','課題処理':'课题处理','PR処理':'PR处理','処理履歴':'处理历史','設定':'设置',
+'チャット':'聊天','スキル':'技能','ログ':'日志','ドキュメント':'文档',
+'全評価 手動実行':'全部手动评估','全課題対応 手動実行':'全部手动处理',
+'課題抽出':'提取课题','中断':'中断','保存':'保存','削除':'删除','ISSUE登録':'创建Issue',
+'今すぐ取得':'立即获取','送信':'发送','クリア':'清除','リセット':'重置','編集':'编辑','表示':'查看',
+'評価':'评估','再評価':'重新评估','対応':'处理','再検証':'重新验证','再実行':'重新执行','詳細':'详情',
+'停止':'停止','追加':'添加','dispatcher.log に戻す':'返回 dispatcher.log',
+'課題整理（目的 → Issue 化）':'课题整理（目标 → Issue）',
+'対象リポジトリ':'目标仓库','Lv1 文言の整理のみ':'Lv1 仅整理文字','Lv2 忠実に抽出':'Lv2 忠实提取','Lv3 関連機能も含む':'Lv3 含相关功能',
+'抽出はチャットセッションで実行（結果はチャットタブに表示）':'提取在聊天会话中执行（结果显示在聊天标签页）',
+'保存済みの目的':'已保存的目标','リポジトリごとに保存し、選択して再編集できます':'按仓库保存，可选择重新编辑',
+'どのようなことをしたいか（目的・要望）':'想做什么？（目标/需求）',
+'スクリーンショットを貼り付けできます（Ctrl+V）。課題抽出時に画像パスをプロンプトへ添付します':'可粘贴截图（Ctrl+V），提取时图片路径会附加到提示词',
+'処理履歴（state.json）':'处理历史（state.json）','PR処理（プルリクエスト課題を集約）':'PR处理（汇总拉取请求课题）',
+'設定（config.json の有効値）':'设置（config.json 有效值）',
+'概要':'概览','監視・共通':'监视/通用','ポーリング周期 (秒)':'轮询周期 (秒)',
+'候補キャッシュ有効 (秒)':'候选缓存有效期 (秒)','新規候補の上限/回':'每次新候选上限',
+'評価 同時起動数':'评估并发数','判定の鮮度 (時間)':'判定有效期 (小时)',
+'対応 同時起動数':'处理并发数','PR/再検証 同時起動数':'PR/再验证并发数','検証ループ上限 (回)':'验证循环上限 (次)',
+'自動処理の判定範囲':'自动处理判定范围','自動処理のリスク上限':'自动处理风险上限',
+'auto のみ':'仅 auto','review まで':'至 review','human まで':'至 human','reject まで(全て)':'至 reject（全部）',
+'low のみ':'仅 low','medium まで':'至 medium','high まで(全て)':'至 high（全部）',
+'※ config.json を直接書き換えます（APIキーは secrets.json へ）。permissionMode・repos は編集不可':'※ 直接改写 config.json（API密钥存入 secrets.json）。permissionMode・repos 不可编辑',
+'チャット (AI)':'聊天 (AI)','ブリッジ設定':'桥接设置','追加指示':'附加指示','データソース':'数据源','プラグイン':'插件',
+'AI プロバイダ':'AI 提供商','モデル':'模型','プロバイダ種別':'提供商类型','プリセット':'预设','（カスタム）':'（自定义）',
+'エンドポイント':'端点','APIキー / トークン':'API密钥/令牌','モデル一覧を取得':'获取模型列表','ツール往復上限 (回)':'工具往返上限 (次)',
+'bridge-hub インストール':'安装 bridge-hub','疎通確認':'连通性检查','CLI を自動インストール':'自动安装 CLI','CLI ログイン':'CLI 登录',
+'全タスク共通の追加指示':'所有任务共通的附加指示','監視リポジトリ':'监视仓库','プラグイン（スキル）':'插件（技能）','スキルタブで編集':'在技能标签页编辑',
+'AI チャット（設定の AIプロバイダで実行 / devin・copilot=ACPセッション、その他=単発応答）':'AI 聊天（按设置的 AI 提供商运行；devin/copilot=ACP 会话，其他=单次响应）',
+'「評価」「対応」ボタンを押すとプロンプトが自動送信されます':'按「评估」「处理」按钮会自动发送提示词',
+'AI アシスタント（管理ツール対応・OpenAI 互換 API）':'AI 助手（支持管理工具・OpenAI 兼容 API）',
+'apiUrl/apiModel/キーは設定タブ「AI」で指定。課題一覧・評価/対応のディスパッチ・ログ参照などをツール経由で実行できます':'在设置标签「AI」中指定 apiUrl/apiModel/密钥。可通过工具执行课题列表、评估/处理调度、日志查看',
+'スキル（skills/*.md — プロンプト末尾に注入される追加指示）':'技能（skills/*.md — 附加到提示词末尾的指示）',
+'_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別':'_all=全模式 / _done=完成时指示 / _assess/_impl/_split=按模式',
+'dispatcher.log（末尾）':'dispatcher.log（末尾）','(ログなし)':'（无日志）','（ログ未生成）':'（日志未生成）',
+'手動のみ':'仅手动','30秒ごと':'每30秒','1分ごと':'每1分钟','2分ごと':'每2分钟','5分ごと':'每5分钟','10分ごと':'每10分钟',
+'自動更新周期':'自动更新周期',
+'フィルター:':'筛选:','判定:すべて':'判定:全部','未評価':'未评估','リスク:すべて':'风险:全部','状態:すべて':'状态:全部',
+'実行中':'运行中','待機中':'等待中','非実行':'未运行','読み込み中…':'加载中…',
+'候補なし':'无候选','監視リポジトリなし':'无监视仓库',
+'評価中':'评估中','対応中':'处理中','再検証中':'验证中','評価失敗':'评估失败','PR中#':'PR中#',
+'評価専用(api)':'仅评估(api)','自動(新規)':'自动(新建)','処理済み(要再検証)':'已处理(待再验证)','devin ラベル':'devin 标签',
+'running ラベル付き(起動中/取残し)':'有 running 标签（运行中/残留）',
+'種別':'类型','操作':'操作','タイトル':'标题','トリガー':'触发','判定':'判定','作成日時':'创建时间','備考':'备注',
+'課題':'课题','状態':'状态','開始':'开始','終了':'结束','履歴なし':'无历史',
+'ポーリング中':'轮询中','ポーリング未起動':'轮询未启动','(判定)':'(判定)','(実装)':'(实现)','▶ 実行中: ':'▶ 运行中: ',
+'ポーリング間隔':'轮询间隔','同時起動(評価/対応/PR)':'并发(评估/处理/PR)',
+'セッションログ: ':'会话日志: ',
+'指示を入力（Enter で送信 / 実行中の追加指示も可）':'输入指示（Enter 发送 / 也可向运行中的会话追加指示）',
+'指示を入力（Enter で送信）':'输入指示（Enter 发送）',
+'Issue タイトル':'Issue 标题','本文（機能追加・エラー修正の内容）':'正文（功能新增・错误修复内容）',
+'例: ◯◯機能を追加したい、△△のエラーを直したい、□□を改善したい（空欄なら現状から課題候補を抽出）':'例：想添加○○功能、修复△△错误、改善□□（留空则从现状提取课题候选）',
+'（必要時）':'（需要时）','モデル名':'模型名','（既定）':'（默认）',
+},
+ko: {
+'課題エージェント ディスパッチャー':'Issue 에이전트 Dispatcher',
+'エンジン':'엔진','マニュアル':'매뉴얼','言語':'언어',
+'GitHub Issue/PR を監視し、エージェントが自動対応する管理パネル':'GitHub Issue/PR을 감시하고 에이전트가 자동 대응하는 관리 패널',
+'課題整理':'과제 정리','課題処理':'과제 처리','PR処理':'PR 처리','処理履歴':'처리 이력','設定':'설정',
+'チャット':'채팅','スキル':'스킬','ログ':'로그','ドキュメント':'문서',
+'全評価 手動実行':'전체 수동 평가','全課題対応 手動実行':'전체 수동 대응',
+'課題抽出':'과제 추출','中断':'중단','保存':'저장','削除':'삭제','ISSUE登録':'Issue 등록',
+'今すぐ取得':'지금 가져오기','送信':'전송','クリア':'지우기','リセット':'재설정','編集':'편집','表示':'보기',
+'評価':'평가','再評価':'재평가','対応':'대응','再検証':'재검증','再実行':'재실행','詳細':'상세',
+'停止':'정지','追加':'추가','dispatcher.log に戻す':'dispatcher.log로 돌아가기',
+'課題整理（目的 → Issue 化）':'과제 정리（목적 → Issue）',
+'対象リポジトリ':'대상 리포지토리','Lv1 文言の整理のみ':'Lv1 문구 정리만','Lv2 忠実に抽出':'Lv2 충실히 추출','Lv3 関連機能も含む':'Lv3 관련 기능 포함',
+'抽出はチャットセッションで実行（結果はチャットタブに表示）':'추출은 채팅 세션에서 실행（결과는 채팅 탭에 표시）',
+'保存済みの目的':'저장된 목적','リポジトリごとに保存し、選択して再編集できます':'리포지토리별로 저장, 선택하여 재편집 가능',
+'どのようなことをしたいか（目的・要望）':'무엇을 하고 싶은가요?（목적・요망）',
+'スクリーンショットを貼り付けできます（Ctrl+V）。課題抽出時に画像パスをプロンプトへ添付します':'스크린샷 붙여넣기 가능（Ctrl+V）. 추출 시 이미지 경로를 프롬프트에 첨부',
+'処理履歴（state.json）':'처리 이력（state.json）','PR処理（プルリクエスト課題を集約）':'PR 처리（풀 리퀘스트 과제 집약）',
+'設定（config.json の有効値）':'설정（config.json 유효값）',
+'概要':'개요','監視・共通':'감시/공통','ポーリング周期 (秒)':'폴링 주기 (초)',
+'候補キャッシュ有効 (秒)':'후보 캐시 유효 (초)','新規候補の上限/回':'회당 신규 후보 상한',
+'評価 同時起動数':'평가 동시 실행 수','判定の鮮度 (時間)':'판정 유효 시간',
+'対応 同時起動数':'대응 동시 실행 수','PR/再検証 同時起動数':'PR/재검증 동시 실행 수','検証ループ上限 (回)':'검증 루프 상한 (회)',
+'自動処理の判定範囲':'자동 처리 판정 범위','自動処理のリスク上限':'자동 처리 리스크 상한',
+'auto のみ':'auto 만','review まで':'review 까지','human まで':'human 까지','reject まで(全て)':'reject 까지(전부)',
+'low のみ':'low 만','medium まで':'medium 까지','high まで(全て)':'high 까지(전부)',
+'※ config.json を直接書き換えます（APIキーは secrets.json へ）。permissionMode・repos は編集不可':'※ config.json을 직접 수정합니다(API 키는 secrets.json에). permissionMode・repos는 편집 불가',
+'チャット (AI)':'채팅 (AI)','ブリッジ設定':'브리지 설정','追加指示':'추가 지시','データソース':'데이터 소스','プラグイン':'플러그인',
+'AI プロバイダ':'AI 프로바이더','モデル':'모델','プロバイダ種別':'프로바이더 종류','プリセット':'프리셋','（カスタム）':'（사용자 지정）',
+'エンドポイント':'엔드포인트','API키ー / トークン':'API 키 / 토큰','モデル一覧を取得':'모델 목록 가져오기','ツール往復上限 (回)':'도구 왕복 상한 (회)',
+'bridge-hub インストール':'bridge-hub 설치','疎通確認':'연결 확인','CLI を自動インストール':'CLI 자동 설치','CLI ログイン':'CLI 로그인',
+'全タスク共通の追加指示':'모든 태스크 공통 추가 지시','監視リポジトリ':'감시 리포지토리','プラグイン（スキル）':'플러그인（스킬）','スキルタブで編集':'스킬 탭에서 편집',
+'AI チャット（設定の AIプロバイダで実行 / devin・copilot=ACPセッション、その他=単発応答）':'AI 채팅（설정된 AI 프로바이더로 실행 / devin・copilot=ACP 세션, 기타=단발 응답）',
+'「評価」「対応」ボタンを押すとプロンプトが自動送信されます':'「평가」「대응」 버튼을 누르면 프롬프트가 자동 전송됩니다',
+'AI アシスタント（管理ツール対応・OpenAI 互換 API）':'AI 어시스턴트（관리 도구 대응・OpenAI 호환 API）',
+'apiUrl/apiModel/キーは設定タブ「AI」で指定。課題一覧・評価/対応のディスパッチ・ログ参照などをツール経由で実行できます':'apiUrl/apiModel/키는 설정 탭「AI」에서 지정. 과제 목록・평가/대응 디스패치・로그 참조 등을 도구로 실행 가능',
+'スキル（skills/*.md — プロンプト末尾に注入される追加指示）':'스킬（skills/*.md — 프롬프트 끝에 주입되는 추가 지시）',
+'_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別':'_all=전 모드 / _done=완료 시 지시 / _assess/_impl/_split=모드별',
+'dispatcher.log（末尾）':'dispatcher.log（끝）','(ログなし)':'(로그 없음)','（ログ未生成）':'（로그 미생성）',
+'手動のみ':'수동만','30秒ごと':'30초마다','1分ごと':'1분마다','2分ごと':'2분마다','5分ごと':'5분마다','10分ごと':'10분마다',
+'自動更新周期':'자동 갱신 주기',
+'フィルター:':'필터:','判定:すべて':'판정:전부','未評価':'미평가','リスク:すべて':'리스크:전부','状態:すべて':'상태:전부',
+'実行中':'실행 중','待機中':'대기 중','非実行':'미실행','読み込み中…':'로드 중…',
+'候補なし':'후보 없음','監視リポジトリなし':'감시 리포지토리 없음',
+'評価中':'평가 중','対応中':'대응 중','再検証中':'검증 중','評価失敗':'평가 실패','PR中#':'PR #',
+'評価専用(api)':'평가 전용(api)','自動(新規)':'자동(신규)','処理済み(要再検証)':'처리 완료(재검증 필요)','devin ラベル':'devin 라벨',
+'running ラベル付き(起動中/取残し)':'running 라벨 있음(실행 중/잔류)',
+'種別':'종별','操作':'조작','タイトル':'제목','トリガー':'트리거','判定':'판정','作成日時':'작성 일시','備考':'비고',
+'課題':'과제','状態':'상태','開始':'시작','終了':'종료','履歴なし':'이력 없음',
+'ポーリング中':'폴링 중','ポーリング未起動':'폴링 미기동','(判定)':'(판정)','(実装)':'(구현)','▶ 実行中: ':'▶ 실행 중: ',
+'ポーリング間隔':'폴링 간격','同時起動(評価/対応/PR)':'동시 실행(평가/대응/PR)',
+'セッションログ: ':'세션 로그: ',
+'指示を入力（Enter で送信 / 実行中の追加指示も可）':'지시 입력（Enter로 전송 / 실행 중 추가 지시도 가능）',
+'指示を入力（Enter で送信）':'지시 입력（Enter로 전송）',
+'Issue タイトル':'Issue 제목','本文（機能追加・エラー修正の内容）':'본문（기능 추가・오류 수정 내용）',
+'例: ◯◯機能を追加したい、△△のエラーを直したい、□□を改善したい（空欄なら現状から課題候補を抽出）':'예: ○○ 기능 추가, △△ 오류 수정, □□ 개선（빈칸이면 현황에서 과제 후보 추출）',
+'（必要時）':'（필요 시）','モデル名':'모델명','（既定）':'（기본）',
+},
+es: {
+'課題エージェント ディスパッチャー':'Issue Agent Dispatcher',
+'エンジン':'Motor','マニュアル':'Manual','言語':'Idioma',
+'GitHub Issue/PR を監視し、エージェントが自動対応する管理パネル':'Panel de gestión: monitoriza GitHub Issue/PR y el agente responde automáticamente',
+'課題整理':'Organizar','課題処理':'Incidencias','PR処理':'PRs','処理履歴':'Historial','設定':'Ajustes',
+'チャット':'Chat','スキル':'Habilidades','ログ':'Registro','ドキュメント':'Documentos',
+'全評価 手動実行':'Evaluar todo (manual)','全課題対応 手動実行':'Implementar todo (manual)',
+'課題抽出':'Extraer','中断':'Cancelar','保存':'Guardar','削除':'Eliminar','ISSUE登録':'Crear issue',
+'今すぐ取得':'Actualizar','送信':'Enviar','クリア':'Limpiar','リセット':'Restablecer','編集':'Editar','表示':'Ver',
+'評価':'Evaluar','再評価':'Reevaluar','対応':'Implementar','再検証':'Reverificar','再実行':'Reintentar','詳細':'Detalles',
+'停止':'Detener','追加':'Añadir','dispatcher.log に戻す':'Volver a dispatcher.log',
+'課題整理（目的 → Issue 化）':'Planificación (objetivo → issue)',
+'対象リポジトリ':'Repo objetivo','Lv1 文言の整理のみ':'Lv1 Solo ordenar texto','Lv2 忠実に抽出':'Lv2 Extraer fielmente','Lv3 関連機能も含む':'Lv3 Incl. relacionadas',
+'抽出はチャットセッションで実行（結果はチャットタブに表示）':'La extracción se ejecuta en sesión de chat (resultados en pestaña Chat)',
+'保存済みの目的':'Objetivos guardados','リポジトリごとに保存し、選択して再編集できます':'Se guarda por repo; seleccione para reeditar',
+'どのようなことをしたいか（目的・要望）':'¿Qué quiere hacer? (objetivo / petición)',
+'スクリーンショットを貼り付けできます（Ctrl+V）。課題抽出時に画像パスをプロンプトへ添付します':'Puede pegar capturas (Ctrl+V); las rutas se adjuntan al prompt',
+'処理履歴（state.json）':'Historial (state.json)','PR処理（プルリクエスト課題を集約）':'Tareas PR (pull requests)',
+'設定（config.json の有効値）':'Ajustes (config.json efectivo)',
+'概要':'Resumen','監視・共通':'Monitor y común','ポーリング周期 (秒)':'Intervalo (s)',
+'候補キャッシュ有効 (秒)':'Caché de candidatos (s)','新規候補の上限/回':'Máx. nuevos/poll',
+'評価 同時起動数':'Evaluación simultánea','判定の鮮度 (時間)':'Validez del veredicto (h)',
+'対応 同時起動数':'Implementación simultánea','PR/再検証 同時起動数':'PR/verificación simultánea','検証ループ上限 (回)':'Máx. bucles de verificación',
+'自動処理の判定範囲':'Rango de veredicto auto','自動処理のリスク上限':'Límite de riesgo auto',
+'auto のみ':'solo auto','review まで':'hasta review','human まで':'hasta human','reject まで(全て)':'hasta reject (todo)',
+'low のみ':'solo low','medium まで':'hasta medium','high まで(全て)':'hasta high (todo)',
+'※ config.json を直接書き換えます（APIキーは secrets.json へ）。permissionMode・repos は編集不可':'* Reescribe config.json directamente (la clave API va a secrets.json). permissionMode y repos no editables',
+'チャット (AI)':'Chat (AI)','ブリッジ設定':'Puente','追加指示':'Instrucciones extra','データソース':'Fuentes de datos','プラグイン':'Plugins',
+'AI プロバイダ':'Proveedor AI','モデル':'Modelo','プロバイダ種別':'Tipo de proveedor','プリセット':'Preajuste','（カスタム）':'(personalizado)',
+'エンドポイント':'Endpoint','APIキー / トークン':'Clave API / token','モデル一覧を取得':'Obtener modelos','ツール往復上限 (回)':'Máx. ciclos de herramientas',
+'bridge-hub インストール':'Instalar bridge-hub','疎通確認':'Probar conexión','CLI を自動インストール':'Instalar CLI','CLI ログイン':'Login CLI',
+'全タスク共通の追加指示':'Instrucciones extra (todas las tareas)','監視リポジトリ':'Repos vigilados','プラグイン（スキル）':'Plugins (habilidades)','スキルタブで編集':'Editar en pestaña Skills',
+'AI チャット（設定の AIプロバイダで実行 / devin・copilot=ACPセッション、その他=単発応答）':'Chat AI (proveedor configurado; devin/copilot = sesión ACP, otros = respuesta única)',
+'「評価」「対応」ボタンを押すとプロンプトが自動送信されます':'Los botones Evaluar/Implementar envían el prompt automáticamente',
+'AI アシスタント（管理ツール対応・OpenAI 互換 API）':'Asistente AI (herramientas de gestión, API compatible OpenAI)',
+'apiUrl/apiModel/キーは設定タブ「AI」で指定。課題一覧・評価/対応のディスパッチ・ログ参照などをツール経由で実行できます':'Configure apiUrl/apiModel/clave en Ajustes > AI. Lista issues, despacha evaluación/impl, lee logs vía herramientas',
+'スキル（skills/*.md — プロンプト末尾に注入される追加指示）':'Habilidades (skills/*.md — instrucciones extra añadidas al prompt)',
+'_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別':'_all=todos los modos / _done=al completar / _assess/_impl/_split=por modo',
+'dispatcher.log（末尾）':'dispatcher.log (final)','(ログなし)':'(sin registro)','（ログ未生成）':'(registro no creado)',
+'手動のみ':'Manual','30秒ごと':'cada 30s','1分ごと':'cada 1m','2分ごと':'cada 2m','5分ごと':'cada 5m','10分ごと':'cada 10m',
+'自動更新周期':'Intervalo de actualización',
+'フィルター:':'Filtro:','判定:すべて':'Veredicto: todo','未評価':'Sin evaluar','リスク:すべて':'Riesgo: todo','状態:すべて':'Estado: todo',
+'実行中':'Ejecutando','待機中':'En cola','非実行':'Inactivo','読み込み中…':'Cargando…',
+'候補なし':'Sin candidatos','監視リポジトリなし':'Sin repos vigilados',
+'評価中':'Evaluando','対応中':'Implementando','再検証中':'Verificando','評価失敗':'Evaluación fallida','PR中#':'En PR #',
+'評価専用(api)':'Solo evaluación (api)','自動(新規)':'Auto (nuevo)','処理済み(要再検証)':'Impl hecho (verificar)','devin ラベル':'etiqueta devin',
+'running ラベル付き(起動中/取残し)':'etiqueta running (activa/residual)',
+'種別':'Tipo','操作':'Acciones','タイトル':'Título','トリガー':'Origen','判定':'Veredicto','作成日時':'Creado','備考':'Notas',
+'課題':'Tarea','状態':'Estado','開始':'Inicio','終了':'Fin','履歴なし':'Sin historial',
+'ポーリング中':'Sondeando','ポーリング未起動':'Sondeo detenido','(判定)':'(evaluación)','(実装)':'(impl)','▶ 実行中: ':'▶ Ejecutando: ',
+'ポーリング間隔':'Intervalo','同時起動(評価/対応/PR)':'Concurrencia (eval/impl/PR)',
+'セッションログ: ':'Registro de sesión: ',
+'指示を入力（Enter で送信 / 実行中の追加指示も可）':'Escriba instrucciones (Enter envía; también guía tareas en curso)',
+'指示を入力（Enter で送信）':'Escriba instrucciones (Enter envía)',
+'Issue タイトル':'Título del issue','本文（機能追加・エラー修正の内容）':'Cuerpo (función / corrección)',
+'例: ◯◯機能を追加したい、△△のエラーを直したい、□□を改善したい（空欄なら現状から課題候補を抽出）':'ej.: añadir función X, corregir error Y, mejorar Z (vacío = extraer candidatos del estado actual)',
+'（必要時）':'(si es necesario)','モデル名':'nombre del modelo','（既定）':'(predeterminado)',
+},
+fr: {
+'課題エージェント ディスパッチャー':'Issue Agent Dispatcher',
+'エンジン':'Moteur','マニュアル':'Manuel','言語':'Langue',
+'GitHub Issue/PR を監視し、エージェントが自動対応する管理パネル':'Panneau de gestion : surveille les Issue/PR GitHub et l\'agent répond automatiquement',
+'課題整理':'Organiser','課題処理':'Tickets','PR処理':'PRs','処理履歴':'Historique','設定':'Paramètres',
+'チャット':'Discussion','スキル':'Compétences','ログ':'Journaux','ドキュメント':'Documentation',
+'全評価 手動実行':'Tout évaluer (manuel)','全課題対応 手動実行':'Tout traiter (manuel)',
+'課題抽出':'Extraire','中断':'Interrompre','保存':'Enregistrer','削除':'Supprimer','ISSUE登録':'Créer le ticket',
+'今すぐ取得':'Actualiser','送信':'Envoyer','クリア':'Effacer','リセット':'Réinitialiser','編集':'Modifier','表示':'Afficher',
+'評価':'Évaluer','再評価':'Réévaluer','対応':'Traiter','再検証':'Revérifier','再実行':'Relancer','詳細':'Détails',
+'停止':'Arrêter','追加':'Ajouter','dispatcher.log に戻す':'Retour à dispatcher.log',
+'課題整理（目的 → Issue 化）':'Planification (objectif → ticket)',
+'対象リポジトリ':'Dépôt cible','Lv1 文言の整理のみ':'Lv1 Texte seul','Lv2 忠実に抽出':'Lv2 Extraction fidèle','Lv3 関連機能も含む':'Lv3 Fonctions liées incl.',
+'抽出はチャットセッションで実行（結果はチャットタブに表示）':'L\'extraction s\'exécute en session de chat (résultats dans l\'onglet Discussion)',
+'保存済みの目的':'Objectifs enregistrés','リポジトリごとに保存し、選択して再編集できます':'Enregistré par dépôt ; sélectionnez pour rééditer',
+'どのようなことをしたいか（目的・要望）':'Que voulez-vous faire ? (objectif / demande)',
+'スクリーンショットを貼り付けできます（Ctrl+V）。課題抽出時に画像パスをプロンプトへ添付します':'Collez des captures (Ctrl+V) ; les chemins sont joints au prompt',
+'処理履歴（state.json）':'Historique (state.json)','PR処理（プルリクエスト課題を集約）':'Tâches PR (pull requests)',
+'設定（config.json の有効値）':'Paramètres (config.json effectif)',
+'概要':'Aperçu','監視・共通':'Surveillance & commun','ポーリング周期 (秒)':'Intervalle (s)',
+'候補キャッシュ有効 (秒)':'Cache candidats (s)','新規候補の上限/回':'Max nouveaux/poll',
+'評価 同時起動数':'Évaluations simultanées','判定の鮮度 (時間)':'Fraîcheur verdict (h)',
+'対応 同時起動数':'Traitements simultanés','PR/再検証 同時起動数':'PR/vérif. simultanées','検証ループ上限 (回)':'Boucles vérif. max',
+'自動処理の判定範囲':'Plage de verdict auto','自動処理のリスク上限':'Limite de risque auto',
+'auto のみ':'auto seul','review まで':'jusqu\'à review','human まで':'jusqu\'à human','reject まで(全て)':'jusqu\'à reject (tout)',
+'low のみ':'low seul','medium まで':'jusqu\'à medium','high まで(全て)':'jusqu\'à high (tout)',
+'※ config.json を直接書き換えます（APIキーは secrets.json へ）。permissionMode・repos は編集不可':'* Réécrit config.json directement (la clé API va dans secrets.json). permissionMode et repos non modifiables',
+'チャット (AI)':'Discussion (AI)','ブリッジ設定':'Pont','追加指示':'Instructions suppl.','データソース':'Sources de données','プラグイン':'Plugins',
+'AI プロバイダ':'Fournisseur AI','モデル':'Modèle','プロバイダ種別':'Type de fournisseur','プリセット':'Préréglage','（カスタム）':'(personnalisé)',
+'エンドポイント':'Endpoint','APIキー / トークン':'Clé API / jeton','モデル一覧を取得':'Charger les modèles','ツール往復上限 (回)':'Allers-retours outils max',
+'bridge-hub インストール':'Installer bridge-hub','疎通確認':'Tester connexion','CLI を自動インストール':'Installer la CLI','CLI ログイン':'Login CLI',
+'全タスク共通の追加指示':'Instructions suppl. (toutes tâches)','監視リポジトリ':'Dépôts surveillés','プラグイン（スキル）':'Plugins (compétences)','スキルタブで編集':'Modifier dans l\'onglet Compétences',
+'AI チャット（設定の AIプロバイダで実行 / devin・copilot=ACPセッション、その他=単発応答）':'Discussion AI (fournisseur configuré ; devin/copilot = session ACP, autres = réponse unique)',
+'「評価」「対応」ボタンを押すとプロンプトが自動送信されます':'Les boutons Évaluer/Traiter envoient le prompt automatiquement',
+'AI アシスタント（管理ツール対応・OpenAI 互換 API）':'Assistant AI (outils de gestion, API compatible OpenAI)',
+'apiUrl/apiModel/キーは設定タブ「AI」で指定。課題一覧・評価/対応のディスパッチ・ログ参照などをツール経由で実行できます':'Définissez apiUrl/apiModel/clé dans Paramètres > AI. Liste les tickets, dépêche éval/traitement, lit les journaux via les outils',
+'スキル（skills/*.md — プロンプト末尾に注入される追加指示）':'Compétences (skills/*.md — instructions ajoutées en fin de prompt)',
+'_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別':'_all=tous modes / _done=à la fin / _assess/_impl/_split=par mode',
+'dispatcher.log（末尾）':'dispatcher.log (fin)','(ログなし)':'(pas de journal)','（ログ未生成）':'(journal non créé)',
+'手動のみ':'Manuel','30秒ごと':'toutes les 30s','1分ごと':'toutes les 1min','2分ごと':'toutes les 2min','5分ごと':'toutes les 5min','10分ごと':'toutes les 10min',
+'自動更新周期':'Intervalle d\'actualisation',
+'フィルター:':'Filtre :','判定:すべて':'Verdict : tout','未評価':'Non évalué','リスク:すべて':'Risque : tout','状態:すべて':'État : tout',
+'実行中':'En cours','待機中':'En file','非実行':'Inactif','読み込み中…':'Chargement…',
+'候補なし':'Aucun candidat','監視リポジトリなし':'Aucun dépôt surveillé',
+'評価中':'Évaluation','対応中':'Traitement','再検証中':'Vérification','評価失敗':'Échec évaluation','PR中#':'PR #',
+'評価専用(api)':'Éval. seule (api)','自動(新規)':'Auto (nouveau)','処理済み(要再検証)':'Traitée (à vérifier)','devin ラベル':'label devin',
+'running ラベル付き(起動中/取残し)':'label running (actif/résiduel)',
+'種別':'Type','操作':'Actions','タイトル':'Titre','トリガー':'Déclencheur','判定':'Verdict','作成日時':'Créé le','備考':'Notes',
+'課題':'Tâche','状態':'État','開始':'Début','終了':'Fin','履歴なし':'Aucun historique',
+'ポーリング中':'Sondage actif','ポーリング未起動':'Sondage arrêté','(判定)':'(éval.)','(実装)':'(impl)','▶ 実行中: ':'▶ En cours : ',
+'ポーリング間隔':'Intervalle','同時起動(評価/対応/PR)':'Concurrence (éval/trait/PR)',
+'セッションログ: ':'Journal de session : ',
+'指示を入力（Enter で送信 / 実行中の追加指示も可）':'Saisissez des instructions (Entrée envoie ; guide aussi les tâches en cours)',
+'指示を入力（Enter で送信）':'Saisissez des instructions (Entrée envoie)',
+'Issue タイトル':'Titre du ticket','本文（機能追加・エラー修正の内容）':'Corps (fonctionnalité / correction)',
+'例: ◯◯機能を追加したい、△△のエラーを直したい、□□を改善したい（空欄なら現状から課題候補を抽出）':'ex. : ajouter la fonction X, corriger l\'erreur Y, améliorer Z (vide = extraire des candidats)',
+'（必要時）':'(si besoin)','モデル名':'nom du modèle','（既定）':'(défaut)',
+},
+de: {
+'課題エージェント ディスパッチャー':'Issue Agent Dispatcher',
+'エンジン':'Engine','マニュアル':'Handbuch','言語':'Sprache',
+'GitHub Issue/PR を監視し、エージェントが自動対応する管理パネル':'Verwaltungspanel: überwacht GitHub Issues/PRs, Agent antwortet automatisch',
+'課題整理':'Organisieren','課題処理':'Vorgänge','PR処理':'PRs','処理履歴':'Verlauf','設定':'Einstellungen',
+'チャット':'Chat','スキル':'Skills','ログ':'Protokoll','ドキュメント':'Dokumente',
+'全評価 手動実行':'Alle manuell bewerten','全課題対応 手動実行':'Alle manuell umsetzen',
+'課題抽出':'Extrahieren','中断':'Abbrechen','保存':'Speichern','削除':'Löschen','ISSUE登録':'Issue erstellen',
+'今すぐ取得':'Aktualisieren','送信':'Senden','クリア':'Leeren','リセット':'Zurücksetzen','編集':'Bearbeiten','表示':'Anzeigen',
+'評価':'Bewerten','再評価':'Neu bewerten','対応':'Umsetzen','再検証':'Erneut prüfen','再実行':'Erneut ausführen','詳細':'Details',
+'停止':'Stoppen','追加':'Hinzufügen','dispatcher.log に戻す':'Zurück zu dispatcher.log',
+'課題整理（目的 → Issue 化）':'Planung (Ziel → Issue)',
+'対象リポジトリ':'Ziel-Repo','Lv1 文言の整理のみ':'Lv1 Nur Text ordnen','Lv2 忠実に抽出':'Lv2 Getreu extrahieren','Lv3 関連機能も含む':'Lv3 Inkl. verwandter Funktionen',
+'抽出はチャットセッションで実行（結果はチャットタブに表示）':'Extraktion läuft in Chat-Sitzung (Ergebnisse im Chat-Tab)',
+'保存済みの目的':'Gespeicherte Ziele','リポジトリごとに保存し、選択して再編集できます':'Pro Repo gespeichert; zum Bearbeiten auswählen',
+'どのようなことをしたいか（目的・要望）':'Was möchten Sie tun? (Ziel / Wunsch)',
+'スクリーンショットを貼り付けできます（Ctrl+V）。課題抽出時に画像パスをプロンプトへ添付します':'Screenshots einfügen (Strg+V); Pfade werden dem Prompt angehängt',
+'処理履歴（state.json）':'Verlauf (state.json)','PR処理（プルリクエスト課題を集約）':'PR-Aufgaben (Pull Requests)',
+'設定（config.json の有効値）':'Einstellungen (effektive config.json)',
+'概要':'Übersicht','監視・共通':'Überwachung & Allgemein','ポーリング周期 (秒)':'Polling-Intervall (s)',
+'候補キャッシュ有効 (秒)':'Kandidaten-Cache (s)','新規候補の上限/回':'Max. neue/Poll',
+'評価 同時起動数':'Bewertung parallel','判定の鮮度 (時間)':'Verdict-Aktualität (h)',
+'対応 同時起動数':'Umsetzung parallel','PR/再検証 同時起動数':'PR/Verifizierung parallel','検証ループ上限 (回)':'Verifizierungs-Loops max',
+'自動処理の判定範囲':'Auto-Verdict-Bereich','自動処理のリスク上限':'Auto-Risikolimit',
+'auto のみ':'nur auto','review まで':'bis review','human まで':'bis human','reject まで(全て)':'bis reject (alle)',
+'low のみ':'nur low','medium まで':'bis medium','high まで(全て)':'bis high (alle)',
+'※ config.json を直接書き換えます（APIキーは secrets.json へ）。permissionMode・repos は編集不可':'* Schreibt config.json direkt (API-Schlüssel in secrets.json). permissionMode & repos nicht editierbar',
+'チャット (AI)':'Chat (AI)','ブリッジ設定':'Bridge','追加指示':'Zusatzanweisungen','データソース':'Datenquellen','プラグイン':'Plugins',
+'AI プロバイダ':'AI-Anbieter','モデル':'Modell','プロバイダ種別':'Anbietertyp','プリセット':'Preset','（カスタム）':'(benutzerdefiniert)',
+'エンドポイント':'Endpunkt','APIキー / トークン':'API-Schlüssel / Token','モデル一覧を取得':'Modelle laden','ツール往復上限 (回)':'Tool-Runden max',
+'bridge-hub インストール':'bridge-hub installieren','疎通確認':'Verbindung testen','CLI を自動インストール':'CLI installieren','CLI ログイン':'CLI-Login',
+'全タスク共通の追加指示':'Zusatzanweisungen (alle Tasks)','監視リポジトリ':'Überwachte Repos','プラグイン（スキル）':'Plugins (Skills)','スキルタブで編集':'Im Skills-Tab bearbeiten',
+'AI チャット（設定の AIプロバイダで実行 / devin・copilot=ACPセッション、その他=単発応答）':'AI-Chat (konfigurierter Anbieter; devin/copilot = ACP-Sitzung, andere = Einzelantwort)',
+'「評価」「対応」ボタンを押すとプロンプトが自動送信されます':'Bewerten/Umsetzen sendet den Prompt automatisch',
+'AI アシスタント（管理ツール対応・OpenAI 互換 API）':'AI-Assistent (Verwaltungstools, OpenAI-kompatible API)',
+'apiUrl/apiModel/キーは設定タブ「AI」で指定。課題一覧・評価/対応のディスパッチ・ログ参照などをツール経由で実行できます':'apiUrl/apiModel/Schlüssel unter Einstellungen > AI. Listet Vorgänge, startet Bewertung/Umsetzung, liest Logs per Tools',
+'スキル（skills/*.md — プロンプト末尾に注入される追加指示）':'Skills (skills/*.md — Zusatzanweisungen am Prompt-Ende)',
+'_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別':'_all=alle Modi / _done=bei Abschluss / _assess/_impl/_split=je Modus',
+'dispatcher.log（末尾）':'dispatcher.log (Ende)','(ログなし)':'(kein Protokoll)','（ログ未生成）':'(Protokoll nicht erstellt)',
+'手動のみ':'Manuell','30秒ごと':'alle 30s','1分ごと':'jede Minute','2分ごと':'alle 2min','5分ごと':'alle 5min','10分ごと':'alle 10min',
+'自動更新周期':'Aktualisierungsintervall',
+'フィルター:':'Filter:','判定:すべて':'Verdict: alle','未評価':'Unbewertet','リスク:すべて':'Risiko: alle','状態:すべて':'Status: alle',
+'実行中':'Läuft','待機中':'Wartend','非実行':'Inaktiv','読み込み中…':'Laden…',
+'候補なし':'Keine Kandidaten','監視リポジトリなし':'Keine überwachten Repos',
+'評価中':'Bewertung läuft','対応中':'Umsetzung läuft','再検証中':'Verifizierung','評価失敗':'Bewertung fehlgeschlagen','PR中#':'In PR #',
+'評価専用(api)':'Nur Bewertung (api)','自動(新規)':'Auto (neu)','処理済み(要再検証)':'Umgesetzt (prüfen)','devin ラベル':'devin-Label',
+'running ラベル付き(起動中/取残し)':'running-Label (aktiv/verwaist)',
+'種別':'Typ','操作':'Aktionen','タイトル':'Titel','トリガー':'Auslöser','判定':'Verdict','作成日時':'Erstellt','備考':'Notizen',
+'課題':'Task','状態':'Status','開始':'Start','終了':'Ende','履歴なし':'Kein Verlauf',
+'ポーリング中':'Polling aktiv','ポーリング未起動':'Polling gestoppt','(判定)':'(Bewertung)','(実装)':'(Impl)','▶ 実行中: ':'▶ Läuft: ',
+'ポーリング間隔':'Poll-Intervall','同時起動(評価/対応/PR)':'Parallel (Bewert/Ums/PR)',
+'セッションログ: ':'Sitzungsprotokoll: ',
+'指示を入力（Enter で送信 / 実行中の追加指示も可）':'Anweisungen eingeben (Enter sendet; steuert auch laufende Tasks)',
+'指示を入力（Enter で送信）':'Anweisungen eingeben (Enter sendet)',
+'Issue タイトル':'Issue-Titel','本文（機能追加・エラー修正の内容）':'Text (Feature / Fehlerbehebung)',
+'例: ◯◯機能を追加したい、△△のエラーを直したい、□□を改善したい（空欄なら現状から課題候補を抽出）':'z.B. Funktion X hinzufügen, Fehler Y beheben, Z verbessern (leer = Kandidaten aus Ist-Stand)',
+'（必要時）':'(falls nötig)','モデル名':'Modellname','（既定）':'(Standard)',
+},
+};
+const LANGS = [['ja','日本語'],['en','English'],['zh','中文'],['ko','한국어'],['es','Español'],['fr','Français'],['de','Deutsch']];
+let LANG = localStorage.getItem('kadai-lang') || 'ja';
+const t = (k) => LANG === 'ja' ? k : (I18N[LANG]?.[k] ?? I18N.en?.[k] ?? k);
+// map(t=>)・badge(bg,t) 等の局所変数 t との衝突回避用エイリアス
+const tr = t;
+function applyI18n() {
+  document.documentElement.lang = LANG;
+  document.title = t('課題エージェント ディスパッチャー');
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+}
+function setLang(v) {
+  LANG = v; localStorage.setItem('kadai-lang', v);
+  applyI18n();
+  // 生成コンテンツは再描画で言語反映（未定義なら次回ポーリングで追従）
+  try { renderFlag && ['autoDiscover','autoAssess','autoTrigger','autoPr'].forEach(renderFlag); } catch { /* noop */ }
+  try { renderCandBody && renderCandBody(); } catch { /* noop */ }
+  try { refreshStatus && refreshStatus(); } catch { /* noop */ }
+}
+</script>
 </head>
 <body>
 <div class="row" style="align-items:flex-start;gap:24px;flex-wrap:wrap;margin-bottom:14px">
   <div>
     <div style="display:flex;align-items:center;gap:16px">
-      <h1 style="margin:0">Devin Agent Dispatcher</h1>
+      <h1 style="margin:0" data-i18n="課題エージェント ディスパッチャー">課題エージェント ディスパッチャー</h1>
       <label style="font-size:12px;color:#4b5563;display:flex;align-items:center;gap:6px"
-        title="全課題に適用する実行エンジン（設定タブの AI プロバイダと連動・即時保存）&#10;GitHub の engine: ラベル/本文行による個別指定はこれより優先されます">エンジン
+        title="全課題に適用する実行エンジン（設定タブの AI プロバイダと連動・即時保存）&#10;GitHub の engine: ラベル/本文行による個別指定はこれより優先されます"><span data-i18n="エンジン">エンジン</span>
         <select id="hdr-engine" style="font-size:12px" onchange="setGlobalEngine(this.value)">
           <option value="devin">【CLI】Devin</option>
           <option value="copilot">【ブリッジ】GitHub Copilot</option>
           <option value="antigravity">【ブリッジ】Antigravity</option>
           <option value="api">【API】汎用（OpenAI互換）</option></select></label>
+      <label style="font-size:12px;color:#4b5563;display:flex;align-items:center;gap:6px"><span data-i18n="言語">言語</span>
+        <select id="lang-sel" style="font-size:12px" onchange="setLang(this.value)"></select></label>
+      <a href="docs/index.html" target="_blank" rel="noopener" data-i18n="マニュアル"
+        title="課題エージェント ディスパッチャーのマニュアルを別タブで開きます"
+        style="display:inline-block;padding:10px 22px;font-size:15px;font-weight:600;
+          background:#2563eb;color:#fff;border-radius:10px;text-decoration:none;white-space:nowrap">マニュアル</a>
     </div>
-    <div class="sub" style="margin-bottom:0">GitHub Issue/PR → devin -p 自動対応エージェントの管理パネル</div>
+    <div class="sub" style="margin-bottom:0" data-i18n="GitHub Issue/PR を監視し、エージェントが自動対応する管理パネル">GitHub Issue/PR を監視し、エージェントが自動対応する管理パネル</div>
   </div>
   <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:8px">
     <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end">
@@ -183,14 +562,14 @@
     <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
       <button id="btn-assess" class="toggle off" onclick="toggleFlag('autoAssess')">…</button>
       <span id="assess-desc" style="display:none"></span>
-      <button id="btnOnce" onclick="act('assess-all')"
-        title="判定が出ていない全候補を評価キューへ投入します。&#10;評価 同時起動数の上限までは並列セッションで即実行、&#10;超過分は待機キューで順次実行されます。">全評価実行</button>
+      <button id="btnOnce" onclick="act('assess-all')" data-i18n="全評価 手動実行"
+        title="判定が出ていない全候補を評価キューへ投入します（手動の一括起動）。&#10;評価 同時起動数の上限までは並列セッションで即実行、&#10;超過分は待機キューで順次実行されます。">全評価 手動実行</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
       <button id="btn-auto" class="toggle off" onclick="toggleFlag('autoTrigger')">…</button>
       <span id="auto-desc" style="display:none"></span>
-      <button onclick="act('impl-all')"
-        title="判定・リスクが自動処理設定（autoCategory × maxAutoRisk の AND）に適合する全課題に対応を開始します。&#10;対応/PR対応 同時起動数の上限までは並列実行、超過分は待機キューで順次実行されます。">全課題対応自動実行</button>
+      <button onclick="act('impl-all')" data-i18n="全課題対応 手動実行"
+        title="判定・リスクが自動処理設定（autoCategory × maxAutoRisk の AND）に適合する全課題に対応を開始します（手動の一括起動）。&#10;対応/PR対応 同時起動数の上限までは並列実行、超過分は待機キューで順次実行されます。">全課題対応 手動実行</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
       <button id="btn-auto-pr" class="toggle off" onclick="toggleFlag('autoPr')">…</button>
@@ -202,94 +581,94 @@
 
 <div class="tabs" id="tabs">
   <span id="meta" style="display:none"></span>
-  <button data-tab="survey" onclick="showTab('survey')">課題整理</button>
-  <button data-tab="cands" class="active" onclick="showTab('cands')">課題処理</button>
-  <button data-tab="prs" onclick="showTab('prs')">PR処理</button>
-  <button data-tab="tasks" onclick="showTab('tasks')">処理履歴</button>
-  <button data-tab="cfg" onclick="showTab('cfg')">設定</button>
-  <button data-tab="chat" onclick="showTab('chat')">チャット</button>
+  <button data-tab="survey" onclick="showTab('survey')" data-i18n="課題整理">課題整理</button>
+  <button data-tab="cands" class="active" onclick="showTab('cands')" data-i18n="課題処理">課題処理</button>
+  <button data-tab="prs" onclick="showTab('prs')" data-i18n="PR処理">PR処理</button>
+  <button data-tab="tasks" onclick="showTab('tasks')" data-i18n="処理履歴">処理履歴</button>
+  <button data-tab="cfg" onclick="showTab('cfg')" data-i18n="設定">設定</button>
+  <button data-tab="chat" onclick="showTab('chat')" data-i18n="チャット">チャット</button>
   <button data-tab="ai" onclick="showTab('ai')">AI</button>
-  <button data-tab="skills" onclick="showTab('skills')">スキル</button>
-  <button data-tab="log" onclick="showTab('log')">ログ</button>
-  <button data-tab="docs" onclick="showTab('docs')">ドキュメント</button>
+  <button data-tab="skills" onclick="showTab('skills')" data-i18n="スキル">スキル</button>
+  <button data-tab="log" onclick="showTab('log')" data-i18n="ログ">ログ</button>
+  <button data-tab="docs" onclick="showTab('docs')" data-i18n="ドキュメント">ドキュメント</button>
   <span id="active" style="font-size:12px;margin-left:auto;align-self:center"></span>
 </div>
 
 <div class="card" style="border-top:none;border-radius:0 0 10px 10px">
   <div id="tab-survey" class="tabpanel">
-    <div class="h3">課題整理（目的 → Issue 化）</div>
+    <div class="h3" data-i18n="課題整理（目的 → Issue 化）">課題整理（目的 → Issue 化）</div>
     <div class="row" style="margin-bottom:10px">
-      <label style="font-size:12px">対象リポジトリ
+      <label style="font-size:12px"><span data-i18n="対象リポジトリ">対象リポジトリ</span>
         <select id="sv-repo" style="font-size:12px;min-width:240px" onchange="document.getElementById('sv-goal-sel').value='';loadGoal();loadGoals();svReset()"></select></label>
       <select id="sv-level" style="font-size:12px" title="抽出レベル: 目的・要望の文言に対する解釈の広さ&#10;Lv1 入力文言をそのまま整理（追加提案なし）&#10;Lv2 拡大解釈せず忠実に抽出&#10;Lv3 関連機能・周辺改善も含めて抽出">
-        <option value="1">Lv1 文言の整理のみ</option>
-        <option value="2" selected>Lv2 忠実に抽出</option>
-        <option value="3">Lv3 関連機能も含む</option>
+        <option value="1" data-i18n="Lv1 文言の整理のみ">Lv1 文言の整理のみ</option>
+        <option value="2" selected data-i18n="Lv2 忠実に抽出">Lv2 忠実に抽出</option>
+        <option value="3" data-i18n="Lv3 関連機能も含む">Lv3 関連機能も含む</option>
       </select>
-      <button id="sv-extract" class="primary" style="font-size:14px;padding:10px 22px" onclick="surveyExtract()">課題抽出</button>
-      <button id="sv-cancel" class="danger" style="display:none;font-size:14px;padding:10px 16px" onclick="surveyCancel()">中断</button>
-      <span style="font-size:12px;color:#6b7280">抽出はチャットセッションで実行（結果はチャットタブに表示）</span>
+      <button id="sv-extract" class="primary" style="font-size:14px;padding:10px 22px" onclick="surveyExtract()" data-i18n="課題抽出">課題抽出</button>
+      <button id="sv-cancel" class="danger" style="display:none;font-size:14px;padding:10px 16px" onclick="surveyCancel()" data-i18n="中断">中断</button>
+      <span style="font-size:12px;color:#6b7280" data-i18n="抽出はチャットセッションで実行（結果はチャットタブに表示）">抽出はチャットセッションで実行（結果はチャットタブに表示）</span>
     </div>
     <div class="row" style="margin-bottom:6px">
-      <label style="display:block;font-size:12px;flex:1">保存済みの目的
+      <label style="display:block;font-size:12px;flex:1"><span data-i18n="保存済みの目的">保存済みの目的</span>
         <select id="sv-goal-sel" style="font-size:12px;width:100%" onchange="loadGoal();svReset()"></select></label>
     </div>
     <div class="row" style="margin-bottom:6px">
-      <button class="mini" onclick="saveGoal()">保存</button>
-      <button class="mini" onclick="delGoal()">削除</button>
-      <span style="font-size:12px;color:#6b7280">リポジトリごとに保存し、選択して再編集できます</span>
+      <button class="mini" onclick="saveGoal()" data-i18n="保存">保存</button>
+      <button class="mini" onclick="delGoal()" data-i18n="削除">削除</button>
+      <span style="font-size:12px;color:#6b7280" data-i18n="リポジトリごとに保存し、選択して再編集できます">リポジトリごとに保存し、選択して再編集できます</span>
     </div>
-    <label style="display:block;font-size:12px;font-weight:600;color:#4b5563;margin-bottom:10px">どのようなことをしたいか（目的・要望）
-      <textarea id="sv-goal" placeholder="例: ◯◯機能を追加したい、△△のエラーを直したい、□□を改善したい（空欄なら現状から課題候補を抽出）" onpaste="onGoalPaste(event)" oninput="svReset()" style="display:block;width:100%;max-width:960px;height:180px;margin-top:4px;font-size:14px;font-family:inherit;padding:10px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false"></textarea>
+    <label style="display:block;font-size:12px;font-weight:600;color:#4b5563;margin-bottom:10px"><span data-i18n="どのようなことをしたいか（目的・要望）">どのようなことをしたいか（目的・要望）</span>
+      <textarea id="sv-goal" data-i18n-ph="例: ◯◯機能を追加したい、△△のエラーを直したい、□□を改善したい（空欄なら現状から課題候補を抽出）" placeholder="例: ◯◯機能を追加したい、△△のエラーを直したい、□□を改善したい（空欄なら現状から課題候補を抽出）" onpaste="onGoalPaste(event)" oninput="svReset()" style="display:block;width:100%;max-width:960px;height:180px;margin-top:4px;font-size:14px;font-family:inherit;padding:10px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false"></textarea>
       <div id="sv-goal-imgs" style="margin-top:4px"></div>
-      <span style="font-size:12px;color:#6b7280">スクリーンショットを貼り付けできます（Ctrl+V）。課題抽出時に画像パスをプロンプトへ添付します</span></label>
+      <span style="font-size:12px;color:#6b7280" data-i18n="スクリーンショットを貼り付けできます（Ctrl+V）。課題抽出時に画像パスをプロンプトへ添付します">スクリーンショットを貼り付けできます（Ctrl+V）。課題抽出時に画像パスをプロンプトへ添付します</span></label>
     <div id="iss-proposals" style="margin-bottom:10px"></div>
     <div style="display:flex;flex-direction:column;gap:6px;max-width:720px">
-      <input id="iss-title" placeholder="Issue タイトル" style="font-size:13px;padding:6px 8px;border:1px solid #d1d7e0;border-radius:6px">
-      <textarea id="iss-body" placeholder="本文（機能追加・エラー修正の内容）" style="height:140px;font-size:12px;font-family:inherit;padding:8px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false"></textarea>
-      <div class="row"><button class="mini primary" onclick="issueCreate()">ISSUE登録</button>
+      <input id="iss-title" data-i18n-ph="Issue タイトル" placeholder="Issue タイトル" style="font-size:13px;padding:6px 8px;border:1px solid #d1d7e0;border-radius:6px">
+      <textarea id="iss-body" data-i18n-ph="本文（機能追加・エラー修正の内容）" placeholder="本文（機能追加・エラー修正の内容）" style="height:140px;font-size:12px;font-family:inherit;padding:8px;border:1px solid #d1d7e0;border-radius:6px" spellcheck="false"></textarea>
+      <div class="row"><button class="mini primary" onclick="issueCreate()" data-i18n="ISSUE登録">ISSUE登録</button>
         <span id="iss-result" style="font-size:12px"></span></div>
     </div>
   </div>
 
   <div id="tab-cands" class="tabpanel active">
-    <div class="h3"><span>課題処理 <span id="cands-mode" style="font-weight:400;font-size:12px"></span></span>
+    <div class="h3"><span><span data-i18n="課題処理">課題処理</span> <span id="cands-mode" style="font-weight:400;font-size:12px"></span></span>
       <span style="display:flex;align-items:center;gap:8px">
         <span id="cands-meta" style="color:#9ca3af;font-size:12px"></span>
-        <select id="cand-int" onchange="setCandInt()" title="自動更新周期">
-          <option value="0">手動のみ</option>
-          <option value="30">30秒ごと</option>
-          <option value="60">1分ごと</option>
-          <option value="120">2分ごと</option>
-          <option value="300">5分ごと</option>
-          <option value="600">10分ごと</option>
+        <select id="cand-int" onchange="setCandInt()" data-i18n-title="自動更新周期" title="自動更新周期">
+          <option value="0" data-i18n="手動のみ">手動のみ</option>
+          <option value="30" data-i18n="30秒ごと">30秒ごと</option>
+          <option value="60" data-i18n="1分ごと">1分ごと</option>
+          <option value="120" data-i18n="2分ごと">2分ごと</option>
+          <option value="300" data-i18n="5分ごと">5分ごと</option>
+          <option value="600" data-i18n="10分ごと">10分ごと</option>
         </select>
-        <button class="mini" onclick="loadCandidates(true)">今すぐ取得</button>
+        <button class="mini" onclick="loadCandidates(true)" data-i18n="今すぐ取得">今すぐ取得</button>
       </span></div>
     <div class="subtabs" id="cand-tabs"></div>
     <div id="cand-filters" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px">
-      <span style="color:#6b7280">フィルター:</span>
+      <span style="color:#6b7280" data-i18n="フィルター:">フィルター:</span>
       <select id="f-category" onchange="renderCandBody()">
-        <option value="">判定:すべて</option><option value="auto">auto</option>
+        <option value="" data-i18n="判定:すべて">判定:すべて</option><option value="auto">auto</option>
         <option value="review">review</option><option value="human">human</option>
-        <option value="reject">reject</option><option value="none">未評価</option>
+        <option value="reject">reject</option><option value="none" data-i18n="未評価">未評価</option>
       </select>
       <select id="f-risk" onchange="renderCandBody()">
-        <option value="">リスク:すべて</option><option value="low">low</option>
+        <option value="" data-i18n="リスク:すべて">リスク:すべて</option><option value="low">low</option>
         <option value="medium">medium</option><option value="high">high</option>
       </select>
       <select id="f-status" onchange="renderCandBody()">
-        <option value="">状態:すべて</option><option value="busy">実行中</option>
-        <option value="queued">待機中</option><option value="idle">非実行</option>
+        <option value="" data-i18n="状態:すべて">状態:すべて</option><option value="busy" data-i18n="実行中">実行中</option>
+        <option value="queued" data-i18n="待機中">待機中</option><option value="idle" data-i18n="非実行">非実行</option>
       </select>
     </div>
-    <div id="cands" style="color:#6b7280;overflow-x:auto">読み込み中…</div>
+    <div id="cands" style="color:#6b7280;overflow-x:auto" data-i18n="読み込み中…">読み込み中…</div>
   </div>
 
   <div id="tab-tasks" class="tabpanel">
-    <div class="h3">処理履歴（state.json）</div>
+    <div class="h3" data-i18n="処理履歴（state.json）">処理履歴（state.json）</div>
     <table>
-      <thead><tr><th>課題</th><th>状態</th><th>評価</th><th>開始</th><th>終了</th><th>exit</th><th>エンジン</th><th></th></tr></thead>
+      <thead><tr><th data-i18n="課題">課題</th><th data-i18n="状態">状態</th><th data-i18n="評価">評価</th><th data-i18n="開始">開始</th><th data-i18n="終了">終了</th><th>exit</th><th data-i18n="エンジン">エンジン</th><th></th></tr></thead>
       <tbody id="tasks"></tbody>
     </table>
   </div>
@@ -302,30 +681,30 @@
   </div>
 
   <div id="tab-prs" class="tabpanel">
-    <div class="h3">PR処理（プルリクエスト課題を集約）</div>
-    <div id="prs" style="color:#6b7280;overflow-x:auto">読み込み中…</div>
+    <div class="h3" data-i18n="PR処理（プルリクエスト課題を集約）">PR処理（プルリクエスト課題を集約）</div>
+    <div id="prs" style="color:#6b7280;overflow-x:auto" data-i18n="読み込み中…">読み込み中…</div>
   </div>
 
   <div id="tab-cfg" class="tabpanel">
     <div class="tabs" id="cfgtabs" style="margin-bottom:10px">
-      <button data-ctab="view" class="active" onclick="showCfgTab('view')">概要</button>
-      <button data-ctab="watch" onclick="showCfgTab('watch')">監視・共通</button>
-      <button data-ctab="assess" onclick="showCfgTab('assess')">評価</button>
-      <button data-ctab="impl" onclick="showCfgTab('impl')">対応</button>
+      <button data-ctab="view" class="active" onclick="showCfgTab('view')" data-i18n="概要">概要</button>
+      <button data-ctab="watch" onclick="showCfgTab('watch')" data-i18n="監視・共通">監視・共通</button>
+      <button data-ctab="assess" onclick="showCfgTab('assess')" data-i18n="評価">評価</button>
+      <button data-ctab="impl" onclick="showCfgTab('impl')" data-i18n="対応">対応</button>
       <button data-ctab="engine" onclick="showCfgTab('engine')">AI</button>
     </div>
     <div id="cfg-view" class="cfgpanel">
-      <div class="h3">設定（config.json の有効値）</div>
+      <div class="h3" data-i18n="設定（config.json の有効値）">設定（config.json の有効値）</div>
       <dl class="kv" id="cfg"></dl>
     </div>
 
     <div id="cfg-watch" class="cfgpanel" style="display:none">
     <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
-      <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px">監視・共通</div>
+      <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px" data-i18n="監視・共通">監視・共通</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px;align-items:end">
-        <label>ポーリング周期 (秒)<br><input id="set-poll" type="number" min="10" style="width:80px"></label>
-        <label>候補キャッシュ有効 (秒)<br><input id="set-cache" type="number" min="0" style="width:80px"></label>
-        <label>新規候補の上限/回<br><input id="set-maxnew" type="number" min="1" style="width:70px"></label>
+        <label><span data-i18n="ポーリング周期 (秒)">ポーリング周期 (秒)</span><br><input id="set-poll" type="number" min="10" style="width:80px"></label>
+        <label><span data-i18n="候補キャッシュ有効 (秒)">候補キャッシュ有効 (秒)</span><br><input id="set-cache" type="number" min="0" style="width:80px"></label>
+        <label><span data-i18n="新規候補の上限/回">新規候補の上限/回</span><br><input id="set-maxnew" type="number" min="1" style="width:70px"></label>
         <label>autoTriggerSince<br><input id="set-since" type="text" placeholder="all / ISO時刻 / 空=初回起動" style="width:150px"></label>
       </div>
     </div>
@@ -333,25 +712,25 @@
 
     <div id="cfg-assess" class="cfgpanel" style="display:none">
     <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
-      <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px">評価</div>
+      <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px" data-i18n="評価">評価</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px;align-items:end">
-        <label>評価 同時起動数<br><input id="set-maxc-assess" type="number" min="1" style="width:60px"></label>
-        <label>判定の鮮度 (時間)<br><input id="set-assess-age" type="number" min="1" style="width:60px"></label>
+        <label><span data-i18n="評価 同時起動数">評価 同時起動数</span><br><input id="set-maxc-assess" type="number" min="1" style="width:60px"></label>
+        <label><span data-i18n="判定の鮮度 (時間)">判定の鮮度 (時間)</span><br><input id="set-assess-age" type="number" min="1" style="width:60px"></label>
       </div>
     </div>
     </div>
 
     <div id="cfg-engine" class="cfgpanel" style="display:none">
     <div class="tabs" id="engtabs" style="margin-bottom:8px">
-      <button data-etab="chat" class="active" onclick="showEngTab('chat')">チャット (AI)</button>
-      <button data-etab="bridge" onclick="showEngTab('bridge')">ブリッジ設定</button>
-      <button data-etab="extra" onclick="showEngTab('extra')">追加指示</button>
-      <button data-etab="data" onclick="showEngTab('data')">データソース</button>
-      <button data-etab="plugin" onclick="showEngTab('plugin')">プラグイン</button>
+      <button data-etab="chat" class="active" onclick="showEngTab('chat')" data-i18n="チャット (AI)">チャット (AI)</button>
+      <button data-etab="bridge" onclick="showEngTab('bridge')" data-i18n="ブリッジ設定">ブリッジ設定</button>
+      <button data-etab="extra" onclick="showEngTab('extra')" data-i18n="追加指示">追加指示</button>
+      <button data-etab="data" onclick="showEngTab('data')" data-i18n="データソース">データソース</button>
+      <button data-etab="plugin" onclick="showEngTab('plugin')" data-i18n="プラグイン">プラグイン</button>
     </div>
 
     <div id="engt-chat" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
-      <label style="display:block;margin-bottom:6px">AI プロバイダ<br>
+      <label style="display:block;margin-bottom:6px"><span data-i18n="AI プロバイダ">AI プロバイダ</span><br>
         <select id="set-engine" style="width:320px" onchange="engFields()">
           <option value="devin">【CLI】Devin</option>
           <option value="copilot">【ブリッジ】GitHub Copilot</option>
@@ -359,12 +738,12 @@
           <option value="api">【API】汎用（OpenAI互換）</option></select></label>
       <div id="eng-desc" style="color:#6b7280;margin:6px 0;max-width:560px"></div>
       <div id="eng-bridge" style="display:none">
-        <label style="display:inline-block">モデル<br>
+        <label style="display:inline-block"><span data-i18n="モデル">モデル</span><br>
           <select id="set-bridgemodel" style="width:320px"></select></label>
         <span id="bridge-model-note" style="color:#b45309;font-size:11px;margin-left:8px"></span>
       </div>
       <div id="eng-api" style="display:none">
-        <label style="display:block;margin-bottom:6px">プロバイダ種別<br>
+        <label style="display:block;margin-bottom:6px"><span data-i18n="プロバイダ種別">プロバイダ種別</span><br>
           <select id="set-apiprovider" style="width:320px" onchange="engProviderChanged()">
             <option value="openai">OpenAI 互換</option>
             <option value="anthropic">Anthropic（/v1/messages）</option>
@@ -375,16 +754,16 @@
           <label style="display:block;margin-bottom:6px">api-version（Azure 用・空欄なら 2024-10-21）<br>
             <input id="set-apiversion" type="text" placeholder="2024-10-21" style="width:140px"></label>
         </div>
-        <label style="display:block;margin-bottom:6px">プリセット<br>
+        <label style="display:block;margin-bottom:6px"><span data-i18n="プリセット">プリセット</span><br>
           <select id="set-apipreset" style="width:320px" onchange="engPreset()">
-            <option value="">（カスタム）</option>
+            <option value="" data-i18n="（カスタム）">（カスタム）</option>
             <option value="https://api.ai.sakura.ad.jp/v1">【API】さくらAIEngine</option>
             <option value="https://api.openai.com/v1">【API】OpenAI</option>
             <option value="https://api.anthropic.com/v1">【API】Anthropic</option>
             <option value="https://models.github.ai/inference/v1">【API】GitHub Models</option>
             <option value="https://generativelanguage.googleapis.com/v1beta/openai">【API】Gemini（OpenAI互換）</option>
           </select></label>
-        <label style="display:block;margin-bottom:6px">エンドポイント<br>
+        <label style="display:block;margin-bottom:6px"><span data-i18n="エンドポイント">エンドポイント</span><br>
           <input id="set-apiurl" type="text" placeholder="https://…/v1（/chat/completions は自動付与）" style="width:320px" onchange="apiEndpointChanged()"></label>
         <div style="color:#6b7280;margin:6px 0;max-width:560px">
           セキュリティについて：キーは <b>secrets.json（Git 管理外）</b>にのみ保存され、config.json・
@@ -392,15 +771,15 @@
           この欄は「設定済みかどうか」だけを表示し、値自体は読み戻しません。
           http（非HTTPS）のエンドポイントを指定するとキーが平文で送信されるため、localhost/127.0.0.1
           以外では https を使ってください。</div>
-        <label style="display:block;margin-bottom:6px">APIキー / トークン<br>
-          <input id="set-apikey" type="password" placeholder="（必要時）" style="width:320px" title="secrets.json（Git 管理外）に保存されます。値は読み戻されません"></label>
-        <label style="display:inline-block">モデル<br>
-          <input id="set-apimodel" type="text" list="apimodels" placeholder="モデル名" style="width:240px"></label>
+        <label style="display:block;margin-bottom:6px"><span data-i18n="APIキー / トークン">APIキー / トークン</span><br>
+          <input id="set-apikey" type="password" data-i18n-ph="（必要時）" placeholder="（必要時）" style="width:320px" title="secrets.json（Git 管理外）に保存されます。値は読み戻されません"></label>
+        <label style="display:inline-block"><span data-i18n="モデル">モデル</span><br>
+          <input id="set-apimodel" type="text" list="apimodels" data-i18n-ph="モデル名" placeholder="モデル名" style="width:240px"></label>
         <datalist id="apimodels"></datalist>
-        <button class="mini" style="margin-left:8px" onclick="fetchModels()" title="エンドポイントからモデル一覧を取得（apiUrl/APIキーは先に保存してください）">モデル一覧を取得</button>
+        <button class="mini" style="margin-left:8px" onclick="fetchModels()" data-i18n="モデル一覧を取得" title="エンドポイントからモデル一覧を取得（apiUrl/APIキーは先に保存してください）">モデル一覧を取得</button>
       </div>
       <div style="margin-top:8px">
-        <label style="display:inline-block">ツール往復上限 (回)<br>
+        <label style="display:inline-block"><span data-i18n="ツール往復上限 (回)">ツール往復上限 (回)</span><br>
           <input id="set-toolsteps" type="number" min="1" max="20" style="width:60px" title="エージェントのツール実行（コマンド・編集の往復）の上限（1-20）。ACP/bridge タスクはプロンプトへ上限指示を注入。api エンジンの課題処理は単発応答のため実効なし"></label>
         <span style="color:#6b7280;font-size:11px;margin-left:6px">ACP/bridge タスクへ「最大 N 回・到達時はまとめて報告して終了」を指示注入。内蔵 AI チャット（api 接続時のツールループ）は硬い上限として打ち切り。api エンジンの課題処理は単発応答のため実効なし</span>
       </div>
@@ -408,26 +787,26 @@
 
     <div id="engt-bridge" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
       <label>bridge-hub URL<br><input id="set-bridgehub" type="text" placeholder="http://127.0.0.1:8511" style="width:240px"></label>
-      <button class="mini" style="margin-left:8px" onclick="act('bridge-install')" title="bridge-hub.exe を CDN から取得し自己インストール（127.0.0.1:8511 常駐）">bridge-hub インストール</button>
-      <button class="mini" style="margin-left:8px" onclick="engHealth()" title="bridge-hub の /health へ疎通確認">疎通確認</button>
+      <button class="mini" style="margin-left:8px" onclick="act('bridge-install')" data-i18n="bridge-hub インストール" title="bridge-hub.exe を CDN から取得し自己インストール（127.0.0.1:8511 常駐）">bridge-hub インストール</button>
+      <button class="mini" style="margin-left:8px" onclick="engHealth()" data-i18n="疎通確認" title="bridge-hub の /health へ疎通確認">疎通確認</button>
       <span id="eng-health" style="margin-left:8px;color:#6b7280"></span>
       <div id="bridge-cli-list" style="margin-top:8px">
         <div data-for="copilot" style="margin-top:6px">
           <strong>GitHub Copilot</strong> <span class="cli-state" data-provider="copilot"></span><br>
-          <button class="mini" onclick="bridgeCliAction('copilot','install')" title="copilot CLI をハブ経由で自動インストール">CLI を自動インストール</button>
-          <button class="mini" onclick="bridgeCliAction('copilot','login')" title="copilot /login を別コンソールで起動">CLI ログイン</button>
+          <button class="mini" onclick="bridgeCliAction('copilot','install')" data-i18n="CLI を自動インストール" title="copilot CLI をハブ経由で自動インストール">CLI を自動インストール</button>
+          <button class="mini" onclick="bridgeCliAction('copilot','login')" data-i18n="CLI ログイン" title="copilot /login を別コンソールで起動">CLI ログイン</button>
           <span class="bridge-cli-note" style="color:#6b7280"></span>
         </div>
         <div data-for="devin" style="margin-top:6px">
           <strong>Devin</strong> <span class="cli-state" data-provider="devin"></span><br>
-          <button class="mini" onclick="bridgeCliAction('devin','install')" title="devin CLI をハブ経由で自動インストール">CLI を自動インストール</button>
-          <button class="mini" onclick="bridgeCliAction('devin','login')" title="devin login を別コンソールで起動">CLI ログイン</button>
+          <button class="mini" onclick="bridgeCliAction('devin','install')" data-i18n="CLI を自動インストール" title="devin CLI をハブ経由で自動インストール">CLI を自動インストール</button>
+          <button class="mini" onclick="bridgeCliAction('devin','login')" data-i18n="CLI ログイン" title="devin login を別コンソールで起動">CLI ログイン</button>
           <span class="bridge-cli-note" style="color:#6b7280"></span>
         </div>
         <div data-for="antigravity" style="margin-top:6px">
           <strong>Antigravity</strong> <span class="cli-state" data-provider="antigravity"></span><br>
-          <button class="mini" onclick="bridgeCliAction('antigravity','install')" title="agy CLI の導入状況確認（自動インストール非対応）">CLI を自動インストール</button>
-          <button class="mini" onclick="bridgeCliAction('antigravity','login')" title="agy のログイン案内">CLI ログイン</button>
+          <button class="mini" onclick="bridgeCliAction('antigravity','install')" data-i18n="CLI を自動インストール" title="agy CLI の導入状況確認（自動インストール非対応）">CLI を自動インストール</button>
+          <button class="mini" onclick="bridgeCliAction('antigravity','login')" data-i18n="CLI ログイン" title="agy のログイン案内">CLI ログイン</button>
           <span class="bridge-cli-note" style="color:#6b7280"></span>
         </div>
       </div>
@@ -438,7 +817,7 @@
     </div>
 
     <div id="engt-extra" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
-      <label style="display:block">全タスク共通の追加指示<br>
+      <label style="display:block"><span data-i18n="全タスク共通の追加指示">全タスク共通の追加指示</span><br>
         <textarea id="set-extraprompt" style="width:100%;height:120px" placeholder="例: コミットメッセージは日本語で / テストが無い場合は最小限の検証に留める 等"></textarea></label>
       <div style="color:#6b7280">評価・対応・PR・完了確認のすべてのプロンプト末尾に【追加指示】として付与します（スキル注入の後に追加）。スキルはモード別にプロンプトへ注入される skills/*.md で、下の一覧または「スキル」タブで編集します。</div>
       <div style="margin-top:8px;font-weight:600">スキル（skills/*.md — モード別注入）</div>
@@ -449,7 +828,7 @@
     </div>
 
     <div id="engt-data" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
-      <div style="font-weight:600;margin-bottom:4px">監視リポジトリ</div>
+      <div style="font-weight:600;margin-bottom:4px" data-i18n="監視リポジトリ">監視リポジトリ</div>
       <div id="eng-data-repos"></div>
       <div style="margin-top:8px;font-weight:600">MCP サーバー（ACP session/new へ接続。新規セッションから適用）</div>
       <div id="eng-mcp-list"></div>
@@ -459,81 +838,81 @@
         <input id="mcp-target" placeholder="command または url" style="width:200px">
         <input id="mcp-args" placeholder="args（空白区切り・stdioのみ）" style="width:150px">
         <input id="mcp-kv" placeholder="env/headers KEY=VALUE（空白区切り）" style="width:210px">
-        <button class="mini" onclick="addMcpServer()">追加</button>
+        <button class="mini" onclick="addMcpServer()" data-i18n="追加">追加</button>
       </div>
       <div style="margin-top:4px;color:#6b7280">秘密情報は値を ${secrets:キー名}（secrets.json の mcpTokens）または ${env:環境変数} で参照（config.json へ直書きしない）</div>
     </div>
 
     <div id="engt-plugin" style="display:none;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px">
-      <div style="font-weight:600;margin-bottom:4px">プラグイン（スキル）</div>
+      <div style="font-weight:600;margin-bottom:4px" data-i18n="プラグイン（スキル）">プラグイン（スキル）</div>
       <div id="eng-plugin-list"></div>
-      <button class="mini" style="margin-top:6px" onclick="showTab('skills')">スキルタブで編集</button>
+      <button class="mini" style="margin-top:6px" onclick="showTab('skills')" data-i18n="スキルタブで編集">スキルタブで編集</button>
     </div>
     </div>
     <div id="cfg-impl" class="cfgpanel" style="display:none">
     <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
-      <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px">対応</div>
+      <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px" data-i18n="対応">対応</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px;align-items:end">
-        <label>対応 同時起動数<br><input id="set-maxc-impl" type="number" min="1" style="width:60px"></label>
-        <label>PR/再検証 同時起動数<br><input id="set-maxc-pr" type="number" min="1" style="width:60px" title="pr# 課題・AI:impl-done 再検証セッションの同時起動上限（issue課題とは別枠）"></label>
-        <label>検証ループ上限 (回)<br><input id="set-impl-loop" type="number" min="1" style="width:60px" title="対応→完了確認→NG→修正のループをこの回数まで実施。到達後はユーザーへ対応依頼"></label>
+        <label><span data-i18n="対応 同時起動数">対応 同時起動数</span><br><input id="set-maxc-impl" type="number" min="1" style="width:60px"></label>
+        <label><span data-i18n="PR/再検証 同時起動数">PR/再検証 同時起動数</span><br><input id="set-maxc-pr" type="number" min="1" style="width:60px" title="pr# 課題・AI:impl-done 再検証セッションの同時起動上限（issue課題とは別枠）"></label>
+        <label><span data-i18n="検証ループ上限 (回)">検証ループ上限 (回)</span><br><input id="set-impl-loop" type="number" min="1" style="width:60px" title="対応→完了確認→NG→修正のループをこの回数まで実施。到達後はユーザーへ対応依頼"></label>
 
-        <label>自動処理の判定範囲<br><select id="set-autocat" style="font-size:12px" title="選択した判定まで自動で対応へ進めます&#10;auto のみ / review まで / human まで / reject まで(全て)">
-          <option value="auto">auto のみ</option>
-          <option value="review">review まで</option>
-          <option value="human">human まで</option>
-          <option value="reject">reject まで(全て)</option></select></label>
-        <label>自動処理のリスク上限<br><select id="set-autorisk" style="font-size:12px" title="選択したリスクまで自動で対応へ進めます&#10;判定範囲とは AND 条件です&#10;low のみ / medium まで / high まで(全て)">
-          <option value="low">low のみ</option>
-          <option value="medium">medium まで</option>
-          <option value="high">high まで(全て)</option></select></label>
+        <label><span data-i18n="自動処理の判定範囲">自動処理の判定範囲</span><br><select id="set-autocat" style="font-size:12px" title="選択した判定まで自動で対応へ進めます&#10;auto のみ / review まで / human まで / reject まで(全て)">
+          <option value="auto" data-i18n="auto のみ">auto のみ</option>
+          <option value="review" data-i18n="review まで">review まで</option>
+          <option value="human" data-i18n="human まで">human まで</option>
+          <option value="reject" data-i18n="reject まで(全て)">reject まで(全て)</option></select></label>
+        <label><span data-i18n="自動処理のリスク上限">自動処理のリスク上限</span><br><select id="set-autorisk" style="font-size:12px" title="選択したリスクまで自動で対応へ進めます&#10;判定範囲とは AND 条件です&#10;low のみ / medium まで / high まで(全て)">
+          <option value="low" data-i18n="low のみ">low のみ</option>
+          <option value="medium" data-i18n="medium まで">medium まで</option>
+          <option value="high" data-i18n="high まで(全て)">high まで(全て)</option></select></label>
       </div>
     </div>
     </div>
     <div class="row" style="margin-top:10px">
-      <button class="mini primary" onclick="saveCfg()">保存</button>
-      <span style="color:#9ca3af;font-size:12px">※ config.json を直接書き換えます（APIキーは secrets.json へ）。permissionMode・repos は編集不可</span>
+      <button class="mini primary" onclick="saveCfg()" data-i18n="保存">保存</button>
+      <span style="color:#9ca3af;font-size:12px" data-i18n="※ config.json を直接書き換えます（APIキーは secrets.json へ）。permissionMode・repos は編集不可">※ config.json を直接書き換えます（APIキーは secrets.json へ）。permissionMode・repos は編集不可</span>
     </div>
   </div>
 
   <div id="tab-chat" class="tabpanel">
-    <div class="h3">AI チャット（設定の AIプロバイダで実行 / devin・copilot=ACPセッション、その他=単発応答）
+    <div class="h3"><span data-i18n="AI チャット（設定の AIプロバイダで実行 / devin・copilot=ACPセッション、その他=単発応答）">AI チャット（設定の AIプロバイダで実行 / devin・copilot=ACPセッション、その他=単発応答）</span>
       <span id="chat-status" style="font-weight:400;color:#6b7280"></span>
-      <button class="mini" onclick="chatCancel()">中断</button>
-      <button class="mini" onclick="chatClear()">クリア</button>
-      <button class="mini" onclick="chatReset()">リセット</button></div>
+      <button class="mini" onclick="chatCancel()" data-i18n="中断">中断</button>
+      <button class="mini" onclick="chatClear()" data-i18n="クリア">クリア</button>
+      <button class="mini" onclick="chatReset()" data-i18n="リセット">リセット</button></div>
     <div id="chat-sessions"></div>
     <div id="chat-opts" style="display:flex;gap:8px;margin:4px 0 8px;flex-wrap:wrap"></div>
-    <div id="chat-box"><div class="msg sys">「評価」「対応」ボタンを押すとプロンプトが自動送信されます</div></div>
+    <div id="chat-box"><div class="msg sys" data-i18n="「評価」「対応」ボタンを押すとプロンプトが自動送信されます">「評価」「対応」ボタンを押すとプロンプトが自動送信されます</div></div>
     <div id="chat-input">
-      <input id="chat-text" placeholder="指示を入力（Enter で送信 / 実行中の追加指示も可）"
+      <input id="chat-text" data-i18n-ph="指示を入力（Enter で送信 / 実行中の追加指示も可）" placeholder="指示を入力（Enter で送信 / 実行中の追加指示も可）"
              onkeydown="if(event.key==='Enter')chatSend()">
-      <button class="primary" onclick="chatSend()">送信</button>
+      <button class="primary" onclick="chatSend()" data-i18n="送信">送信</button>
     </div>
   </div>
   <div id="tab-ai" class="tabpanel">
-    <div class="h3">AI アシスタント（管理ツール対応・OpenAI 互換 API）
+    <div class="h3"><span data-i18n="AI アシスタント（管理ツール対応・OpenAI 互換 API）">AI アシスタント（管理ツール対応・OpenAI 互換 API）</span>
       <span id="ai-meta" style="font-weight:400;color:#6b7280"></span>
-      <button class="mini" onclick="aiClear()">クリア</button></div>
+      <button class="mini" onclick="aiClear()" data-i18n="クリア">クリア</button></div>
     <div id="ai-box">
-      <div class="ai-msg sys">apiUrl/apiModel/キーは設定タブ「AI」で指定。課題一覧・評価/対応のディスパッチ・ログ参照などをツール経由で実行できます</div>
+      <div class="ai-msg sys" data-i18n="apiUrl/apiModel/キーは設定タブ「AI」で指定。課題一覧・評価/対応のディスパッチ・ログ参照などをツール経由で実行できます">apiUrl/apiModel/キーは設定タブ「AI」で指定。課題一覧・評価/対応のディスパッチ・ログ参照などをツール経由で実行できます</div>
     </div>
     <div id="ai-input">
-      <input id="ai-text" placeholder="指示を入力（Enter で送信）"
+      <input id="ai-text" data-i18n-ph="指示を入力（Enter で送信）" placeholder="指示を入力（Enter で送信）"
              onkeydown="if(event.key==='Enter')aiSend()">
-      <button class="primary" id="ai-send" onclick="aiSend()">送信</button>
+      <button class="primary" id="ai-send" onclick="aiSend()" data-i18n="送信">送信</button>
     </div>
   </div>
   <div id="tab-skills" class="tabpanel">
-    <div class="h3">スキル（skills/*.md — プロンプト末尾に注入される追加指示）</div>
+    <div class="h3" data-i18n="スキル（skills/*.md — プロンプト末尾に注入される追加指示）">スキル（skills/*.md — プロンプト末尾に注入される追加指示）</div>
     <div id="skill-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
     <div class="row" style="margin-bottom:8px">
-      <button class="mini primary" onclick="saveSkill()">保存</button>
+      <button class="mini primary" onclick="saveSkill()" data-i18n="保存">保存</button>
       <span class="swseg">
-        <button id="sv-edit" class="mini" onclick="setSkillView('edit')">編集</button>
-        <button id="sv-view" class="mini primary" onclick="setSkillView('view')">表示</button>
+        <button id="sv-edit" class="mini" onclick="setSkillView('edit')" data-i18n="編集">編集</button>
+        <button id="sv-view" class="mini primary" onclick="setSkillView('view')" data-i18n="表示">表示</button>
       </span>
-      <span style="font-size:12px;color:#6b7280">_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別</span>
+      <span style="font-size:12px;color:#6b7280" data-i18n="_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別">_all=全モード / _done=完了時指示 / _assess/_impl/_split=モード別</span>
     </div>
     <textarea id="skill-edit" style="width:100%;height:420px;font-family:monospace;font-size:12px;
       border:1px solid #dfe3ea;border-radius:6px;padding:10px;display:none" spellcheck="false"></textarea>
@@ -541,7 +920,7 @@
   </div>
   <div id="tab-log" class="tabpanel">
     <div class="h3"><span id="log-title">dispatcher.log（末尾）</span>
-      <button class="mini" onclick="logKey=null;showTab('log')">dispatcher.log に戻す</button></div>
+      <button class="mini" onclick="logKey=null;showTab('log')" data-i18n="dispatcher.log に戻す">dispatcher.log に戻す</button></div>
     <pre id="log">…</pre>
   </div>
 </div>
@@ -920,6 +1299,7 @@ async function act(name) {
     else toast(name + ': OK' + (j.pid ? ' (pid ' + j.pid + ')' : ''));
   } catch (e) { toast(name + ': ' + e.message); }
   refresh();
+  ensurePolling();
 }
 
 let cfgInit = false;
@@ -929,6 +1309,7 @@ function viewLog(key) { logKey = key; showTab('log'); }
 // devin.exe CLI ログインは IDE エンジン方式では不要（実行は Devin IDE セッションが担う）
 let lastActive = [];
 let lastAnyActive = false; // chatWaiting/chatBusy が存在したか（完了検知用）
+let lastTaskSig = ''; // state.tasks の状態シグネチャ（変化検知で候補表示を即リロード）
 async function killActive() {
   for (const s of lastActive) {
     const key = s.replace(/ \((判定|実装)\)/, '');
@@ -969,9 +1350,9 @@ function renderFlag(key) {
   const on = flags[key];
   const b = document.getElementById(u.btn);
   b.className = 'toggle ' + (on ? 'on' : 'off');
-  b.textContent = on ? u.on : u.off;
+  b.textContent = on ? t(u.on) : t(u.off);
   const de = document.getElementById(u.desc);
-  if (de) de.textContent = on ? u.onDesc : u.offDesc;
+  if (de) de.textContent = on ? t(u.onDesc) : t(u.offDesc);
 }
 
 async function toggleFlag(key) {
@@ -1191,9 +1572,11 @@ async function loadSessions() {
     if (chatSel == null && list.length) chatSel = list[0].id;
     document.getElementById('chat-sessions').innerHTML =
       list.map((s) => '<span class="csess' + (s.id === chatSel ? ' active' : '') +
-        (s.busy ? ' busy' : '') + '" onclick="chatSelect(' + JSON.stringify(s.id) + ')">' +
+        (s.busy ? ' busy' : '') + '"' +
+        (s.resumable ? ' title="ACPセッション切断・次の送信で再開します"' : '') +
+        ' onclick="chatSelect(' + JSON.stringify(s.id) + ')">' +
         ((s.engine && s.engine !== 'devin') ? '[' + esc(s.engine) + '] ' : '') +
-        esc(s.label || 'session ' + s.id) + (s.busy ? ' ●' : '') +
+        esc(s.label || 'session ' + s.id) + (s.busy ? ' ●' : (s.resumable ? ' ↺' : '')) +
         '<span class="x" onclick="event.stopPropagation();chatClose(' + JSON.stringify(s.id) + ')">✕</span></span>'
       ).join('') +
       '<span class="csess" onclick="chatSelect(null)">＋新規</span>';
@@ -1242,7 +1625,7 @@ async function loadChat() {
     const j = await (await fetch(API + '/api/chat?id=' + (chatSel || 0))).json();
     document.getElementById('chat-status').textContent =
       j.busy ? '（実行中…）' :
-      j.sessionId ? (j.live ? '（接続中）' : '（切断・次の送信で再接続）') : '（未起動）';
+      j.sessionId ? (j.live ? '（接続中）' : '（切断・次の送信で再開）') : '（未起動）';
     // モデル/モード選択（ACP configOptions）
     const opts = document.getElementById('chat-opts');
     if (j.options && j.options.length) {
@@ -1369,6 +1752,7 @@ async function assess(key) {
         loadSessions();
       }
       renderCandBody();
+      ensurePolling();
     }
   } catch (e) { toast('assess: ' + e.message); }
 }
@@ -1386,6 +1770,7 @@ async function dispatch(key, verify) {
       if (j.queued) localWait.add(key + ' ' + mode);
       else { localBusy.set(key + ' ' + mode, Date.now()); chatSel = j.id; loadSessions(); }
       renderCandBody();
+      ensurePolling();
     }
   } catch (e) { toast('dispatch: ' + e.message); }
   setTimeout(loadCandidates, 1000);
@@ -1407,8 +1792,8 @@ async function refresh() {
   }
   const me = document.getElementById('meta');
   if (me) me.textContent = status.running
-    ? 'ポーリング中 (pid ' + status.pid + ' / 起動: ' + status.startedAt + ')'
-    : 'ポーリング未起動';
+    ? t('ポーリング中') + ' (pid ' + status.pid + ' / ' + status.startedAt + ')'
+    : t('ポーリング未起動');
 
   const c = status.config;
   const he = document.getElementById('hdr-engine');
@@ -1428,10 +1813,11 @@ async function refresh() {
   }
   lastActive = [...actSet];
   document.getElementById('active').innerHTML = actSet.size
-    ? '<span style="color:#ca8a04">▶ 実行中: ' + [...actSet].map(s =>
+    ? '<span style="color:#ca8a04">' + t('▶ 実行中: ') + [...actSet].map(s =>
         '<a href="#" style="color:#ca8a04" onclick="event.preventDefault();viewLog(\'' +
-        esc(s.replace(/ \((判定|実装)\)/, '')) + '\')">' + esc(s) + '</a>').join(' , ') +
-      ' <button class="mini danger" onclick="killActive()">停止</button></span>'
+        esc(s.replace(/ \((判定|実装)\)/, '')) + '\')">' +
+        esc(s).replace(/ \((判定|実装)\)/, (m, g) => ' ' + t('(' + g + ')')) + '</a>').join(' , ') +
+      ' <button class="mini danger" onclick="killActive()">' + t('停止') + '</button></span>'
     : '';
   // 評価完了検知 → 対応候補をリロード（複数同時評価も全件反映）
   if (awaitAssess.size) {
@@ -1447,10 +1833,17 @@ async function refresh() {
     }
     if (doneAny) loadCandidates(true);
   }
-  // 実行中・待機中の課題がある間は候補表示を追従し、全て完了したら強制リロード（新判定を取得）
-  const anyActive = ((status.chatWaiting || []).length + (status.chatBusy || []).length) > 0;
-  if (anyActive) loadCandidates(false);
+  // 実行中・待機中の課題がある間は候補表示を追従し、全て完了したら強制リロード（新判定を取得）。
+  // dispatcher 直接起動セッションは chatBusy/chatWaiting に載らないため、
+  // state.tasks の running/inflight/chatDelegated も「アクティブ」として扱う。
+  // またタスク状態のシグネチャが変化したら即座にリロードし、表示遅延を防ぐ
+  const taskSig = (status.tasks || []).map((t) =>
+    [t.key, t.status, t.phase, t.inflight, t.chatDelegated].join(':')).join('|');
+  const anyActive = ((status.chatWaiting || []).length + (status.chatBusy || []).length) > 0
+    || (status.tasks || []).some((t) => t.status === 'running' || t.inflight || t.chatDelegated);
+  if (taskSig !== lastTaskSig || anyActive) loadCandidates(false);
   else if (lastAnyActive) loadCandidates(true);
+  lastTaskSig = taskSig;
   lastAnyActive = anyActive;
   fillCfgForm();
   flags.autoDiscover = !!status.config.autoDiscover;
@@ -1462,16 +1855,16 @@ async function refresh() {
   renderFlag('autoTrigger');
   renderFlag('autoPr');
   document.getElementById('cfg').innerHTML =
-    '<dt>ポーリング間隔</dt><dd>' + c.pollIntervalSec + 's（候補キャッシュ ' + c.candidateCacheSec + 's）</dd>' +
+    '<dt>' + t('ポーリング間隔') + '</dt><dd>' + c.pollIntervalSec + 's（cache ' + c.candidateCacheSec + 's）</dd>' +
     '<dt>autoTrigger</dt><dd>' + c.autoTrigger +
       (c.autoTrigger ? '（起点: ' + (c.autoTriggerSince || status.deployedAt || '-') + '）' : '') + '</dd>' +
       '<dt>autoCategory</dt><dd>' + esc(c.autoCategory ?? 'review') + '</dd>' +
       '<dt>maxAutoRisk</dt><dd>' + esc(c.maxAutoRisk ?? 'medium') + '</dd>' +
     '<dt>permissionMode</dt><dd>' + c.permissionMode + '</dd>' +
-    '<dt>同時起動(評価/対応/PR)</dt><dd>' + (c.maxConcurrentAssess ?? c.maxConcurrent) +
+    '<dt>' + t('同時起動(評価/対応/PR)') + '</dt><dd>' + (c.maxConcurrentAssess ?? c.maxConcurrent) +
       ' / ' + (c.maxConcurrentImpl ?? c.maxConcurrent) +
       ' / ' + (c.maxConcurrentPr ?? c.maxConcurrentImpl ?? c.maxConcurrent) + '</dd>' +
-    '<dt>監視リポジトリ</dt><dd>' + c.repos.map(r =>
+    '<dt>' + t('監視リポジトリ') + '</dt><dd>' + c.repos.map(r =>
       '<a href="https://github.com/' + esc(r) + '" target="_blank" rel="noopener">' +
       esc(r) + '</a>').join('<br>') + '</dd>';
 
@@ -1480,7 +1873,7 @@ async function refresh() {
     '<tr><td>' + esc(t.key) + '</td><td class="st-' + esc(t.status || '') + '">' +
     esc(t.status || '-') + '</td>' +
     '<td title="' + esc(t.assess?.reason || t.assess?.error || '') + '">' +
-      (t.assess?.error ? '<span class="jd jd-err">評価失敗</span>'
+      (t.assess?.error ? '<span class="jd jd-err">' + tr('評価失敗') + '</span>'
         : t.assess ? esc(t.assess.category || t.assess.feasible || '?') +
         '/' + esc(t.assess.risk || '?') : '-') + '</td>' +
     '<td>' + fmt(t.startedAt) + '</td><td>' +
@@ -1488,19 +1881,19 @@ async function refresh() {
     '<td>' + esc(t.engineUsed || t.engine || '') + '</td>' +
     '<td>' + ((t.status === 'failed' || t.status === 'needs-review' || t.status === 'rejected')
       && !manualSet.has(t.key)
-      ? '<button class="mini" onclick="dispatch(\'' + esc(t.key) + '\')">再実行</button>' : '') +
+      ? '<button class="mini" onclick="dispatch(\'' + esc(t.key) + '\')">' + tr('再実行') + '</button>' : '') +
     '</td></tr>').join('') ||
-    '<tr><td colspan="8" style="color:#6b7280">履歴なし</td></tr>';
+    '<tr><td colspan="8" style="color:#6b7280">' + tr('履歴なし') + '</td></tr>';
 
   const lg = await (await fetch(API + (logKey
     ? '/api/tasklog?key=' + encodeURIComponent(logKey) + '&n=150'
     : '/api/log?n=150'))).json();
   document.getElementById('log-title').textContent = logKey
-    ? 'セッションログ: ' + logKey + (lg.file ? ' (' + lg.file + ')' : '（ログ未生成）')
-    : 'dispatcher.log（末尾）';
+    ? t('セッションログ: ') + logKey + (lg.file ? ' (' + lg.file + ')' : ' ' + t('（ログ未生成）'))
+    : t('dispatcher.log（末尾）');
   const pre = document.getElementById('log');
   const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-  pre.textContent = lg.log || '(ログなし)';
+  pre.textContent = lg.log || t('(ログなし)');
   if (atBottom || !pre.textContent) pre.scrollTop = pre.scrollHeight;
 }
 
@@ -1519,6 +1912,9 @@ async function loadCandidates(force) {
         ? '<span style="color:#15803d">対応自動 ON：ポーリングで順次起動</span>'
         : '<span style="color:#b45309">対応自動 OFF：起動は個別ボタン</span>');
     const list = j.candidates || [];
+    // dispatcher が自動起動した実行中課題を候補側で検出したらポーリングを開始
+    // （常時ポーリングはしないため、気付きは候補一覧の更新周期に従う）
+    if (list.some((c) => c.phase || c.inflight || c.chatDelegated || c.runningLabel)) ensurePolling();
     // 監視リポジトリごとにグルーピング（config の並び順を維持）
     const order = (status?.config?.repos) ||
       [...new Set(list.map(c => c.key.split(' ')[0]))];
@@ -1988,7 +2384,7 @@ function renderCandBody() {
       esc(repo) + '</a>' +
       '<span class="cnt' + (filtered.length ? '' : ' zero') + '">' +
       filtered.length + '/' + items.length + '</span></div>';
-    if (!filtered.length) return head + '<div class="repo-empty">候補なし</div>';
+    if (!filtered.length) return head + '<div class="repo-empty">' + tr('候補なし') + '</div>';
     const rows = filtered.map(c => {
       const chatPh = (status.chatBusy || []).find((l) => l.startsWith(c.key + ' '));
       const localPh = [...localBusy.keys()].find((l) => l.startsWith(c.key + ' '));
@@ -1998,7 +2394,8 @@ function renderCandBody() {
         (status.chatWaiting || []).includes(c.key + ' pr') ||
         localWait.has(c.key + ' impl') || localWait.has(c.key + ' pr');
       const chatQueued = quedAssess || quedImpl;
-      const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key) || !!chatPh || !!localPh || chatQueued;
+      const busy = c.runningLabel || manual.has(c.key) || manual.has('assess:' + c.key) || !!chatPh || !!localPh || chatQueued
+        || !!(c.phase || c.inflight || c.chatDelegated);
       const a = c.assess;
       const rowBg = (chatPh || localPh) ? ' style="background:#fef3e2"' :
         chatQueued ? ' style="background:#eef1f5;color:#94a3b8"' :
@@ -2018,36 +2415,43 @@ function renderCandBody() {
         high: 'risk=high: 高リスク（破壊的操作・機密・注入等）。自動実装の上限超過',
       };
       const judge = a?.error
-        ? '<span class="jd jd-err" title="' + esc(a.error) + '">評価失敗</span>' +
+        ? '<span class="jd jd-err" title="' + esc(a.error) + '">' + tr('評価失敗') + '</span>' +
           '<button class="mini" style="margin-left:4px" onclick="detail(\'' +
-          esc(c.key) + '\')">詳細</button>'
+          esc(c.key) + '\')">' + tr('詳細') + '</button>'
         : a
         ? '<span class="jd jd-' + esc(a.category || '?') + '">' +
           esc(a.category || '?') + '/' + esc(a.risk || '?') + '</span>' +
           '<button class="mini" style="margin-left:4px" onclick="detail(\'' +
-          esc(c.key) + '\')">詳細</button>'
+          esc(c.key) + '\')">' + tr('詳細') + '</button>'
         : '-';
-      const assessCell = ph?.endsWith(' assess') ? badge('#b45309', '評価中')
-        : quedAssess ? badge('#6b7280', '待機中')
+      // 実行中フェーズ: チャット経路(ph)に加え、dispatcher 直接起動の devin セッション
+      // （state の phase/inflight/chatDelegated）も統一的に判定する。
+      // verify=再検証 / impl=対応 / assess=評価
+      const runKind = ph?.endsWith(' pr') || c.phase === 'verify' || c.inflight === 'pr' || c.chatDelegated === 'verify' ? 'verify'
+        : ph?.endsWith(' impl') || c.phase === 'impl' || c.inflight === 'impl' || c.chatDelegated === 'impl' ? 'impl'
+        : ph?.endsWith(' assess') || c.phase === 'assess' || c.inflight === 'assess' ? 'assess' : null;
+      const assessCell = runKind === 'assess' ? badge('#b45309', tr('評価中'))
+        : quedAssess ? badge('#6b7280', tr('待機中'))
         : '<button class="mini" ' + (busy ? 'disabled' : '') +
-          ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? '再評価' : '評価') + '</button>';
+          ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? tr('再評価') : tr('評価')) + '</button>';
       const prM = c.openPr ? String(c.openPr).match(/^(\S+)\s+pr#(\d+)$/) : null;
       const crM = c.createdPr ? String(c.createdPr).match(/^(\S+)\s+pr#(\d+)$/) : null;
       const remPr = prM || crM;
-      const implCell = (ph?.endsWith(' impl') || ph?.endsWith(' pr')) ? badge('#b45309', c.verify ? '再検証中' : '対応中')
-        : quedImpl ? badge('#6b7280', '待機中')
+      const implCell = runKind === 'verify' ? badge('#b45309', tr('再検証中'))
+        : runKind === 'impl' ? badge('#b45309', tr('対応中'))
+        : quedImpl ? badge('#6b7280', tr('待機中'))
         : prM
           ? '<a class="badge" style="background:#6b7280;color:#fff;text-decoration:none" ' +
             'href="https://github.com/' + esc(prM[1]) + '/pull/' + prM[2] +
             '" target="_blank" rel="noopener" title="対応は PR #' + prM[2] +
-            ' へ移行しました（PR一覧で継続中）">PR中#' + prM[2] + '</a>'
+            ' へ移行しました（PR一覧で継続中）">' + tr('PR中#') + prM[2] + '</a>'
         : (c.engineImpl ?? c.engine) === 'api'
-          ? '<span style="font-size:11px;color:#9ca3af" title="api エンジンは評価専用のため対応を起動できません">評価専用(api)</span>'
+          ? '<span style="font-size:11px;color:#9ca3af" title="api エンジンは評価専用のため対応を起動できません">' + tr('評価専用(api)') + '</span>'
           : c.verify
             ? '<button class="mini primary" ' + (busy ? 'disabled' : '') +
-              ' onclick="dispatch(\'' + esc(c.key) + '\', true)">再検証</button>'
+              ' onclick="dispatch(\'' + esc(c.key) + '\', true)">' + tr('再検証') + '</button>'
             : '<button class="mini primary" ' + (busy ? 'disabled' : '') +
-              ' onclick="dispatch(\'' + esc(c.key) + '\')">対応</button>';
+              ' onclick="dispatch(\'' + esc(c.key) + '\')">' + tr('対応') + '</button>';
       return '<tr' + rowBg + '><td><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">' +
         (c.type === 'pr'
@@ -2057,11 +2461,11 @@ function renderCandBody() {
       '<td style="white-space:normal;min-width:220px;max-width:560px;word-break:break-all"><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener">' + esc(c.title) + '</a></td>' +
       '<td class="' + (c.trigger === 'auto-new' || c.trigger === 'impl-done' ? 'trig-auto' : 'trig-label') + '">' +
-        (c.trigger === 'auto-new' ? '自動(新規)' : c.trigger === 'impl-done' ? '処理済み(要再検証)' : 'devin ラベル') + '</td>' +
+        (c.trigger === 'auto-new' ? tr('自動(新規)') : c.trigger === 'impl-done' ? tr('処理済み(要再検証)') : tr('devin ラベル')) + '</td>' +
       '<td>' + implCell + '</td>' +
       '<td>' + judge + '</td>' +
       '<td>' + fmt(c.createdAt) + '</td>' +
-      '<td>' + (c.runningLabel ? 'running ラベル付き(起動中/取残し)' :
+      '<td>' + (c.runningLabel ? tr('running ラベル付き(起動中/取残し)') :
                 c.state ? 'state: ' + c.state : '') +
         (remPr ? ' → <a href="https://github.com/' + esc(remPr[1]) + '/pull/' + remPr[2] +
           '" target="_blank" rel="noopener">pr#' + remPr[2] + '</a>'
@@ -2069,16 +2473,16 @@ function renderCandBody() {
         '</td></tr>';
     }).join('');
     return head + '<table><thead><tr>' +
-      '<th title="課題の種別（issue / PR）と番号">種別</th>' +
-      '<th title="評価: チャットで対応可否だけを評価（変更しない）">操作</th>' +
-      '<th title="GitHub の課題タイトル（クリックで GitHub を開く）">タイトル</th>' +
-      '<th title="候補になった経路&#10;自動(新規): 起点以降に作成された未処理課題&#10;devin ラベル: 明示的にラベル指定">トリガー</th>' +
-      '<th title="対応: 実装の実行指示を送信&#10;PR中#N: 対応が PR へ移行し PR 側で継続中（クリックで PR を開く）">対応</th>' +
-      '<th title="評価セッションの判定結果&#10;auto: 即対応可 / review: 検討の上対応 / human: 人的判断必須（ユーザー選択）/ reject: 不可・危険&#10;risk: low/medium/high&#10;ホバーで理由も表示">判定</th>' +
-      '<th title="課題が作成された日時">作成日時</th>' +
-      '<th title="実行中ラベル・過去の処理状態などの補足">備考</th>' +
+      '<th title="課題の種別（issue / PR）と番号">' + tr('種別') + '</th>' +
+      '<th title="評価: チャットで対応可否だけを評価（変更しない）">' + tr('操作') + '</th>' +
+      '<th title="GitHub の課題タイトル（クリックで GitHub を開く）">' + tr('タイトル') + '</th>' +
+      '<th title="候補になった経路&#10;自動(新規): 起点以降に作成された未処理課題&#10;devin ラベル: 明示的にラベル指定">' + tr('トリガー') + '</th>' +
+      '<th title="対応: 実装の実行指示を送信&#10;PR中#N: 対応が PR へ移行し PR 側で継続中（クリックで PR を開く）">' + tr('対応') + '</th>' +
+      '<th title="評価セッションの判定結果&#10;auto: 即対応可 / review: 検討の上対応 / human: 人的判断必須（ユーザー選択）/ reject: 不可・危険&#10;risk: low/medium/high&#10;ホバーで理由も表示">' + tr('判定') + '</th>' +
+      '<th title="課題が作成された日時">' + tr('作成日時') + '</th>' +
+      '<th title="実行中ラベル・過去の処理状態などの補足">' + tr('備考') + '</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table>';
-    }).join('') || '<div class="repo-empty">監視リポジトリなし</div>';
+    }).join('') || '<div class="repo-empty">' + tr('監視リポジトリなし') + '</div>';
   document.getElementById('cands').innerHTML = renderEntries('issue');
   const prsEl = document.getElementById('prs');
   if (prsEl) prsEl.innerHTML = renderEntries('pr');
@@ -2087,6 +2491,23 @@ function renderCandBody() {
 function esc(s) { return String(s).replace(/[&<>"]/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmt(s) { return s ? String(s).replace('T',' ').slice(0,19) : '-'; }
+
+// 常時ポーリングはしない。ユーザー操作・候補取得でアクティブを検出した時だけ
+// 3秒周期で refresh() を回し、実行中・待機中・ローカル保留が全て無くなったら自動停止する
+let pollIv = null;
+function anyActivity() {
+  return ((status?.chatWaiting?.length ?? 0) + (status?.chatBusy?.length ?? 0)) > 0
+    || localWait.size > 0 || localBusy.size > 0
+    || (status?.tasks || []).some((t) => t.status === 'running' || t.inflight || t.chatDelegated);
+}
+function ensurePolling() {
+  if (pollIv) return;
+  pollIv = setInterval(async () => {
+    await refresh();
+    if (document.getElementById('tab-chat').classList.contains('active')) { loadSessions(); loadChat(); }
+    if (!anyActivity()) { clearInterval(pollIv); pollIv = null; }
+  }, 3000);
+}
 
 // 候補一覧の自動更新周期（localStorage に永続化、既定60秒）
 let candTimer = null;
@@ -2103,13 +2524,22 @@ function setCandInt() {
   setCandInt();
 })();
 
+// 言語選択肢を生成し現在値を反映 → 初回適用
+{
+  const ls = document.getElementById('lang-sel');
+  ls.innerHTML = LANGS.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
+  ls.value = LANG;
+  applyI18n();
+}
 document.getElementById('docs-toc').src = API + '/docs/toc.html';
 document.getElementById('docs-frame').src = API + '/docs/index.html';
 refresh();
 loadSkills();
 loadSessions();
 loadChat();
-setInterval(() => { refresh(); if (document.getElementById('tab-chat').classList.contains('active')) { loadSessions(); loadChat(); } }, 3000);
+// 常時ポーリングはしない。アクション・候補取得でアクティブを検出した時だけ
+// ensurePolling() が 3秒周期を開始し、全て完了したら自動停止する
+ensurePolling();
 loadCandidates(false);
 </script>
 </body>

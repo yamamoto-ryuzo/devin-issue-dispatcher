@@ -44,6 +44,12 @@ const call = (name, args) => {
     if (!it) return { error: 'not found: ' + args.key };
     it.status = 'in-progress'; it.claimedAt = new Date().toISOString();
     save(QUEUE, q);
+    // dispatcher の自動起動と二重化しないよう飛行マーカーを立てる
+    // （解除は queue_done または dispatcher の滞留回収が行う）
+    const st = load(STATE, { tasks: {} });
+    st.tasks[it.key] = { ...(st.tasks[it.key] ?? {}),
+      status: 'running', inflight: it.mode, inflightAt: it.claimedAt };
+    save(STATE, st);
     const common =
       `GitHub ${it.type} #${it.number} (${it.repo.github}):\n` +
       `- リポジトリ: ${it.repo.path}\n- タイトル: ${it.title}\n- URL: ${it.url}\n` +
@@ -74,6 +80,9 @@ const call = (name, args) => {
     st.tasks[args.key] = { ...(st.tasks[args.key] ?? {}), status: args.status,
       note: args.note ?? '', finishedAt: new Date().toISOString(), engine: 'ide',
       ...(assess?.category ? { assess, assessedAt: new Date().toISOString() } : {}) };
+    delete st.tasks[args.key].inflight;
+    delete st.tasks[args.key].inflightAt;
+    st.tasks[args.key].inflightClearedAt = new Date().toISOString();
     save(STATE, st);
     return { ok: true, removed: !!it };
   }

@@ -3,6 +3,7 @@ state.json
 candidates.json
 issues.json
 desired.json
+chats.json
 kill-requests.json
 steer-requests.json
 login.bat
