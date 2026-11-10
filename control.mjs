@@ -251,14 +251,14 @@ function persistChats() {
   writeFileSync(tmp, JSON.stringify(o, null, 2));
   renameSync(tmp, CHATS_PATH);
 }
-// 空きセッションはエンジン一致時のみ再利用（設定切替後に旧エンジンへ
-// 誤送信しない）。不一致なら新規セッションを作る
+// 空きセッションはエンジン・auto 区分一致時のみ再利用（設定切替後に旧エンジンへ
+// 誤送信しない・人力チャットを委譲タスクへ転用して autoCloseChats の削除対象に
+// しない）。不一致なら新規セッションを作る
 function pickChatId(label, eng = 'devin', auto = false) {
   for (const [id, s] of chats) {
-    if (!s.chat.busy && (s.chat.engine ?? 'devin') === eng) {
-      if (label && (s.label !== label || !!s.auto !== auto)) {
-        s.label = label; s.auto = auto; persistChats();
-      }
+    if (!s.chat.busy && (s.chat.engine ?? 'devin') === eng
+        && !!s.auto === auto) {
+      if (label && s.label !== label) { s.label = label; persistChats(); }
       return id;
     }
   }
