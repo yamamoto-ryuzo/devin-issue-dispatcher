@@ -24,6 +24,7 @@
 import { createServer } from 'node:http';
 import { engineSendCore, injectExtraPrompt, ASSESS_RE, SPLIT_RE, skillEnabled,
          mcpServersForSession, apiAdapter, apiListModels } from './engine.mjs';
+import { buildTaskPrompt } from './task-prompts.mjs';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
@@ -572,73 +573,18 @@ setInterval(() => {
   })();
 }, 3000).unref?.();
 
+// 課題プロンプトの本文生成は task-prompts.mjs に集約（dispatcher と同一正本）。
+// ここでは課題キーの解決と issue ストアからの詳細補完のみを行う
 function taskPrompt(key, mode, skillFile) {
   const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
   if (!m) return null;
   const repo = config.repos?.find((r) => r.github === m[1]);
   if (!repo) return { error: 'repo not monitored: ' + m[1] };
   const it = readIssueStore(ISSUES_PATH).issues?.[key] ?? {};
-  let policy = '';
-  for (const f of [m[1].split('/')[1], '_default']) {
-    try { policy = readFileSync(join(ROOT, 'prompts', f + '.md'), 'utf8').trim(); break; }
-    catch { /* next */ }
-  }
-  // skills/: モード別・完了時のカスタム指示を注入（_all/_assess/_impl/_split/_done.md）
-  // skillFile 指定時はモード既定ではなくそのファイルを使う（パス走査防止の検証付き）
-  const modeSkill = (skillFile && /^[\w-]+\.md$/.test(skillFile)) ? skillFile
-    : (mode !== 'assess' && mode !== 'split' && m[2] === 'pr') ? '_pr.md' : `_${mode}.md`;
-  // config.plugins の type:'skill' エントリで無効化されたスキルは注入しない
-  const skillFiles = ['_all.md', modeSkill, '_done.md']
-    .filter((f) => skillEnabled(config, f));
-  const skills = skillFiles
-    .map((f) => { try { return readFileSync(join(ROOT, 'skills', f), 'utf8').trim(); } catch { return ''; } })
-    .filter(Boolean).join('\n\n');
-  const head = `GitHub ${m[2]} #${m[3]} (${m[1]}):\n` +
-    `- リポジトリ: ${repo.path}\n- タイトル: ${it.title ?? ''}\n- URL: ${it.url ?? ''}\n` +
-    `- 本文:\n${it.body || '(本文なし)'}\n\n## リポジトリ指針\n${policy}\n\n` +
-    (skills ? `## 追加スキル指示\n${skills}\n\n` : '');
-  return { key, text: mode === 'assess'
-    ? head + `この課題の対応可否を【評価のみ】してください（コード変更・コミット禁止）。\n` +
-      `最後に <!--devin-assess\\n{"feasible":"yes|needs-human|no","risk":"low|medium|high",` +
-      `"category":"auto|review|human|reject","partial":true|false,"reason":"理由","plan":"方針"}` +
-      `\\ndevin-assess--> ブロックを出力。\n` +
-      `partial は「要求の一部が既に実装済み・分割可能な残作業がある」場合のみ true。`
-    : mode === 'split'
-    ? head + `この課題について、現在のリポジトリ状態を確認し、実装済みの部分と未実装の部分を切り分けてください（コード変更はしない）。\n` +
-      `1. 実装状況を調査（git log / コードの現状 / PR履歴）\n` +
-      `2. 元 issue を実装済み扱いにする: gh issue edit ${m[3]} -R ${m[1]} --add-label devin:done し、\n` +
-      `   「実装済み部分は完了として切り分け。残りは新規 issue #N に移行」のコメントを投稿\n` +
-      `3. 未実装の残り作業をまとめた新規 issue を gh issue create -R ${m[1]} で作成\n` +
-      `   （タイトル先頭に [残課題]、本文に元 issue #${m[3]} への参照と残作業の箇条書き）\n` +
-      `4. 最後に <!--split\\n{"newKey":"${m[1]} issue#<新issue番号>"}\\nsplit--> ブロックを出力`
-    : head + (m[2] === 'pr'
-        // 手動作成の PR 課題（旧経路）
-        ? `gh pr checkout ${m[3]} -R ${m[1]} で対象 PR のブランチへ移り、レビュー指摘・CI 失敗等へ対応→検証→push。\n` +
-          `新規ブランチ・新規 PR の作成は禁止。main直push・force push禁止。\n` +
-          `検証が NG の場合は修正→再検証のループを最大 ${config.implLoopMax ?? 5} 回まで行う。\n` +
-          `上限に達しても完了しない場合は「対応困難」として理由と現状を PR コメントで報告し、ユーザーへ対応を依頼する。\n`
-        : mode === 'pr'
-        // AI:impl-done 付き issue の再検証（PR処理=リモートへのコミット）
-        ? `この課題は実装済み（AI:impl-done フラグ付き）です。既定ブランチ上の未 push コミットを別視点で再検証してください。\n` +
-          `1. git status と git log origin/<既定ブランチ>..HEAD --oneline で未 push コミットを確認（空なら他課題が一括 push 済み。手順3へ）\n` +
-          `2. 完了時スキル（_done）の確認項目を違う視点で、この課題の変更のみ再検証\n` +
-          `3. 混在チェック: 未 push コミットの課題番号（(#N)等）を特定し gh issue view で確認。` +
-          `open の監視対象 issue への帰属のみは混在とみなさず push 可（他課題の検証は各課題が行う）。` +
-          `closed・devin:rejected 課題のコミットは断念済み作業として git revert --no-edit で除去してから push` +
-          `（revert 衝突時は push せず報告。既存の "Revert ..." コミットは掃除済み記録として帰属確認をスキップ）。` +
-          `課題番号を特定できないコミットがあれば push せず報告\n` +
-          `4. OK → git push でリモートへ反映（他課題コミットも一括 push される旨をコメント明記）→ 検証内容をコメント → ` +
-          `gh issue edit ${m[3]} -R ${m[1]} --add-label devin:done --remove-label AI:impl-done → ` +
-          `gh issue close ${m[3]} -R ${m[1]}\n` +
-          `   NG → git 操作はしない（混在時の reset は他課題コミットを破壊するため禁止）→ ` +
-          `gh issue edit ${m[3]} -R ${m[1]} --remove-label AI:impl-done → NG 内容をコメント（課題は実装キューへ戻る）\n` +
-          `コード修正・ブランチ/PR 作成・force push・git reset は禁止` +
-          `（断念コミット除去の git revert のみ新規コミットとして許可）。\n`
-        : `既定ブランチで git pull --ff-only してから実装→検証→ローカルコミット（push 禁止。コミットはこの課題の変更のみ）→\n` +
-          `gh issue edit ${m[3]} -R ${m[1]} --add-label AI:impl-done で処理済みフラグを立て、実施内容を issue コメントで報告。\n` +
-          `ブランチ作成・PR 作成・push・force push は禁止。\n` +
-          `検証が NG の場合は修正→再検証のループを最大 ${config.implLoopMax ?? 5} 回まで行う。\n` +
-          `上限に達しても完了しない場合は「対応困難」として理由と現状を issue コメントで報告し、ユーザーへ対応を依頼する。\n`) };
+  const task = { repo, type: m[2], number: +m[3],
+    title: it.title ?? '', body: it.body ?? '', url: it.url ?? '' };
+  return { key, text: buildTaskPrompt({ ROOT, config, task, mode, skillFile,
+    implLoopMax: config.implLoopMax ?? 5 }) };
 }
 
 const readBody = (req, limit = 64 * 1024) => new Promise((resolve, reject) => {
@@ -762,85 +708,55 @@ function watchAssess(key, ch) {
     clearInterval(iv);
     assessWatchers.delete(key);
     clearTimeout(to);
-    // 直近の agent メッセージ群（最大8件）から判定・split ブロックを横断検出
-    let verdictDone = false, splitDone = false, scanned = 0;
-    let reused = false; // split 検出で同一セッションを次キーの評価へ再利用するか
+    // 直近の agent メッセージ群（最大8件）から判定ブロックを横断検出
+    // （<!--split--> は切り分けセッション専用の出力で、評価セッションは出さない）
+    let scanned = 0;
     for (let i = ch.messages.length - 1; i >= 0 && scanned < 8; i--) {
       const msg = ch.messages[i];
       if (msg.role !== 'agent') continue;
       scanned++;
-      if (!verdictDone) {
-        const m = msg.text.match(ASSESS_RE);
-        if (m) {
-          verdictDone = true;
-          try {
-            const v = JSON.parse(m[1].trim());
-            const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
-            st.tasks[key] = { ...(st.tasks[key] ?? {}),
-              assess: v, assessedAt: new Date().toISOString(), engine: 'chat' };
-            // 正常な判定が得られたら過去のエンジン障害記録を整理し、
-            // failed-by-engine が残っていれば解除して自動連鎖を解放する
-            if (st.tasks[key].status === 'failed' && st.tasks[key].engineError) {
-              delete st.tasks[key].status;
-              delete st.tasks[key].failedAt;
-            }
-            delete st.tasks[key].engineError;
-            delete st.tasks[key].engineErrorAt;
-            // dispatcher 委譲の自動評価が立てた inflight マーカーを解除（多重キュー抑止の解除）
-            // 解除時刻を残し、dispatcher がメモリ上のマーカーへ新しさで追従できるようにする
-            delete st.tasks[key].inflight;
-            st.tasks[key].inflightClearedAt = new Date().toISOString();
-            // 自動連鎖: issue課題は autoTrigger、pr課題は autoPr が ON のとき
-            // 判定・リスクが自動処理範囲内なら対応（impl）へ投入。
-            // dispatcher が同一課題を別途自動起動しないよう、同一書き込みで
-            // 飛行マーカーを立ててから待機キューへ入れる
-            const autoOk = key.includes(' pr#')
-              ? (config.autoPr ?? false) : (config.autoTrigger ?? false);
-            const chainImpl = autoOk && catAllowed(v.category) && riskAllowed(v.risk) &&
-                !['running', 'done', 'failed', 'needs-review', 'rejected'].includes(st.tasks[key]?.status) &&
-                !st.tasks[key]?.chatDelegated &&
-                !chatWait.some((w) => w.key === key);
-            if (chainImpl) {
-              st.tasks[key].inflight = 'impl';
-              st.tasks[key].inflightAt = new Date().toISOString();
-            }
-            writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
-            if (chainImpl) chatWait.push({ key, mode: 'impl' });
-          } catch { /* malformed JSON */ }
+      const m = msg.text.match(ASSESS_RE);
+      if (!m) continue;
+      try {
+        const v = JSON.parse(m[1].trim());
+        const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+        st.tasks[key] = { ...(st.tasks[key] ?? {}),
+          assess: v, assessedAt: new Date().toISOString(), engine: 'chat' };
+        // 正常な判定が得られたら過去のエンジン障害記録を整理し、
+        // failed-by-engine が残っていれば解除して自動連鎖を解放する
+        if (st.tasks[key].status === 'failed' && st.tasks[key].engineError) {
+          delete st.tasks[key].status;
+          delete st.tasks[key].failedAt;
         }
-      }
-      if (!splitDone) {
-        const sp = msg.text.match(SPLIT_RE);
-        if (sp) {
-          splitDone = true;
-          try {
-            const { newKey } = JSON.parse(sp[1].trim());
-            if (newKey) {
-              const st2 = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
-              st2.tasks[key] = { ...(st2.tasks[key] ?? {}),
-                splitTo: newKey, splitAt: new Date().toISOString() };
-              writeFileSync(STATE_PATH, JSON.stringify(st2, null, 2));
-              const p = taskPrompt(newKey, 'assess');
-              if (p && !p.error) {
-                reused = true;
-                // 同一セッションで次キーの評価を続けるためラベルを追従させる
-                // （自動クローズの `<key> ` 前方一致で誤畳みされないようにする）
-                for (const s of chats.values()) {
-                  if (s.chat === ch) {
-                    s.label = newKey + ' assess'; persistChats(); break;
-                  }
-                }
-                ch.send(p.text).then(() => watchAssess(newKey, ch));
-              }
-            }
-          } catch { /* noop */ }
+        delete st.tasks[key].engineError;
+        delete st.tasks[key].engineErrorAt;
+        // dispatcher 委譲の自動評価が立てた inflight マーカーを解除（多重キュー抑止の解除）
+        // 解除時刻を残し、dispatcher がメモリ上のマーカーへ新しさで追従できるようにする
+        delete st.tasks[key].inflight;
+        st.tasks[key].inflightClearedAt = new Date().toISOString();
+        // 自動連鎖: issue課題は autoTrigger、pr課題は autoPr が ON のとき
+        // 判定・リスクが自動処理範囲内なら次セッションへ投入。
+        // partial=true はまず切り分け（残作業は分割先 issue が引き継ぐ。
+        // splitAt は多重切り分け防止の試行マーカー）
+        const autoOk = key.includes(' pr#')
+          ? (config.autoPr ?? false) : (config.autoTrigger ?? false);
+        const chainable = autoOk && catAllowed(v.category) && riskAllowed(v.risk) &&
+            !['running', 'done', 'failed', 'needs-review', 'rejected', 'closed'].includes(st.tasks[key]?.status) &&
+            !st.tasks[key]?.chatDelegated &&
+            !chatWait.some((w) => w.key === key);
+        const partial = v.partial === true || v.partial === 'true';
+        const chainMode = partial && !st.tasks[key]?.splitAt ? 'split' : 'impl';
+        if (chainable) {
+          st.tasks[key].inflight = chainMode;
+          st.tasks[key].inflightAt = new Date().toISOString();
         }
-      }
-      if (verdictDone && splitDone) break;
+        writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+        if (chainable) chatWait.push({ key, mode: chainMode });
+      } catch { /* malformed JSON */ }
+      break;
     }
-    // 評価ターン終了 = 委譲タスクの終端。split 再利用時は残し、それ以外の
-    // 自動生成セッションは畳む
-    if (!reused) closeAutoChatsForKey(key).catch(() => {});
+    // 評価ターン終了 = 委譲タスクの終端。自動生成セッションは畳む
+    closeAutoChatsForKey(key).catch(() => {});
   }, 3000);
   // 30分で強制終了。完了検出前に応答が途絶えた場合は失敗として記録する
   const to = setTimeout(() => {
@@ -855,27 +771,33 @@ function watchSplit(key, ch) {
     if (ch.busy) return;
     clearInterval(iv);
     clearTimeout(to);
+    let blk = null;
     for (let i = ch.messages.length - 1; i >= 0; i--) {
       const msg = ch.messages[i];
       if (msg.role !== 'agent') continue;
       const m = msg.text.match(SPLIT_RE);
       if (!m) continue;
-      try {
-        const { newKey } = JSON.parse(m[1].trim());
-        if (newKey) {
-          const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
-          st.tasks[key] = { ...(st.tasks[key] ?? {}),
-            splitTo: newKey, splitAt: new Date().toISOString() };
-          writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
-          // エンジン非依存に切り分け先を再評価（非 devin の疑似チャットには send が
-          // 無いため dispatchChatTask 経由でエンジン解決・監視へ委ねる）
-          Promise.resolve(dispatchChatTask(newKey, 'assess', null)).catch(() => {});
-        }
-      } catch { /* noop */ }
+      try { blk = JSON.parse(m[1].trim()); } catch { /* noop */ }
       break;
     }
-    // 切り分けターン終了。後続 assess は dispatchChatTask 経由で別セッション
-    // （またはこのセッションのリラベル再利用）へ移るため畳んでよい
+    // 試行マーカー splitAt を記録（多重切り分け防止）し inflight を解除。
+    // ブロック無し・newKey 無し（NG/起票失敗）でも課題を再処理可能に戻す
+    {
+      const now = new Date().toISOString();
+      const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+      st.tasks[key] = { ...(st.tasks[key] ?? {}),
+        splitAt: now, ...(blk?.newKey ? { splitTo: blk.newKey } : {}),
+        inflightClearedAt: now };
+      delete st.tasks[key].inflight;
+      delete st.tasks[key].inflightAt;
+      writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+    }
+    if (blk?.newKey) {
+      // エンジン非依存に切り分け先を再評価（非 devin の疑似チャットには send が
+      // 無いため dispatchChatTask 経由でエンジン解決・監視へ委ねる）
+      Promise.resolve(dispatchChatTask(blk.newKey, 'assess', null)).catch(() => {});
+    }
+    // 切り分けターン終了。後続は dispatchChatTask 経由の別セッションへ移るため畳む
     closeAutoChatsForKey(key).catch(() => {});
   }, 3000);
   const to = setTimeout(() => { clearInterval(iv);
@@ -1472,7 +1394,7 @@ const server = createServer(async (req, res) => {
           if (!a?.category || a.error) continue;
           if (!catAllowed(a.category) || !riskAllowed(a.risk)) continue;
           const s = st[key]?.status;
-          if (s === 'running' || s === 'done' || s === 'needs-review' || s === 'rejected') continue;
+          if (s === 'running' || s === 'done' || s === 'needs-review' || s === 'rejected' || s === 'closed') continue;
           if (chatWait.some((w) => w.key === key)) continue;
           chatWait.push({ key, mode: 'impl' });
           markQueued(key, 'impl');

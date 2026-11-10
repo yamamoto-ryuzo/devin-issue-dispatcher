@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadPolicy } from './task-prompts.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const QUEUE = join(ROOT, 'work-queue.json');
@@ -14,13 +15,8 @@ const STATE = join(ROOT, 'state.json');
 const load = (p, d) => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return d; } };
 const save = (p, v) => writeFileSync(p, JSON.stringify(v, null, 2));
 
-const policy = (github) => {
-  for (const f of [github.split('/')[1], '_default']) {
-    try { return readFileSync(join(ROOT, 'prompts', f + '.md'), 'utf8').trim(); }
-    catch { /* next */ }
-  }
-  return '';
-};
+// リポジトリ指針は task-prompts.mjs の loadPolicy（prompts/<repo>.md → _default.md）を共有
+const policy = (github) => loadPolicy(ROOT, github).text;
 
 const tools = [
   { name: 'queue_list', description: '対応待ちタスク一覧（パネルで「対応」が押された課題）',
@@ -59,7 +55,8 @@ const call = (name, args) => {
       return { task: it, instructions: common +
         `この課題の対応可否を【評価のみ】してください（コード変更・コミット禁止）。\n` +
         `判定は feasible=yes|needs-human|no, risk=low|medium|high,\n` +
-        `category=auto(即対応可)|review(検討の上対応)|human(既存機能と明確に相反・大きな副作用でユーザー判断必須)|reject(破壊的・不能) で、\n` +
+        `category=auto(即対応可)|review(検討の上対応)|human(既存機能と明確に相反・大きな副作用でユーザー判断必須)|reject(破壊的・不能)、\n` +
+        `partial=true(一部実装済みで残作業を分割可の場合のみ)|false で、\n` +
         `完了時に queue_done({key:"${it.key}",status:"needs-review"または"done",\n` +
         `note:"{category|risk|reason}形式のJSON"}) を呼ぶ。` };
     }

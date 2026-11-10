@@ -24,7 +24,10 @@ GitHub Issue/PR を監視し、エージェントが評価・実装・再検証�
 
 ## 処理ライフサイクル（verify の混在ルール）
 
-- 未pushコミットは `(#N)` で課題に帰属させる。open の監視対象 issue への帰属は混在とみなさず一括 push 可
+- **再検証（verify）と push は一体の仕事**: push は verify セッションのみが行い、検証を通っていないコミットはリモートへ公開しない
+- 未pushコミットは `(#N)` で課題に帰属させる。open の監視対象 issue への帰属は混在とみなさず一括 push 可（ただし `devin:needs-review` / `devin:failed` 付きの open 課題は未検証作業のため `git revert` で除去し `git push` で除去をリモートへ反映してから報告し、その課題を close）
 - closed / `devin:rejected` の課題に帰属するコミット = 断念済み作業 → verify が `git revert` で除去してから push
-- 課題番号を特定できないコミット = 未管理の変更 → push せず人間へ報告
-- verify NG は git 操作なしで `AI:impl-done` 除去のみ（fix-forward で実装キューへ自動復帰）。`git reset --hard` は禁止（他課題コミットを破壊する）
+- 課題番号を特定できないコミット = 未管理の変更 → `git revert` で除去し `git push` で除去をリモートへ反映してから報告
+- impl が完了せず終了する時（「対応困難」・実現不可能・判断不能・矛盾指示による中断）は、自分課題の `Issue: #N` コミットを `git revert` で除去し `git push` で除去をリモートへ反映してから報告し、課題を close（この push は断念時の除去目的のみ許可。`AI:impl-done` 付与済みなら除去。未コミットの作業ツリー変更は残す・コメントに明記）
+- verify NG の差し戻しも、自分課題の `Issue: #N` コミットを `git revert` で除去し `git push` で除去をリモートへ反映してから報告（除去を反映しないと差し戻し後の impl が gated で起動しない。`AI:impl-done` 付与済みなら除去。未コミットの作業ツリー変更は残す・コメントに明記）
+- `git reset` は禁止（他課題コミットを破壊する）

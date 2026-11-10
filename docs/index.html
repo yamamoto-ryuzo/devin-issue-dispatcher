@@ -39,7 +39,7 @@
 <tr><td><code>discover.mjs</code></td><td>候補検出・state.json 参照</td></tr>
 <tr><td><code>mcp-server.mjs</code></td><td>Devin IDE チャット向け MCP（queue_claim / queue_done）</td></tr>
 <tr><td><code>acp-chat.mjs</code> / <code>acp-runner.mjs</code></td><td>Devin ACP チャット制御（パネルのチャット・評価・対応セッション）</td></tr>
-<tr><td><code>panel.html</code></td><td>管理パネル UI（単一ファイル・外部依存なし）</td></tr>
+<tr><td><code>panel.html</code></td><td>管理パネル UI（単一ファイル。スキル内 Mermaid 図の描画のみ CDN から遅延ロード・失敗時はソース表示）</td></tr>
 <tr><td><code>skills/_*.md</code></td><td>エージェントへ注入する行動規範（全モード共通 + モード別）</td></tr>
 <tr><td><code>prompts/*.md</code></td><td>リポジトリ固有の対応指針（<code>_default.md</code> が既定）</td></tr>
 <tr><td><code>config.json</code></td><td>設定（監視リポジトリ・同時起動数・フラグ・ループ上限等）</td></tr>
@@ -49,27 +49,38 @@
 <pre class="mermaid">
 flowchart TD
   S0["ステップ0: 課題整理<br/>目的入力 → AI が必要作業を検討<br/>→ Issue 候補化 → 起票"]
-  S0 --> S1["ステップ1: 評価 (assess)"]
-  S1 -->|部分実装あり| SP["split 切り分け<br/>実装済みを done で検証 → 元 issue クローズ<br/>残りは [残課題] 新 issue へ（再帰）"]
-  SP --> S1
-  S1 --> V{"判定 category"}
-  V -->|"auto / review / human"| S2["ステップ2: 対応 (impl)<br/>既定ブランチで実装→ローカルコミット<br/>issue に AI:impl-done 付与"]
-  V -->|reject| X["対応しない"]
-  S2 --> D{"_done で動作確認"}
-  D -->|NG| LP["修正ループ（implLoopMax 回まで）<br/>到達で「対応困難」報告→ユーザー依頼"]
+  S0 --> GT{"起動可否（全セッション共通）<br/>同時起動数上限・repo直列・未pushゲート"}
+  GT -->|"起動条件OK"| S1{"ステップ1: 評価 (assess)<br/>category / risk / partial"}
+  GT -->|"待機"| WT1["【評価待機中】"] -.-> GT
+  S1 -->|"partial=true"| SP["split 切り分け（別セッション）<br/>実装済みを done で検証"]
+  SP -->|検証OK| CLX["【実装困難・クローズ】<br/>元 issue クローズ"]
+  CLX --> NX["[残課題]<br/>新 issue"]
+  NX -.-> S1
+  SP -->|検証NG・課題に戻す| V
+  S1 -->|"partial=false"| V{"判定 category"}
+  V -->|"auto / review"| GT2{"起動可否"} -->|"起動"| S2["【評価完了→実装完了・検証前】<br/>ステップ2: 対応 (impl)<br/>既定ブランチで実装→ローカルコミット<br/>issue に AI:impl-done 付与"]
+  V -->|"human"| H["【要人間確認】（open）<br/>ユーザーが判定を選択するまで進めない"]
+  H -->|"ユーザー判断で close"| HC["【人力・クローズ】<br/>issue close"]
+  H -->|"ユーザー判断で対応"| S2
+  V -->|"reject / risk 超過"| X["【対応困難・クローズ】<br/>（devin:rejected + close）"]
+  S2 --> D{"【実装中】<br/>_done で動作確認"}
+  D -->|NG| LP["【上限到達・クローズ】<br/>修正ループ（implLoopMax 回まで）<br/>到達で自コミットを revert 除去＋push<br/>→「対応困難」報告 → close"]
   LP --> S2
   D -->|OK| FLG["AI:impl-done フラグ検出"]
-  FLG --> S3["ステップ3: PR処理=再検証 (_pr)<br/>未 push コミットを確認 → 違う視点で再検証"]
-  S3 --> D2{"_done を「違う視点」で再検証<br/>（自課題の変更のみ）"}
-  D2 -->|OK| AT{"未pushコミットの帰属チェック<br/>（#N → issue 状態）"}
-  AT -->|全て open 課題に帰属| MG["一括 push → devin:done 付与<br/>→ gh issue close"]
-  AT -->|closed/rejected 課題に帰属| RV["git revert で断念作業を除去<br/>→ push → devin:done+close"]
-  AT -->|帰属先を特定できない| BL["push せず人間へ報告"]
-  D2 -->|NG| RO["AI:impl-done 除去＋コメントで差し戻し<br/>（git操作なし → 実装キューへ自動復帰・fix-forward）"]
-  RO --> S2
+  FLG --> GT3{"起動可否"} -->|"起動"| S3["ステップ3: PR処理=再検証＋push 一体 (_pr)"]
+  GT2 -->|"待機"| WT2["【実装待機中】"] -.-> GT2
+  GT3 -->|"待機"| WT3["【検証待機中】"] -.-> GT3
+  S3 --> AT{"【検証中】<br/>未pushコミットの帰属チェック<br/>（#N → issue 状態）"}
+  AT -->|closed/rejected 課題に帰属| RV["git revert で断念作業を除去＋push"]
+  AT -->|帰属不明・needs-review/failed の open 課題| BL["【帰属不明・クローズ】<br/>git revert で除去 → push → 報告<br/>→ 帰属課題 close"]
+  AT -->|open の監視課題のみ<br/>（needs-review/failed 除く）| D2{"_done を「違う視点」で再検証<br/>（自課題の変更のみ）"}
+  RV --> D2
+  D2 -->|OK| MG["【完了】<br/>一括 push → devin:done 付与<br/>→ gh issue close"]
+  D2 -->|NG| RO["【差し戻し】<br/>git revert で自コミット除去＋push<br/>＋ AI:impl-done 除去＋コメント"]
+  RO --> V
 </pre>
 <script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@12.3.0/dist/mermaid.esm.min.mjs';
   mermaid.initialize({ startOnLoad: true });
 </script>
 <p style="font-size:12px;color:#6b7280">図は Mermaid（MIT License）で描画</p>
@@ -171,8 +182,8 @@ flowchart LR
 <tr><th>ファイル</th><th>内容</th></tr>
 <tr><td><code>_all.md</code></td><td>全モード共通: ステップ0〜3の全体フロー・常に守ること</td></tr>
 <tr><td><code>_assess.md</code></td><td>評価のみ。4段階判定・risk・partial・出力ブロック形式</td></tr>
-<tr><td><code>_impl.md</code></td><td>実装。既定ブランチでローカルコミットまで（push 禁止）・AI:impl-done 付与・禁止事項・検証ループ・公開データ機密チェック</td></tr>
-<tr><td><code>_pr.md</code></td><td>再検証。未 push コミットを違う視点で検証 → OK: 帰属チェック後 push＋クローズ（open課題のコミットは一括push可・closed/rejected課題分はrevert除去）/ NG: フラグ剥がしで差し戻し（git操作なし・fix-forward）</td></tr>
+<tr><td><code>_impl.md</code></td><td>実装。既定ブランチでローカルコミットまで（push は断念時の revert 除去のみ許可）・AI:impl-done 付与・禁止事項・検証ループ・公開データ機密チェック</td></tr>
+<tr><td><code>_pr.md</code></td><td>再検証。未 push コミットを違う視点で検証 → OK: 帰属チェック後 push＋クローズ（open課題のコミットは一括push可・needs-review/failed・帰属不明のコミットはrevert除去＋pushして報告・closed/rejected課題分はrevert除去してpush）/ NG: 自コミットをrevert除去＋フラグ剥がしで差し戻し（fix-forward）</td></tr>
 <tr><td><code>_split.md</code></td><td>切り分け。実装済み部分の完了化＋残課題の issue 分割</td></tr>
 <tr><td><code>_done.md</code></td><td>完了確認。実動作検証・スクリーンショット・DOCS 整備・クローズ時コメント</td></tr>
 </table>
@@ -247,7 +258,7 @@ flowchart LR
 
 <h2 id="safety">安全設計</h2>
 <ul>
-<li><b>二段階の検証ゲート</b>: 実装セッションはローカルコミットまで（push 禁止）。リモートへの push は別視点の再検証を通ったコミットのみ。未検証コミットが残るリポジトリでは新規実装を開始しない（混入 push 防止）</li>
+<li><b>二段階の検証ゲート</b>: 実装セッションはローカルコミットまで（push は断念時の revert 除去のみ許可）。リモートへの push は別視点の再検証を通ったコミットのみ。未検証コミットが残るリポジトリでは新規実装を開始しない（混入 push 防止）</li>
 <li><b>CSRF 対策</b>: POST は <code>X-Panel: 1</code> ヘッダ必須・127.0.0.1 バインドのみ</li>
 <li><b>レース対策</b>: state.json の原子的リネーム・children.json の flock による多重起動防止</li>
 <li><b>検証ループ有界</b>: 実装↔検証のループは implLoopMax で打ち止め、対応困難は issue コメントでユーザーへ報告</li>

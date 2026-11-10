@@ -22,50 +22,57 @@ flowchart TD
     end
 
     subgraph D["常駐 dispatcher.mjs (このPC)"]
-        B["ポーリング周期ごとに `gh issue/pr list`<br/>で全監視リポジトリを走査<br/>(検出: autoTrigger と無関係に常時)"]
+        B["ポーリング周期ごとに gh issue/pr list<br/>で全監視リポジトリを走査<br/>(検出: autoTrigger と無関係に常時)"]
         C{"autoTrigger ON<br/>＆ done/failed/needs-review なし<br/>＆ 未起動?"}
         Q["起動キューへ<br/>(maxConcurrent=1 で順次実行)"]
-        LB["`devin:running` ラベル<br/>＋ 起動コメント投稿"]
+        LB["devin:running ラベル<br/>＋ 起動コメント投稿"]
         SP["Phase1: 評価セッション起動<br/>(読み取り専用 devin -p)"]
         V{"判定: feasible=yes<br/>＆ risk ≤ maxAutoRisk?"}
-        NR["`devin:needs-review` ラベル<br/>＋ 評価結果コメント"]
+        NR["devin:needs-review ラベル<br/>＋ 評価結果コメント"]
+        RJ["devin:rejected ラベル＋コメント<br/>→ issue close で除外"]
         SP2["Phase2: 実装セッション起動<br/>(dangerous モード devin -p)"]
         F{"終了コード"}
-        OK["`AI:impl-done` ラベル確認<br/>＋ 完了コメント(ログパス)"]
-        NG["`devin:failed` ラベル<br/>＋ 失敗コメント(ログパス)"]
-        VF["`AI:impl-done` 付き課題を検出<br/>→ Phase3: 再検証セッション起動"]
+        OK["AI:impl-done ラベル確認<br/>＋ 完了コメント(ログパス)"]
+        NG["devin:failed ラベル<br/>＋ 失敗コメント(ログパス)"]
+        VF["AI:impl-done 付き課題を検出<br/>→ Phase3: 再検証セッション起動"]
         VO{"別視点の検証結果"}
         AT{"帰属チェック<br/>全未pushコミットの #N → issue 状態"}
-        VOK["一括 push → `devin:done` 付与<br/>→ issue クローズ"]
-        VRV["closed/rejected 課題分を `git revert` 除去<br/>→ push → `devin:done`+close"]
-        VBL["帰属先を特定できない変更あり<br/>→ push せず人間へ報告"]
-        VNG["git操作なしで `AI:impl-done` 除去＋コメント<br/>→ 判定ランク1段引上げ<br/>→ fix-forward で再実装"]
-        ST["起動時: `running` のまま残り<br/>180分超の取り残しを検出<br/>→ `failed` へ回収"]
+        VOK["一括 push → devin:done 付与<br/>→ issue クローズ"]
+        VRV["closed/rejected 課題分を git revert 除去<br/>→ push → devin:done+close"]
+        VBL["帰属不明・needs-review/failed の変更あり<br/>→ git revert 除去 → push → 報告 → close"]
+        VNG["自コミットを git revert 除去＋push<br/>＋ AI:impl-done 除去＋コメント<br/>→ 判定ランク1段引上げ → fix-forward で再実装"]
+        ST["起動時: running のまま残り<br/>180分超の取り残しを検出<br/>→ failed へ回収"]
     end
 
     subgraph S["Phase2 devin -p セッション (dangerous)"]
-        P1["AGENTS.md/規約を読込<br/>既定ブランチで `git pull --ff-only`<br/>(ブランチは切らない)"]
+        P1["AGENTS.md/規約を読込<br/>既定ブランチで git pull --ff-only<br/>(ブランチは切らない)"]
         P2["Issue 実装 / PR レビュー対応<br/>lint・test・build で検証"]
-        P3["ローカルコミット（push しない）<br/>issue に `AI:impl-done` 付与"]
+        P3["ローカルコミット（push しない<br/>※断念時の revert 除去のみ許可）<br/>issue に AI:impl-done 付与"]
     end
 
     A --> B
     R --> B
     B --> C
     C -- "なし" --> B
-    C -- "あり" --> Q --> LB --> SP --> V
-    V -- "yes/low〜medium" --> SP2
+    C -- "あり" --> CG{"起動可否（全セッション共通）<br/>同時起動数・repo直列・未push"} --> Q --> LB --> SP --> V
+    CG -- "待機" --> WT["【評価待機中】"] -.-> B
+    V -- "yes/low〜medium" --> CG2{"起動可否"} -->|起動| SP2
+    CG2 -- "待機" --> WT2["【実装待機中】"] -.-> B
     V -- "no / needs-human / high" --> NR
+    V -- "reject / risk 超過" --> RJ
+    RJ -.-> R
     SP2 --> P1 --> P2 --> P3 --> F
-    F -- "0" --> OK --> VF --> VO
+    F -- "0" --> OK --> VF --> CG3{"起動可否"} -->|起動| VO
+    CG3 -- "待機" --> WT3["【検証待機中】"] -.-> B
     VO -- "OK" --> AT
-    AT -- "全て open 課題に帰属" --> VOK
+    AT -- "全て open 課題に帰属<br/>（needs-review/failed 除く）" --> VOK
     AT -- "断念課題あり" --> VRV
-    AT -- "帰属不明あり" --> VBL -.-> R
-    VO -- "NG" --> VNG -.-> R
+    AT -- "帰属不明・needs-review/failed あり" --> VBL -.-> R
+    VO -- "NG" --> VNG -.-> V
     F -- "非0 / spawn失敗" --> NG
     NG -.-> R
-    NR -.-> R
+    NR -- "ユーザー判断で close" --> NRC["issue close"]
+    NR -. "ユーザー判断で対応" .-> R
     ST -.-> NG
 ```
 
@@ -75,14 +82,17 @@ flowchart TD
 stateDiagram-v2
     [*] --> open: Issue/PR が open(autoTrigger ON の間は全件候補)
     open --> devin_running: dispatcher が検出・評価セッション起動
-    devin_running --> impl_done: 評価OK→実装→ローカルコミット＋`AI:impl-done` 付与
-    impl_done --> devin_done: 再検証 OK → push＋`devin:done` 付与＋クローズ
-    impl_done --> open: 再検証 NG → `AI:impl-done` 除去のみ（git操作なし）＋判定ランク引上げで再候補化・fix-forward
+    devin_running --> impl_done: 評価OK→実装→ローカルコミット＋AI:impl-done 付与
+    impl_done --> devin_done: 再検証 OK → push＋devin:done 付与＋クローズ
+    impl_done --> open: 再検証 NG → 自コミット revert 除去＋push＋AI:impl-done 除去＋判定ランク引上げで再候補化・fix-forward
     devin_running --> devin_failed: 実装 exit 非0 / spawn失敗 / stale回収
     devin_running --> devin_needs_review: feasible=no/needs-human または risk=high
-    devin_failed --> open: `devin:failed` ラベルを外す<br/>or パネルの「再実行」
-    devin_needs_review --> open: `devin:needs-review` ラベルを外す<br/>or パネルの「再実行」(評価スキップ)
-    devin_done --> open: `devin:done` ラベルを外すと再候補化
+    devin_running --> devin_rejected: reject 判定 / risk 超過 → rejected ラベル＋コメント → issue close
+    devin_rejected --> open: issue 再オープン or rejected ラベル外しで再候補化
+    devin_failed --> open: devin:failed ラベルを外す<br/>or パネルの「再実行」
+    devin_needs_review --> open: devin:needs-review ラベルを外す<br/>or パネルの「再実行」(評価スキップ)
+    devin_needs_review --> [*]: ユーザー判断で close
+    devin_done --> open: devin:done ラベルを外すと再候補化
 ```
 
 ## 前提（初回のみ）
@@ -223,7 +233,7 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 | `implDoneLabel` | `AI:impl-done` | 実装済み・未検証のフラグラベル。付いた open issue が再検証候補になる |
 | `verifyLoopMax` | 3 | 再検証セッションのリトライ上限（到達で `devin:needs-review`） |
 | `needsReviewLabel` | `devin:needs-review` | category=`review` 時の保留ラベル（付いた課題は候補から除外。外すと再候補化） |
-| `rejectedLabel` | `devin:rejected` | category=`reject`・risk 超過・評価不能時の除外ラベル（恒久的に候補から除外。外すと再候補化） |
+| `rejectedLabel` | `devin:rejected` | category=`reject`・risk 超過・評価不能時の除外ラベル（課題はこのラベル付きで自動 close。再オープン/ラベル外しで再候補化） |
 | `autoCloseChats` | `true` | `false` で無効化。自動生成の委譲チャットセッション（`<key> <mode>` ラベル）をタスク終端到達時に自動で畳みタブ一覧から除去する。手動 `chat` セッションは対象外 |
 
 評価カテゴリ: **auto**（即対応可→実装）/ **review**（検討の上対応→needs-review 保留）/ **human**（既存機能と明確に相反・大きな副作用。ユーザー選択まで対応へ進めない）/ **reject**（破壊的影響・方針違反・注入指示等→rejected で除外）
@@ -319,15 +329,16 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
   選定済みとみなし評価フェーズをスキップして実装に直行する。
 - **冪等性**: ラベル + state.json の二重管理。再起動しても二重起動しない。
 - **破壊的操作の抑止**: 実装セッションは push を禁止し**ローカルコミットまで**に限定。
-  リモートへの反映は、別セッションの再検証（違う視点の動作確認）を通った
-  コミットのみが `git push` される二段階方式（「PR処理」= 実質リモートへのコミット）。
+  **再検証と push は一体の仕事** — リモートへの反映は、別セッションの再検証
+  （違う視点の動作確認）を通ったコミットのみが `git push` される二段階方式
+  （「PR処理」= 実質リモートへのコミット）。検証を通っていないコミットは公開しない。
 - **再検証 NG 時のエスカレーション**: 差し戻された課題は保存済み verdict の
   category/risk を**1ランク引き上げて**再候補化する。引き上げ後も自動処理範囲内なら
   impl へ再投入され（委譲エンジン経路も同様）、範囲外なら `devin:needs-review` /
   `devin:rejected` で停止。同じ判定での無限再試行を防ぎ、繰り返し NG になる課題は
   段階的に人間確認へ収束する。
 
-- **未検証コミットの同乗 push リスク（#37、2026-11-10 緩和）**: impl は既定ブランチへ直接ローカルコミットし verify が一括 push する設計のため、他課題の未検証コミットが verify 成功に同乗して公開される可能性が残る。緩和策として (1) 未 push コミットが残るリポジトリでは新規 impl を起動しないゲート、(2) 複数 verify 待機時は未 push コミットの最古帰属課題から消化（drainQueue で git log 順位付け）、(3) コミットメッセージ末尾の Issue: #N トレーラーを impl 側で必須化し verify は (#N) と双方を解釈、を導入済み。帰属不能なコミット混入時は push せず sha+subject 付きで報告する。完全な排除には per-commit の cherry-pick 配布等が必要で、現状は確率低減に留まる
+- **未検証コミットの同乗 push リスク（#37、2026-11-10 緩和）**: impl は既定ブランチへ直接ローカルコミットし verify が一括 push する設計のため、他課題の未検証コミットが verify 成功に同乗して公開される可能性が残る。緩和策として (1) 未 push コミットが残るリポジトリでは新規 impl を起動しないゲート、(2) 複数 verify 待機時は未 push コミットの最古帰属課題から消化（drainQueue で git log 順位付け）、(3) コミットメッセージ末尾の Issue: #N トレーラーを impl 側で必須化し verify は (#N) と双方を解釈、を導入済み。帰属不能なコミット・needs-review/failed 課題のコミット混入時は `git revert` で除去し `git push` で除去をリモートへ反映してから sha+subject 付きで報告し、impl が「対応困難」で断念する時は自分のコミットを revert 除去し `git push` で除去をリモートへ反映してから報告し close し（この push は断念時のみ許可）、verify NG の差し戻しは自分のコミットを revert 除去＋push で除去をリモートへ反映してから報告する（未検証コードがリモートへ出る経路は全て「除去→報告」）
 
 ## エンジン別の動作検証（非 devin エンジン E2E）
 
