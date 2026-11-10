@@ -243,6 +243,7 @@ function persistChats() {
   for (const [id, s] of chats) {
     const acp = ACP_ENGINES.has(s.chat.engine ?? 'devin');
     o[id] = { label: s.label, engine: s.chat.engine ?? 'devin',
+      auto: s.auto === true,
       sessionId: acp ? (s.chat.savedSessionId ?? s.chat.sessionId ?? null) : null };
   }
   const tmp = CHATS_PATH + '.tmp';
@@ -251,15 +252,17 @@ function persistChats() {
 }
 // 空きセッションはエンジン一致時のみ再利用（設定切替後に旧エンジンへ
 // 誤送信しない）。不一致なら新規セッションを作る
-function pickChatId(label, eng = 'devin') {
+function pickChatId(label, eng = 'devin', auto = false) {
   for (const [id, s] of chats) {
     if (!s.chat.busy && (s.chat.engine ?? 'devin') === eng) {
-      if (label && s.label !== label) { s.label = label; persistChats(); }
+      if (label && (s.label !== label || !!s.auto !== auto)) {
+        s.label = label; s.auto = auto; persistChats();
+      }
       return id;
     }
   }
   const id = ++chatSeq;
-  chats.set(id, { chat: makeChat(eng), label: label ?? `session ${id}` });
+  chats.set(id, { chat: makeChat(eng), label: label ?? `session ${id}`, auto });
   persistChats();
   return id;
 }
@@ -271,10 +274,28 @@ function pickChatId(label, eng = 'devin') {
     const nid = +id;
     if (!nid || !s?.engine) continue;
     chats.set(nid, { chat: makeChat(s.engine, { sessionId: s.sessionId }),
-      label: s.label ?? `session ${nid}` });
+      label: s.label ?? `session ${nid}`, auto: s.auto === true });
     if (nid > chatSeq) chatSeq = nid;
   }
 })();
+// 委譲タスクの終端（chatResult/assess/split 確定・タイムアウト）到達時に、
+// 自動生成の委譲チャット（auto フラグ + ラベル `<key> <mode>`）を畳んで
+// タブ一覧から除去する。経路は /api/chat/close と同じ close → chats.delete →
+// persistChats。手動 'chat' セッションは auto を持たないため対象外。
+// busy 中（別キー処理へ再利用中）のものは force 指定時以外スキップする
+async function closeAutoChatsForKey(key, { force = false } = {}) {
+  if (config.autoCloseChats === false) return;
+  const prefix = key + ' ';
+  let changed = false;
+  for (const [id, s] of chats) {
+    if (!s.auto || !String(s.label).startsWith(prefix)) continue;
+    if (s.chat.busy && !force) continue;
+    try { await (s.chat.close?.() ?? s.chat.reset()); } catch { /* noop */ }
+    chats.delete(id);
+    changed = true;
+  }
+  if (changed) persistChats();
+}
 // フェーズ別の上限（maxConcurrentAssess/Impl）を超えた送信は待機キューへ
 const chatWait = []; // {key, mode, skill}
 function busyCount(mode, isPr) {
@@ -403,6 +424,9 @@ async function dispatchChatTask(key, mode, skill, engine) {
     if (mode === 'assess') {
       next.inflight = 'assess';
       next.inflightAt = next.engineUsedAt;
+    } else if (mode === 'split') {
+      next.inflight = 'split';
+      next.inflightAt = next.engineUsedAt;
     } else if (mode === 'impl' || mode === 'pr') {
       next.inflight = mode;
       next.inflightAt = next.engineUsedAt;
@@ -460,7 +484,7 @@ async function dispatchChatTask(key, mode, skill, engine) {
       st.tasks[key].inflightClearedAt = now;
       writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
     });
-    chats.set(id, { chat: shim, label: key + ' ' + mode });
+    chats.set(id, { chat: shim, label: key + ' ' + mode, auto: true });
     shim.busy = true;
     shim.send(p.text).catch(() => {});
     recordChatId(key, id); // 全モードで記録（engN セッション後追い用）
@@ -469,11 +493,13 @@ async function dispatchChatTask(key, mode, skill, engine) {
     if (mode === 'impl' || mode === 'pr') watchImpl(key, shim);
     return id;
   }
-  const id = pickChatId(key + ' ' + mode, eng);
+  const id = pickChatId(key + ' ' + mode, eng, true);
   try {
     await chats.get(id).chat.send(p.text);
   } catch (e) {
     unmarkDelegated(key); // 未起動のまま委譲マーカーを残さない
+    // 起動しなかった自動生成セッションは監視も付かず残るため畳む
+    closeAutoChatsForKey(key).catch(() => {});
     throw e;
   }
   if (mode === 'impl' || mode === 'pr') recordChatId(key, id);
@@ -692,6 +718,9 @@ async function resolveDelegatedEnd(key, via) {
   delete st.tasks[key].inflightAt;
   delete st.tasks[key].chatId;
   writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+  // 終端確定した委譲タスクの自動生成セッションを畳む（watcher 不在の
+  // タイムアウト/起動時走査経路では busy が残りうるため強制）
+  closeAutoChatsForKey(key, { force: true }).catch(() => {});
 }
 
 function recordWatchTimeout(key, mode) {
@@ -708,6 +737,9 @@ function recordWatchTimeout(key, mode) {
   delete st.tasks[key].inflight;
   delete st.tasks[key].inflightAt;
   writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+  // タイムアウトで打ち切ったタスクの自動生成セッションも畳む
+  // （30分無応答のターンは残しても再開しないため強制クローズ）
+  closeAutoChatsForKey(key, { force: true }).catch(() => {});
   // 委譲 impl/verify は「マーカー掃除」ではなく「終端解決」を行う。
   // gh 実状態で chatResult を書き、dispatcher の消費経路（status 確定・
   // ラベル適用）へ載せる。書かないと委譲マーカーが残り永久に SKIP される
@@ -732,6 +764,7 @@ function watchAssess(key, ch) {
     clearTimeout(to);
     // 直近の agent メッセージ群（最大8件）から判定・split ブロックを横断検出
     let verdictDone = false, splitDone = false, scanned = 0;
+    let reused = false; // split 検出で同一セッションを次キーの評価へ再利用するか
     for (let i = ch.messages.length - 1; i >= 0 && scanned < 8; i--) {
       const msg = ch.messages[i];
       if (msg.role !== 'agent') continue;
@@ -789,6 +822,14 @@ function watchAssess(key, ch) {
               writeFileSync(STATE_PATH, JSON.stringify(st2, null, 2));
               const p = taskPrompt(newKey, 'assess');
               if (p && !p.error) {
+                reused = true;
+                // 同一セッションで次キーの評価を続けるためラベルを追従させる
+                // （自動クローズの `<key> ` 前方一致で誤畳みされないようにする）
+                for (const s of chats.values()) {
+                  if (s.chat === ch) {
+                    s.label = newKey + ' assess'; persistChats(); break;
+                  }
+                }
                 ch.send(p.text).then(() => watchAssess(newKey, ch));
               }
             }
@@ -797,6 +838,9 @@ function watchAssess(key, ch) {
       }
       if (verdictDone && splitDone) break;
     }
+    // 評価ターン終了 = 委譲タスクの終端。split 再利用時は残し、それ以外の
+    // 自動生成セッションは畳む
+    if (!reused) closeAutoChatsForKey(key).catch(() => {});
   }, 3000);
   // 30分で強制終了。完了検出前に応答が途絶えた場合は失敗として記録する
   const to = setTimeout(() => {
@@ -830,6 +874,9 @@ function watchSplit(key, ch) {
       } catch { /* noop */ }
       break;
     }
+    // 切り分けターン終了。後続 assess は dispatchChatTask 経由で別セッション
+    // （またはこのセッションのリラベル再利用）へ移るため畳んでよい
+    closeAutoChatsForKey(key).catch(() => {});
   }, 3000);
   const to = setTimeout(() => { clearInterval(iv);
     recordWatchTimeout(key, 'split'); }, 30 * 60 * 1000).unref?.();
@@ -847,6 +894,8 @@ function watchImpl(key, ch) {
     clearInterval(iv);
     implWatchers.delete(key);
     clearTimeout(to);
+    // ターン終了 = 委譲タスクの終端。自動生成の委譲セッションを畳む
+    closeAutoChatsForKey(key).catch(() => {});
     // dispatcher から委譲された自動 impl/verify: chat 完了時に status を確定する。
     // dispatcher は chatResult と inflightClearedAt を読んで滞留中の委譲マーカーを解除する
     const st0 = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
@@ -914,6 +963,7 @@ function status() {
       implLoopMax: config.implLoopMax ?? 5,
       maxConcurrentPr: config.maxConcurrentPr ?? config.maxConcurrentImpl ?? config.maxConcurrent ?? 1,
       maxNewPerPoll: config.maxNewPerPoll ?? 50,
+      autoCloseChats: config.autoCloseChats !== false,
       repos: (config.repos ?? []).map((r) => r.github),
     },
     tasks,
@@ -1301,7 +1351,7 @@ async function handleMcp(req, res, acao, readOnly = false) {
 const sseClients = new Set();
 let stateWatcher = null, sseTimer = null;
 const SSE_WATCH_FILES = new Set(
-  ['state.json', 'candidates.json', 'issues.json', 'desired.json']);
+  ['state.json', 'candidates.json', 'issues.json', 'desired.json', 'chats.json']);
 function sseBroadcast(obj) {
   const data = 'data: ' + JSON.stringify(obj) + '\n\n';
   for (const res of sseClients) { try { res.write(data); } catch { /* noop */ } }
@@ -1448,7 +1498,7 @@ const server = createServer(async (req, res) => {
           'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt', 'extraOrigins',
           'toolMaxSteps', 'apiModels', 'bridgeModels', 'acpOptions', 'plugins',
           'mcpServers', 'apiProvider', 'apiVersion',
-          'chatStallMinutes', 'delegatedSweepMinutes'];
+          'chatStallMinutes', 'delegatedSweepMinutes', 'autoCloseChats'];
         const patch = JSON.parse((await readBody(req)) || '{}');
         const fresh = loadJson(CONFIG_PATH, config);
         // apiProvider は実装済みアダプタの種別のみ受理

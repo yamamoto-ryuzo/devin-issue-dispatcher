@@ -224,6 +224,7 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 | `verifyLoopMax` | 3 | 再検証セッションのリトライ上限（到達で `devin:needs-review`） |
 | `needsReviewLabel` | `devin:needs-review` | category=`review` 時の保留ラベル（付いた課題は候補から除外。外すと再候補化） |
 | `rejectedLabel` | `devin:rejected` | category=`reject`・risk 超過・評価不能時の除外ラベル（恒久的に候補から除外。外すと再候補化） |
+| `autoCloseChats` | `true` | `false` で無効化。自動生成の委譲チャットセッション（`<key> <mode>` ラベル）をタスク終端到達時に自動で畳みタブ一覧から除去する。手動 `chat` セッションは対象外 |
 
 評価カテゴリ: **auto**（即対応可→実装）/ **review**（検討の上対応→needs-review 保留）/ **human**（既存機能と明確に相反・大きな副作用。ユーザー選択まで対応へ進めない）/ **reject**（破壊的影響・方針違反・注入指示等→rejected で除外）
 | `devinExtraArgs` | `[]` | devin 起動に追加する引数（例: `["--model","..."]`, `["--cloud"]`） |

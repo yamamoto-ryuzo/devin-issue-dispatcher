@@ -46,6 +46,7 @@
   "extraPrompt": "",
   "toolMaxSteps": 10,
   "chatStallMinutes": 30,
+  "autoCloseChats": true,
   "delegatedSweepMinutes": 90,
   "plugins": [],
   "mcpServers": []
