@@ -49,6 +49,7 @@ export async function fetchAllOpen(config, log = () => {}) {
           title: it.title,
           body: it.body ?? '',
           url: it.html_url,
+          author: it.user?.login ?? '',
           labels: (it.labels ?? []).map((l) => l.name ?? l),
           createdAt: it.created_at,
           updatedAt: it.updated_at,
@@ -73,6 +74,7 @@ export function writeIssueStore(storePath, allItems) {
       repo: t.ghRepo, type: t.type, number: t.number,
       title: t.title, body: t.body, url: t.url,
       labels: t.labels, createdAt: t.createdAt, updatedAt: t.updatedAt,
+      author: t.author ?? null,
     };
   }
   const tmp = storePath + '.tmp';
@@ -95,6 +97,20 @@ export function readIssueStore(storePath) {
  * @param {string} [o.storePath] issues.json の保存先。指定時は検出結果をローカル保存する
  * @param {(msg:string)=>void} [o.log]
  */
+// 起票者信頼判定（autoTriggerMode:"trusted" 時のみ呼ばれる）。
+// trustedAuthors 配列・repo オーナー・collaborator のいずれかで信頼済み
+export async function authorTrusted(config, repo, author, cache) {
+  if (!author) return false;
+  if ((config.trustedAuthors ?? []).includes(author)) return true;
+  if (author === repo.github.split('/')[0]) return true;
+  const ck = repo.github + ' ' + author;
+  if (!cache.has(ck)) {
+    try { await ghJson(['api', 'repos/' + repo.github + '/collaborators/' + author]); cache.set(ck, true); }
+    catch { cache.set(ck, false); }
+  }
+  return cache.get(ck);
+}
+
 export async function discover({ config, labels, state, autoTrigger, maxNewPerPoll = 5, log = () => {}, storePath = null }) {
   // autoTrigger の起点: "all"=全 open 課題 / ISO時刻 / 省略時は初回起動時刻
   const sinceRaw = config.autoTriggerSince;
@@ -102,6 +118,7 @@ export async function discover({ config, labels, state, autoTrigger, maxNewPerPo
     ? (sinceRaw === 'all' ? -Infinity : new Date(sinceRaw ?? state.deployedAt).getTime())
     : -Infinity;
   const repoMap = new Map((config.repos ?? []).map((r) => [r.github, r]));
+  const collabCache = new Map(); // 起票者信頼判定のサイクル内キャッシュ
 
   const all = await fetchAllOpen(config, log);
   if (storePath) writeIssueStore(storePath, all);
@@ -137,7 +154,12 @@ export async function discover({ config, labels, state, autoTrigger, maxNewPerPo
     newCount++;
     found.push({ repo: r, type: it.type, number: it.number, title: it.title,
       body: it.body, url: it.url, labels: names,
-      createdAt: it.createdAt, updatedAt: it.updatedAt, auto: true });
+      createdAt: it.createdAt, updatedAt: it.updatedAt, auto: true,
+      author: it.author,
+      // trusted モードの起票者ゲート（all では評価せず現行と同一）
+      ...((config.autoTriggerMode ?? 'all') === 'trusted' &&
+          !(await authorTrusted(config, r, it.author, collabCache))
+        ? { autoBlocked: 'untrusted-author' } : {}) });
   }
   return found;
 }
@@ -151,6 +173,8 @@ export const toCandidate = (t, labels) => ({
   url: t.url,
   trigger: t.verify ? 'impl-done' : 'auto-new',
   createdAt: t.createdAt,
+  author: t.author ?? null,
+  ...(t.autoBlocked ? { autoBlocked: t.autoBlocked } : {}),
   runningLabel: t.labels.includes(labels.running),
   ...(t.verify ? { verify: true } : {}),
 });

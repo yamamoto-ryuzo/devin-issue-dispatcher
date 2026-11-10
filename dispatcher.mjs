@@ -1121,6 +1121,15 @@ async function cycle(state) {
   }
   for (const t of found) {
     const key = keyOf(t.repo.github, t.type, t.number);
+    // 起票者ゲート: autoTriggerMode=trusted で非信頼 author の課題は自動起動しない
+    // （候補一覧には出す。手動 dispatch・devin ラベル経路は別途起動可）
+    if (t.autoBlocked) {
+      state.tasks[key] = { ...(state.tasks[key] ?? {}),
+        autoBlocked: t.autoBlocked, author: t.author ?? null };
+      saveState(state);
+      log('skip ' + key + ': autoBlocked (' + t.autoBlocked + ', author=' + (t.author ?? '?') + ')');
+      continue;
+    }
     // 再検証課題（AI:impl-done）・PR 課題の自動対応は autoPr がゲート
     // （autoTrigger は新規 issue 課題の自動対応）
     if ((t.verify || t.type === 'pr') && !liveConfig('autoPr', false)) continue;

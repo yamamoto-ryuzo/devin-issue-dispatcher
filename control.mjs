@@ -1413,7 +1413,7 @@ const server = createServer(async (req, res) => {
         // config.json の一部キーを更新（ファイル + メモリ両方）
         const allowed = ['pollIntervalSec', 'candidateCacheSec', 'maxNewPerPoll',
           'maxConcurrent', 'maxConcurrentAssess', 'maxConcurrentImpl', 'maxConcurrentPr',
-          'autoDiscover', 'autoTrigger', 'autoAssess', 'autoPr', 'autoCategory',
+          'autoDiscover', 'autoTrigger', 'autoTriggerMode', 'trustedAuthors', 'autoAssess', 'autoPr', 'autoCategory',
           'maxAutoRisk',
           'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax',
           'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt', 'extraOrigins',

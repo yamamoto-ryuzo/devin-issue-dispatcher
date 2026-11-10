@@ -6,6 +6,8 @@ GitHub Issues/PR を監視する常駐システム。**「対応候補の検出�
 - **対応候補（検出）= `autoDiscover`**: ON の間、全 open Issue/PR を定期スキャンし
   `candidates.json` に保存。OFF なら自動検出を停止（「今すぐ取得」での手動更新は可）
 - **課題対応（起動）= `autoTrigger`**: ON の間だけ、検出した候補を評価→実装の
+| `autoTriggerMode` | `all` | 自動処理の起票者ゲート。`all`=全起票者（現行動作）/ `trusted`=`trustedAuthors`・repo オーナー・collaborator のみ自動起動（他は候補表示のみで手動 dispatch/ラベルで起動可）|
+| `trustedAuthors` | `[]` | `autoTriggerMode:trusted` 時に信頼済みとみなす起票者ログイン名の配列 |
   2フェーズで自動起動する。OFF でも検出・一覧・手動起動は動く
 - パネル最上段の2つのトグルで独立制御。「取得だけ自動・処理は手動」も可能
 - トリガーにラベルは不要。除外したい課題には `devin:done` ラベルを付ける
