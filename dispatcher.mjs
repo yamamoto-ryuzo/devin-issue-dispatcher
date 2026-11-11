@@ -1293,8 +1293,16 @@ async function main() {
     catch (e) { log(`cycle error: ${e.message}`); }
   }
   if (ONCE && !DRY_RUN) {
-    // --once でも起動したタスクは完了まで待つ
-    while (running.size || queue.length) await sleep(1000);
+    // --once でも起動したタスクは完了まで待つ。待つのは running のみ:
+    // queue に残るのは起動可否ゲートで滞留中のタスクで、実行中タスクの
+    // 完了時に drainQueue が起動可否を再判定するため running が空なら
+    // 残りは永久滞留（unpushed 等）。once には次ポーリングが無いので
+    // queue を待ち続けると終了できず、child が /api/start を塞ぐ
+    while (running.size) await sleep(1000);
+    if (queue.length) {
+      log(`once: ${queue.length} gated task(s) left in queue ` +
+        queue.map((t) => keyOf(t.repo.github, t.type, t.number)).join(', '));
+    }
   }
   log('dispatcher stop');
 }

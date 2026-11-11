@@ -2135,6 +2135,7 @@ async function refresh() {
   if (me) me.textContent = status.running
     ? t('ポーリング中') + ' (pid ' + status.pid + ' / ' + status.startedAt + ')'
     : t('ポーリング未起動');
+  renderCandsMode();
 
   const c = status.config;
   const he = document.getElementById('hdr-engine');
@@ -2244,6 +2245,26 @@ async function refresh() {
   if (atBottom || !pre.textContent) pre.scrollTop = pre.scrollHeight;
 }
 
+// cands-mode 表示: autoTrigger(autoEnabled) だけでなく dispatcher の実稼働も
+// 反映する。停止中・単発(--once)モードではポーリングで順次起動しないため別表示。
+// refresh() からも呼び、dispatcher 停止/モード変化を即時反映する
+function renderCandsMode(discoverEnabled, autoEnabled) {
+  const el = document.getElementById('cands-mode');
+  if (!el || !status) return;
+  const c = status.config || {};
+  const disc = discoverEnabled ?? (c.autoDiscover !== false);
+  const auto = autoEnabled ?? !!c.autoTrigger;
+  el.innerHTML =
+    (disc ? '' : '<span style="color:#b45309">— 自動検出停止中</span> ') +
+    (auto
+      ? (status.running === false
+          ? '<span style="color:#c62828">対応自動 ON だが dispatcher 停止中</span>'
+          : status.mode === 'once'
+            ? '<span style="color:#b45309">対応自動 ON：単発実行中（次ポーリングなし）</span>'
+            : '<span style="color:#15803d">対応自動 ON：ポーリングで順次起動</span>')
+      : '<span style="color:#b45309">対応自動 OFF：起動は個別ボタン</span>');
+}
+
 async function loadCandidates(force) {
   const box = document.getElementById('cands');
   try {
@@ -2253,11 +2274,7 @@ async function loadCandidates(force) {
     const j = await (await fetch(API + '/api/candidates' + (force ? '?force=1' : ''))).json();
     document.getElementById('cands-meta').textContent =
       '取得: ' + fmt(j.fetchedAt) + (j.cached ? '（キャッシュ）' : '（ライブ取得）');
-    document.getElementById('cands-mode').innerHTML =
-      (j.discoverEnabled === false ? '<span style="color:#b45309">— 自動検出停止中</span> ' : '') +
-      (j.autoEnabled
-        ? '<span style="color:#15803d">対応自動 ON：ポーリングで順次起動</span>'
-        : '<span style="color:#b45309">対応自動 OFF：起動は個別ボタン</span>');
+    renderCandsMode(j.discoverEnabled !== false, !!j.autoEnabled);
     const list = j.candidates || [];
     // dispatcher が自動起動した実行中課題を候補側で検出したらポーリングを開始
     // （常時ポーリングはしないため、気付きは候補一覧の更新周期に従う）
