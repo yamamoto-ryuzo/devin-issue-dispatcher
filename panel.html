@@ -71,7 +71,6 @@
   .csess.busy { border-color: #b45309; }
   .csess.task { border-color: #ca8a04; background: #fef9e7; }
   .csess.task.active { background: #ca8a04; color: #fff; }
-  .msg.tasklog { max-width: 100%; align-self: stretch; font-family: monospace; font-size: 11.5px; }
   .csess .x { margin-left: 6px; opacity: .55; }
   #chat-input { display: flex; gap: 8px; margin-top: 8px; }
   #chat-input input { flex: 1; }
@@ -1779,6 +1778,57 @@ const taskShortLabel = (key) =>
   key.split(' ')[0].split('/').pop() + ' ' + key.split(' ').slice(1).join(' ');
 const taskPhaseLabel = (ph) =>
   ph === 'assess' ? t('(評価)') : ph === 'verify' ? t('(検証)') : t('(実装)');
+// acp-runner のセッションログをチャットメッセージへ分解する。
+// ログ形式（acp-runner.mjs が転記）: エージェント本文は無印の生テキストで、
+// [tool →]/[tool ✗]/[plan]/[steer]/[session started] 等は行頭マーカー。
+// マーカー以外の連続行は1つの agent バブルへまとめる
+const TASKLOG_SYS_TAGS = new Set([
+  'session started', 'done', 'stopped by user', 'stopped by user via panel',
+  'option', 'option失敗', 'fatal', 'mcp', 'auth', 'spawn error', 'steer error']);
+function taskLogToMessages(text) {
+  // devin デーモン診断レコード（"2026-…T…Z  INFO …"）は stderr が runner の
+  // 出力へ混ざるため会話本文の途中から始まることがある。行頭限定にせず、
+  // タイムスタンプ＋レベルの出現位置で分割して除去/降格する
+  const DM = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:[\d.]+Z\s+(INFO|WARN|ERROR|DEBUG|TRACE)\b/;
+  const msgs = [];
+  const push = (role, t) => {
+    const last = msgs[msgs.length - 1];
+    if ((role === 'agent' || role === 'sys') && last?.role === role) {
+      last.text += '\n' + t;
+      return;
+    }
+    if (t === '') return; // 先頭や役割境界の空行はバブルを作らない
+    msgs.push({ role, text: t });
+  };
+  for (const raw of String(text ?? '').split('\n')) {
+    // デーモンレコードは行末まで続く: 手前を本文、以降を診断として分離
+    const dm = raw.match(DM);
+    const head = dm ? raw.slice(0, dm.index) : raw;
+    if (!dm || head !== '') {
+      const line = head;
+      const m = line.match(/^\[([^\]]{1,60})\] ?/);
+      const tag = m?.[1] ?? '';
+      if (m && (tag === 'tool →' || tag === 'tool ✗')) {
+        push('tool', (tag === 'tool ✗' ? '✗ ' : '') + line.slice(m[0].length));
+      } else if (m && tag === 'steer') {
+        push('user', line.slice(m[0].length));
+      } else if (m && (tag === 'plan' || TASKLOG_SYS_TAGS.has(tag)
+                       || tag.startsWith('session closed'))
+                 || line.startsWith('acp spawn ')) {
+        push('sys', line);
+      } else {
+        push('agent', line);
+      }
+    }
+    // INFO 系は省略、WARN/ERROR のみ sys として残す
+    if (dm && (dm[1] === 'WARN' || dm[1] === 'ERROR')) {
+      push('sys', raw.slice(dm.index).trim());
+    }
+  }
+  return msgs
+    .map((x) => ({ ...x, text: x.text.replace(/\n+$/, '') }))
+    .filter((x) => x.role !== 'agent' || x.text.trim());
+}
 // 処理履歴「内容」列: タスク状態から「何をどうしたか」を端的に導出する。
 // ラベルはマーメイド状態名（MM_TERMS）を流用して翻訳する
 const mmTerm = (ja) => (MM_TERMS[LANG] ?? (LANG === 'ja' ? null : MM_TERMS.en))?.[ja] ?? ja;
@@ -1812,9 +1862,14 @@ async function loadSessions() {
         " onclick='chatSelect(" + JSON.stringify(id) + ")'>▶ " +
         esc(taskShortLabel(x.key)) + ' ' + esc(taskPhaseLabel(x.phase)) + '</span>';
     }).join('');
-    // 選択中の擬似セッションが終了していてもチップを残す（ログ参照・追加指示の文脈維持）
+    // 自動生成の擬似セッションはタスク終了とともに畳む（委譲チャットの
+    // closeAutoChatsForKey と同じく autoCloseChats 設定に連動）。無効化時のみ
+    // 従来どおり終了済みチップを残してログ参照・追加指示の文脈を維持する
+    const autoClose = status?.config?.autoCloseChats !== false;
     const selKey = taskSelKey();
-    const selDone = selKey && !runTasks.some((x) => x.key === selKey)
+    const selFinished = selKey && !runTasks.some((x) => x.key === selKey);
+    if (selFinished && autoClose) chatSel = null;
+    const selDone = selFinished && !autoClose
       ? "<span class=\"csess task active\" onclick='chatSelect(" + JSON.stringify(chatSel) + ")'>✓ " +
         esc(taskShortLabel(selKey)) + '</span>' : '';
     document.getElementById('chat-sessions').innerHTML =
@@ -1954,7 +2009,8 @@ async function loadChat() {
       const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
       box.innerHTML = lg.log
         ? '<div class="msg sys">' + t('セッションログ: ') + esc(lg.file || key) + '</div>' +
-          '<div class="msg agent tasklog">' + esc(lg.log) + '</div>'
+          taskLogToMessages(lg.log)
+            .map((x) => '<div class="msg ' + x.role + '">' + esc(x.text) + '</div>').join('')
         : '<div class="msg sys">(ログなし)</div>';
       if (atBottom) box.scrollTop = box.scrollHeight;
       return;
