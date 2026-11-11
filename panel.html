@@ -2642,7 +2642,16 @@ function renderProps(list) {
         '</div>';
     }).join('');
 }
-async function issueCreateProp(i) {
+// 候補が全て登録済みになったら抽出結果と目的入力をクリア（滞留による二重登録を防止）。クリアしたら true
+function svClearIfAllDone() {
+  if (!surveyProps.length || !surveyProps.every((p) => p.createdUrl)) return false;
+  svReset();
+  document.getElementById('sv-goal').value = '';
+  goalImages = [];
+  renderGoalImgs();
+  return true;
+}
+async function issueCreateProp(i, fromAll) {
   // 起票先は抽出時のリポジトリに固定（セレクト変更による誤登録を防止）
   const repo = surveyRepo || document.getElementById('sv-repo').value;
   const p = surveyProps[i];
@@ -2676,6 +2685,7 @@ async function issueCreateProp(i) {
       toast((j.dup ? '同名の既存Issue: ' : 'Issue作成: ') + j.url);
       markDone(j.url);
       loadCandidates(true);
+      if (!fromAll && svClearIfAllDone()) toast('全候補の登録が完了したため、抽出結果をクリアしました');
     } else { markIdle(); toast('失敗: ' + (j.error || '')); }
   } catch (e) { markIdle(); toast('issue: ' + e.message); }
 }
@@ -2691,10 +2701,11 @@ async function issueCreateAll() {
     const p = surveyProps[i];
     if (p.createdUrl || p.creating) { done++; continue; }
     if (b) b.textContent = 'Issue登録中… ' + (done + 1) + '/' + n;
-    await issueCreateProp(i);
+    await issueCreateProp(i, true);
     if (surveyProps[i].createdUrl) done++;
   }
   if (b) { b.textContent = '登録完了 ' + done + '/' + n; b.disabled = false; }
+  if (svClearIfAllDone()) toast('全 ' + n + ' 件の登録が完了したため、抽出結果をクリアしました');
 }
 
 // Issue 起票
