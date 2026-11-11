@@ -2795,8 +2795,10 @@ function renderCandTabs() {
     '<button class="' + (candTab === id ? 'active' : '') +
     '" onclick="candTab=\'' + id + '\';renderCandTabs();renderCandBody()">' +
     esc(label) + '<span class="n">' + cand + (open != null ? '/' + open : '') + '</span></button>';
+  const visible = [...candGroups.entries()].filter(([, items]) => items.length > 0);
+  if (candTab !== '__all__' && !visible.some(([r]) => r === candTab)) candTab = '__all__';
   tabs.innerHTML = mk('__all__', 'すべて', total, openTotal) +
-    [...candGroups.entries()].map(([r, items]) =>
+    visible.map(([r, items]) =>
       mk(r, r.split('/')[1], items.length, openCounts[r] ?? 0)).join('');
 }
 
@@ -2827,12 +2829,11 @@ function renderCandBody() {
       if (fStat === 'idle' && (ph || qued)) return false;
       return true;
     });
+    if (!filtered.length) return '';
     const head = '<div class="repo-h">' +
       '<a href="https://github.com/' + esc(repo) + '" target="_blank" rel="noopener">' +
       esc(repo) + '</a>' +
-      '<span class="cnt' + (filtered.length ? '' : ' zero') + '">' +
-      filtered.length + '/' + items.length + '</span></div>';
-    if (!filtered.length) return head + '<div class="repo-empty">' + tr('候補なし') + '</div>';
+      '<span class="cnt">' + filtered.length + '/' + items.length + '</span></div>';
     const rows = filtered.map(c => {
       const chatPh = (status.chatBusy || []).find((l) => l.startsWith(c.key + ' '));
       const localPh = [...localBusy.keys()].find((l) => l.startsWith(c.key + ' '));
@@ -2944,7 +2945,8 @@ function renderCandBody() {
       '<th title="課題が作成された日時">' + tr('作成日時') + '</th>' +
       '<th title="実行中ラベル・過去の処理状態などの補足">' + tr('備考') + '</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table>';
-    }).join('') || '<div class="repo-empty">' + tr('監視リポジトリなし') + '</div>';
+    }).join('') || '<div class="repo-empty">' +
+      tr(entries.length ? '候補なし' : '監視リポジトリなし') + '</div>';
   document.getElementById('cands').innerHTML = renderEntries('issue');
   const prsEl = document.getElementById('prs');
   if (prsEl) prsEl.innerHTML = renderEntries('pr');
