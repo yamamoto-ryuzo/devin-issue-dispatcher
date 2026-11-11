@@ -111,7 +111,9 @@ function saveState(state) {
     if (!('engineReq' in dt)) delete merged.engineReq;
     // queued は dispatcher が起動管理用に立てる揮発マーカー（メモリ内キューが正）。
     // メモリ側に無ければディスク側の残存も消す（キュー消化・再起動後の幽霊化防止）
-    if (!('queued' in cur)) { delete merged.queued; delete merged.queuedAt; }
+    if (!('queued' in cur)) {
+      delete merged.queued; delete merged.queuedAt; delete merged.waitReason;
+    }
     out.tasks[k] = merged;
   }
   const tmp = STATE_PATH + '.tmp';
@@ -828,41 +830,45 @@ function drainQueueBody(state) {
   }
   if (purged) saveState(state);
   const ordCache = new Map(); // verify 優先順位用: repo -> Map(issue番号->順位)
+  // 起動不可の理由を返す（起動可なら null）。滞留タスクへ理由を記録して
+  // 「同時起動がないのに待機」に見える状態を説明可能にする
+  const blockedReason = (t) => {
+    const dest = t.verify ? 'verify' : t.assessOnly ? 'assess' : 'impl';
+    const isPr = dest === 'impl' && t.type === 'pr';
+    // 同時起動数はフェーズ別（パネル変更を即時反映するため都度 config を読む）
+    const base = liveConfig('maxConcurrent', config.maxConcurrent ?? 1);
+    // 0 以下の設定値はキュー永久滞留になるため 1 に丸める
+    const max = Math.max(1, dest === 'assess'
+      ? liveConfig('maxConcurrentAssess', base)
+      : (dest === 'verify' || isPr)
+        ? liveConfig('maxConcurrentPr', liveConfig('maxConcurrentImpl', base))
+        : liveConfig('maxConcurrentImpl', base));
+    // 同時起動数はリポジトリ毎に数える（issue#70）。ただし評価で影響範囲が
+    // 複数リポジトリ横断（scope=multi）と判定された impl 課題は、作業ツリー
+    // 衝突回避のため全リポジトリ合算で上限を適用する
+    const tKey = keyOf(t.repo.github, t.type, t.number);
+    const globalScope = dest === 'impl' && t.type === 'issue'
+      && state.tasks[tKey]?.assess?.scope === 'multi';
+    // dest（行き先フェーズ）で数える: impl 予定のタスクは評価中でも impl 枠を占有し、
+    // 評価通過後に上限を超えて impl へ進まないようにする
+    const busy = [...running.entries()].filter(([k, v]) =>
+      v.dest === dest &&
+      (globalScope || k.startsWith(t.repo.github + ' ')) &&
+      (dest === 'assess' || k.includes(isPr ? ' pr#' : ' issue#'))).length;
+    if (busy >= max) return 'concurrency';
+    // 同一リポジトリの書き込み系（impl=ローカルコミット / verify=push・reset）は
+    // 同じ作業ツリーで衝突するため直列化
+    const repoBusy = (dest === 'impl' || dest === 'verify') && [...running.entries()]
+      .some(([k, v]) => (v.dest === 'impl' || v.dest === 'verify')
+        && k.startsWith(t.repo.github + ' '));
+    if (repoBusy) return 'repo-serial';
+    // 未 push コミット（= 未検証の実装）が残るリポジトリでは新規実装を開始しない。
+    // 別課題の未検証コミットが再検証の push に巻き込まれるのを防ぐ
+    const gated = dest === 'impl' && t.type === 'issue' && unpushedCommits(t.repo.path) > 0;
+    return gated ? 'unpushed' : null;
+  };
   for (;;) {
-    const elig = (t) => {
-      const dest = t.verify ? 'verify' : t.assessOnly ? 'assess' : 'impl';
-      const isPr = dest === 'impl' && t.type === 'pr';
-      // 同時起動数はフェーズ別（パネル変更を即時反映するため都度 config を読む）
-      const base = liveConfig('maxConcurrent', config.maxConcurrent ?? 1);
-      // 0 以下の設定値はキュー永久滞留になるため 1 に丸める
-      const max = Math.max(1, dest === 'assess'
-        ? liveConfig('maxConcurrentAssess', base)
-        : (dest === 'verify' || isPr)
-          ? liveConfig('maxConcurrentPr', liveConfig('maxConcurrentImpl', base))
-          : liveConfig('maxConcurrentImpl', base));
-      // 同時起動数はリポジトリ毎に数える（issue#70）。ただし評価で影響範囲が
-      // 複数リポジトリ横断（scope=multi）と判定された impl 課題は、作業ツリー
-      // 衝突回避のため全リポジトリ合算で上限を適用する
-      const tKey = keyOf(t.repo.github, t.type, t.number);
-      const globalScope = dest === 'impl' && t.type === 'issue'
-        && state.tasks[tKey]?.assess?.scope === 'multi';
-      // dest（行き先フェーズ）で数える: impl 予定のタスクは評価中でも impl 枠を占有し、
-      // 評価通過後に上限を超えて impl へ進まないようにする
-      const busy = [...running.entries()].filter(([k, v]) =>
-        v.dest === dest &&
-        (globalScope || k.startsWith(t.repo.github + ' ')) &&
-        (dest === 'assess' || k.includes(isPr ? ' pr#' : ' issue#'))).length;
-      // 同一リポジトリの書き込み系（impl=ローカルコミット / verify=push・reset）は
-      // 同じ作業ツリーで衝突するため直列化
-      const repoBusy = (dest === 'impl' || dest === 'verify') && [...running.entries()]
-        .some(([k, v]) => (v.dest === 'impl' || v.dest === 'verify')
-          && k.startsWith(t.repo.github + ' '));
-      // 未 push コミット（= 未検証の実装）が残るリポジトリでは新規実装を開始しない。
-      // 別課題の未検証コミットが再検証の push に巻き込まれるのを防ぐ
-      const gated = dest === 'impl' && t.type === 'issue' && unpushedCommits(t.repo.path) > 0;
-      return busy < max && !repoBusy && !gated;
-    };
-    let idx = queue.findIndex(elig);
+    let idx = queue.findIndex((t) => !blockedReason(t));
     // 同リポジトリの verify が複数起動可能なら未 push コミットの最古帰属を優先
     // （未検証コミットが他課題 verify の push に同乗する機会を減らす）
     if (idx >= 0 && queue[idx].verify) {
@@ -875,7 +881,7 @@ function drainQueueBody(state) {
       for (let k = idx + 1; k < queue.length; k++) {
         const q = queue[k];
         if (q.verify && q.repo.github === queue[idx].repo.github &&
-            elig(q) && ordOf(q) < ordOf(queue[idx])) idx = k;
+            !blockedReason(q) && ordOf(q) < ordOf(queue[idx])) idx = k;
       }
     }
     if (idx < 0) break;
@@ -883,8 +889,9 @@ function drainQueueBody(state) {
     const key = keyOf(task.repo.github, task.type, task.number);
     // キュー待ちマーカーを解除（runTask が task エントリを spread 更新する前に
     // 消さないと実行中エントリへ queued が残ってしまう）
-    if (state.tasks[key]?.queued) {
+    if (state.tasks[key]?.queued || state.tasks[key]?.waitReason) {
       delete state.tasks[key].queued; delete state.tasks[key].queuedAt;
+      delete state.tasks[key].waitReason;
       saveState(state);
     }
     // running.set は runTask/doAssess 内で非同期に行われるため、ここで先行登録して
@@ -896,6 +903,19 @@ function drainQueueBody(state) {
       .catch((e) => log(`runTask error ${key}: ${e.message}`))
       .finally(() => { running.delete(key); drainQueue(state); });
   }
+  // 起動できず滞留しているタスクへ待機理由を記録する
+  // （/api/candidates 経由でパネルの「待機中」表示に理由を出すため。
+  // 理由が消えた＝起動条件を満たした滞留は次回 findIndex で起動される）
+  let wq = false;
+  for (const q of queue) {
+    const k = keyOf(q.repo.github, q.type, q.number);
+    const rsn = blockedReason(q);
+    if ((state.tasks[k]?.waitReason ?? null) !== rsn) {
+      state.tasks[k] = { ...(state.tasks[k] ?? {}), waitReason: rsn };
+      wq = true;
+    }
+  }
+  if (wq) saveState(state);
 }
 
 // ---------- reclaim stale ----------
@@ -1243,7 +1263,7 @@ async function main() {
   // 前回プロセスが残したキュー待ちマーカーを掃除（queued はメモリ内キューと
   // 連動する揮発状態。再起動直後はキューが空なので全て陳腐）
   for (const t of Object.values(state.tasks ?? {})) {
-    delete t.queued; delete t.queuedAt;
+    delete t.queued; delete t.queuedAt; delete t.waitReason;
   }
   state.deployedAt ??= new Date().toISOString();
   saveState(state);
