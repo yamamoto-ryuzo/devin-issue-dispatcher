@@ -932,8 +932,11 @@ function watchImpl(key, ch) {
 
 function status() {
   const state = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+  // 履歴表示の「何を」に使う課題タイトル・URL を issues.json ストアから付与
+  const issues = readIssueStore(ISSUES_PATH).issues ?? {};
   const tasks = Object.entries(state.tasks ?? {})
-    .map(([key, t]) => ({ key, ...t }))
+    .map(([key, t]) => ({ key, title: issues[key]?.title ?? null,
+      url: issues[key]?.url ?? null, ...t }))
     .sort((a, b) => (b.startedAt ?? b.finishedAt ?? '').localeCompare(a.startedAt ?? a.finishedAt ?? ''))
     .slice(0, 30);
   return {
