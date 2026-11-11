@@ -47,7 +47,8 @@
   .tabpanel.active { display: block; }
 
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  #cands table { min-width: 1100px; }
+  #cands table, #prs table { min-width: 1100px; table-layout: fixed; }
+  #cands td, #prs td { overflow: hidden; text-overflow: ellipsis; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eef1f5;
            white-space: nowrap; }
   th { color: #6b7280; font-weight: 500; }
@@ -2938,21 +2939,24 @@ function renderCandBody() {
           ? '<span class="badge-pr">pr #' + c.number + '</span>'
           : esc(c.type) + ' #' + c.number) + '</a></td>' +
       '<td style="white-space:nowrap">' + assessCell + '</td>' +
-      '<td style="white-space:normal;min-width:220px;max-width:560px;word-break:break-all"><a href="' + esc(c.url) +
+      '<td style="white-space:normal;word-break:break-all"><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener">' + esc(c.title) + '</a></td>' +
-      '<td class="' + (c.trigger === 'auto-new' || c.trigger === 'impl-done' || c.trigger === 'active' ? 'trig-auto' : 'trig-label') + '">' +
+      '<td style="white-space:normal" class="' + (c.trigger === 'auto-new' || c.trigger === 'impl-done' || c.trigger === 'active' ? 'trig-auto' : 'trig-label') + '">' +
         (c.trigger === 'auto-new' ? tr('自動(新規)') : c.trigger === 'impl-done' ? tr('処理済み(要再検証)') : c.trigger === 'active' ? tr('実行中') : tr('devin ラベル')) + (c.autoBlocked ? ' <span class="badge" style="background:#b45309;color:#fff" title="author: ' + esc(c.author || '') + '">' + tr('自動対象外（起票者）') + '</span>' : '') + '</td>' +
       '<td>' + implCell + '</td>' +
       '<td>' + judge + '</td>' +
       '<td>' + fmt(c.createdAt) + '</td>' +
-      '<td>' + (c.runningLabel ? tr('running ラベル付き(起動中/取残し)') :
+      '<td style="white-space:normal">' + (c.runningLabel ? tr('running ラベル付き(起動中/取残し)') :
                 c.state ? 'state: ' + c.state : '') +
         (remPr ? ' → <a href="https://github.com/' + esc(remPr[1]) + '/pull/' + remPr[2] +
           '" target="_blank" rel="noopener">pr#' + remPr[2] + '</a>'
           : c.createdPr ? ' → ' + esc(String(c.createdPr).split(' ').pop()) : '') +
         '</td></tr>';
     }).join('');
-    return head + '<table><thead><tr>' +
+    return head + '<table><colgroup>' +
+      '<col style="width:92px"><col style="width:108px"><col>' +
+      '<col style="width:130px"><col style="width:112px"><col style="width:148px">' +
+      '<col style="width:150px"><col style="width:190px"></colgroup><thead><tr>' +
       '<th title="課題の種別（issue / PR）と番号">' + tr('種別') + '</th>' +
       '<th title="評価: チャットで対応可否だけを評価（変更しない）">' + tr('操作') + '</th>' +
       '<th title="GitHub の課題タイトル（クリックで GitHub を開く）">' + tr('タイトル') + '</th>' +
