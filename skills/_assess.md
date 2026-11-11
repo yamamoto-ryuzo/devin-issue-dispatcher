@@ -41,6 +41,13 @@
 
 `yes`=実装可能 / `needs-human`=人間の判断が必要 / `no`=実現不能
 
+### scope（影響範囲）
+
+| 値 | 意味 |
+|---|---|
+| `repo` | 変更がこの課題のリポジトリ内に完結する（既定・未出力時もこの扱い）。同時起動数はリポジトリ毎に適用される |
+| `multi` | 複数リポジトリの同時編集が必要、または横断する影響が明らか。同時起動数は全リポジトリ合算で判定される |
+
 ### 副作用（既存機能・既存挙動への影響）の判定区分
 
 副作用の程度に応じて扱いを分ける:
@@ -61,7 +68,7 @@
 
 ```
 <!--devin-assess
-{"feasible":"yes|needs-human|no","risk":"low|medium|high","category":"auto|review|human|reject","partial":true|false,"reason":"判定理由（1-2文）","plan":"実施方針（箇条書き）"}
+{"feasible":"yes|needs-human|no","risk":"low|medium|high","category":"auto|review|human|reject","partial":true|false,"scope":"repo|multi","reason":"判定理由（1-2文）","plan":"実施方針（箇条書き）"}
 devin-assess-->
 ```
 

@@ -610,13 +610,13 @@ function setLang(v) {
       <button id="btn-assess" class="toggle off" onclick="toggleFlag('autoAssess')">…</button>
       <span id="assess-desc" style="display:none"></span>
       <button id="btnOnce" onclick="act('assess-all')" data-i18n="全評価 手動実行"
-        title="判定が出ていない全候補を評価キューへ投入します（手動の一括起動）。&#10;評価 同時起動数の上限までは並列セッションで即実行、&#10;超過分は待機キューで順次実行されます。">全評価 手動実行</button>
+        title="判定が出ていない全候補を評価キューへ投入します（手動の一括起動）。&#10;評価 同時起動数の上限（リポジトリ毎）までは並列セッションで即実行、&#10;超過分は待機キューで順次実行されます。">全評価 手動実行</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
       <button id="btn-auto" class="toggle off" onclick="toggleFlag('autoTrigger')">…</button>
       <span id="auto-desc" style="display:none"></span>
       <button onclick="act('impl-all')" data-i18n="全課題対応 手動実行"
-        title="判定・リスクが自動処理設定（autoCategory × maxAutoRisk の AND）に適合する全課題に対応を開始します（手動の一括起動）。&#10;対応/PR対応 同時起動数の上限までは並列実行、超過分は待機キューで順次実行されます。">全課題対応 手動実行</button>
+        title="判定・リスクが自動処理設定（autoCategory × maxAutoRisk の AND）に適合する全課題に対応を開始します（手動の一括起動）。&#10;対応/PR対応 同時起動数の上限（リポジトリ毎）までは並列実行、超過分は待機キューで順次実行されます。">全課題対応 手動実行</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
       <button id="btn-auto-pr" class="toggle off" onclick="toggleFlag('autoPr')">…</button>
@@ -784,7 +784,7 @@ function setLang(v) {
     <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
       <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px" data-i18n="評価">評価</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px;align-items:end">
-        <label><span data-i18n="評価 同時起動数">評価 同時起動数</span><br><input id="set-maxc-assess" type="number" min="1" style="width:60px"></label>
+        <label><span data-i18n="評価 同時起動数">評価 同時起動数</span><br><input id="set-maxc-assess" type="number" min="1" style="width:60px" title="リポジトリ毎の同時起動上限"></label>
         <label><span data-i18n="判定の鮮度 (時間)">判定の鮮度 (時間)</span><br><input id="set-assess-age" type="number" min="1" style="width:60px"></label>
       </div>
     </div>
@@ -923,8 +923,8 @@ function setLang(v) {
     <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
       <div style="font-size:12px;font-weight:600;color:#4b5563;margin-bottom:6px" data-i18n="対応">対応</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px;align-items:end">
-        <label><span data-i18n="対応 同時起動数">対応 同時起動数</span><br><input id="set-maxc-impl" type="number" min="1" style="width:60px"></label>
-        <label><span data-i18n="PR/再検証 同時起動数">PR/再検証 同時起動数</span><br><input id="set-maxc-pr" type="number" min="1" style="width:60px" title="pr# 課題・AI:impl-done 再検証セッションの同時起動上限（issue課題とは別枠）"></label>
+        <label><span data-i18n="対応 同時起動数">対応 同時起動数</span><br><input id="set-maxc-impl" type="number" min="1" style="width:60px" title="リポジトリ毎の同時起動上限"></label>
+        <label><span data-i18n="PR/再検証 同時起動数">PR/再検証 同時起動数</span><br><input id="set-maxc-pr" type="number" min="1" style="width:60px" title="pr# 課題・AI:impl-done 再検証セッションの同時起動上限（issue課題とは別枠・リポジトリ毎）"></label>
         <label><span data-i18n="検証ループ上限 (回)">検証ループ上限 (回)</span><br><input id="set-impl-loop" type="number" min="1" style="width:60px" title="対応→完了確認→NG→修正のループをこの回数まで実施。到達後はユーザーへ対応依頼"></label>
 
         <label><span data-i18n="自動処理の判定範囲">自動処理の判定範囲</span><br><select id="set-autocat" style="font-size:12px" title="選択した判定まで自動で対応へ進めます&#10;auto のみ / review まで / human まで / reject まで(全て)">

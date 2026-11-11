@@ -223,7 +223,7 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 |---|---|---|
 | `devinExe` | Devin Desktop 同梱 exe | devin CLI のパス |
 | `pollIntervalSec` | 120 | ポーリング間隔（秒） |
-| `maxConcurrent` | 1 | 同時起動セッション数 |
+| `maxConcurrent` | 1 | 同時起動セッション数（リポジトリ毎。評価で `scope:"multi"` と判定された課題のみ全リポジトリ合算で判定） |
 | `triggerLabel` 他 | `devin` / `devin:running` / `devin:done` / `devin:failed` | 状態ラベル（初回起動時に各 repo へ自動作成） |
 | `autoDiscover` | `true` | `true` なら全 open Issue/PR を定期検出して `candidates.json` を更新 |
 | `autoTrigger` | `true` | `true` なら検出した候補を自動起動（評価→実装）。検出自体は `autoDiscover` 側 |

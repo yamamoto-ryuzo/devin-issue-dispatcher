@@ -248,6 +248,7 @@ function parseVerdict(logPath) {
     }
     return { feasible: v.feasible, risk: v.risk, category,
       partial: v.partial === true || v.partial === 'true',
+      scope: v.scope === 'multi' ? 'multi' : 'repo',
       reason: v.reason ?? '', plan: v.plan ?? '' };
   } catch { return null; }
 }
@@ -839,10 +840,17 @@ function drainQueueBody(state) {
         : (dest === 'verify' || isPr)
           ? liveConfig('maxConcurrentPr', liveConfig('maxConcurrentImpl', base))
           : liveConfig('maxConcurrentImpl', base));
+      // 同時起動数はリポジトリ毎に数える（issue#70）。ただし評価で影響範囲が
+      // 複数リポジトリ横断（scope=multi）と判定された impl 課題は、作業ツリー
+      // 衝突回避のため全リポジトリ合算で上限を適用する
+      const tKey = keyOf(t.repo.github, t.type, t.number);
+      const globalScope = dest === 'impl' && t.type === 'issue'
+        && state.tasks[tKey]?.assess?.scope === 'multi';
       // dest（行き先フェーズ）で数える: impl 予定のタスクは評価中でも impl 枠を占有し、
       // 評価通過後に上限を超えて impl へ進まないようにする
       const busy = [...running.entries()].filter(([k, v]) =>
         v.dest === dest &&
+        (globalScope || k.startsWith(t.repo.github + ' ')) &&
         (dest === 'assess' || k.includes(isPr ? ' pr#' : ' issue#'))).length;
       // 同一リポジトリの書き込み系（impl=ローカルコミット / verify=push・reset）は
       // 同じ作業ツリーで衝突するため直列化

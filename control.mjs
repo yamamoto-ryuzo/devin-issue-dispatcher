@@ -316,10 +316,11 @@ async function closeAutoChatsForKey(key, { force = false } = {}) {
 }
 // フェーズ別の上限（maxConcurrentAssess/Impl）を超えた送信は待機キューへ
 const chatWait = []; // {key, mode, skill}
-function busyCount(mode, isPr) {
+function busyCount(mode, isPr, repo) {
   let n = 0;
   for (const s of chats.values()) {
     if (!s.chat.busy || !s.label.endsWith(' ' + mode)) continue;
+    if (repo && !s.label.startsWith(repo + ' ')) continue;
     if (isPr === undefined || s.label.includes(' pr#') === isPr) n++;
   }
   return n;
@@ -328,8 +329,8 @@ function chatCapacity(mode, key) {
   // 同一リポジトリの書き込み系（impl=ローカルコミット / pr=再検証 push）は
   // 同じ作業ツリーを使うため直列化。issue と PR が同時起動して
   // commit/push が衝突するのを防ぐ
+  const repo = key ? key.slice(0, key.indexOf(' ')) : null;
   if ((mode === 'impl' || mode === 'pr') && key) {
-    const repo = key.slice(0, key.indexOf(' '));
     for (const s of chats.values()) {
       if (s.chat.busy && (s.label.endsWith(' impl') || s.label.endsWith(' pr'))
           && s.label.startsWith(repo + ' ')) {
@@ -343,7 +344,11 @@ function chatCapacity(mode, key) {
     : (mode === 'pr' || isPr === true)
     ? (config.maxConcurrentPr ?? config.maxConcurrentImpl ?? config.maxConcurrent ?? 1)
     : (config.maxConcurrentImpl ?? config.maxConcurrent ?? 1);
-  return busyCount(mode, isPr) < max;
+  // 同時起動数はリポジトリ毎に数える（issue#70）。評価で影響範囲が複数
+  // リポジトリ横断（scope=multi）と判定された impl 課題のみ全リポジトリ合算で判定
+  const globalScope = mode === 'impl' && key && key.includes(' issue#')
+    && loadJson(STATE_PATH, { tasks: {} }).tasks[key]?.assess?.scope === 'multi';
+  return busyCount(mode, isPr, globalScope ? null : repo) < max;
 }
 // エンジン抽象層: devin=ACPチャット / copilot・antigravity=bridge-hub / api=汎用LLM(OpenAI互換)
 // apiUrl は Bearer キーを送信するため、外部ホストは https 限定。

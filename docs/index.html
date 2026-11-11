@@ -202,7 +202,7 @@ flowchart LR
 <table>
 <tr><th>キー</th><th>既定</th><th>意味</th></tr>
 <tr><td><code>pollIntervalSec</code></td><td>120</td><td>候補検出のポーリング周期</td></tr>
-<tr><td><code>maxConcurrentAssess</code> / <code>Impl</code> / <code>Pr</code></td><td>5 / 1 / 5</td><td>モード別同時起動数</td></tr>
+<tr><td><code>maxConcurrentAssess</code> / <code>Impl</code> / <code>Pr</code></td><td>5 / 1 / 5</td><td>モード別同時起動数（リポジトリ毎）</td></tr>
 <tr><td><code>implLoopMax</code></td><td>5</td><td>対応→検証 NG→修正ループの上限</td></tr>
 <tr><td><code>verifyLoopMax</code></td><td>3</td><td>再検証セッションのリトライ上限（到達で needs-review）</td></tr>
 <tr><td><code>implDoneLabel</code></td><td>AI:impl-done</td><td>実装済み・未検証のフラグラベル（付いた課題が再検証候補）</td></tr>
