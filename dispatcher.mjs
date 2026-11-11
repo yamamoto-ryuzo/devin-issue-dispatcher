@@ -566,7 +566,7 @@ async function runTask(task, state, { skipAssess = false } = {}) {
             ngNote = (cur.comments ?? []).at(-1)?.body?.split('\n')[0].slice(0, 160) ?? '';
           }
         } catch { st2 = 'needs-review'; }
-      } else st2 = 'failed';
+      } else st2 = tries >= vMax ? 'needs-review' : 'failed';
       // verify NG で差し戻された課題は保存済み verdict の category/risk を
       // 1ランク引き上げて再候補化（同一判定での無限再試行を防ぐ）
       const prevAssess = state.tasks[key]?.assess;
@@ -581,9 +581,12 @@ async function runTask(task, state, { skipAssess = false } = {}) {
         status: st2, finishedAt: new Date().toISOString(), exitCode: vcode };
       saveState(state);
       log(`VERIFY-${st2.toUpperCase()} ${key} (exit ${vcode})`);
+      // needs-review（vMax 到達・結果確定不能）は自動再検証を諦める終端。
+      // implDone を残すと discover が verify 候補へ戻して試行上限を迂回する
+      // （failed ＜ vMax は implDone 維持で次ポーリングに自動再試行させる）
       await setLabel(task.repo.github, task.number, task.type,
         st2 === 'failed' ? [LABEL.failed] : st2 === 'needs-review' ? [LABEL.needsReview] : [],
-        [LABEL.running]);
+        st2 === 'needs-review' ? [LABEL.running, LABEL.implDone] : [LABEL.running]);
       if (st2 === 'failed') await comment(task.repo.github, task.number, task.type,
         `再検証セッションが異常終了しました（exit ${vcode}）。ログ: \`${vp}\`\n\n再試行はパネルの「再実行」ボタンまたは \`POST /api/dispatch\` から行えます。`);
       if (st2 === 'needs-review') await comment(task.repo.github, task.number, task.type,
