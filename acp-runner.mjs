@@ -58,6 +58,7 @@ const rpc = (method, params) => {
 };
 
 let sessionId = null;
+let agentCaps = null;
 let buf = '';
 proc.stdout.on('data', (d) => {
   buf += d;
@@ -119,10 +120,25 @@ const iv = setInterval(async () => {
       k.keys = k.keys.filter((x) => x !== key);
       writeFileSync(KILL, JSON.stringify(k));
       out('\n[stopped by user]');
+      await closeSession();
       proc.kill();
     }
   } catch { /* noop */ }
 }, 2000);
+
+// devin 側セッション一覧に残さないよう、終了・停止前に session/close を
+// best-effort で通知する（自動起動セッションは完了とともに閉じる）
+const closeSession = async () => {
+  if (config.autoCloseChats === false) return;
+  if (!sessionId || !agentCaps?.sessionCapabilities?.close) return;
+  if (proc.exitCode !== null || proc.killed) return;
+  try {
+    await Promise.race([
+      rpc('session/close', { sessionId }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000)),
+    ]);
+  } catch { /* noop */ }
+};
 
 const finish = (code) => { clearInterval(iv); out(`\n[session closed exit=${code}]`); process.exit(code ?? 0); };
 // 孫プロセスが stdio を握り続けると 'close' は発火しない（孤児化した検証
@@ -134,10 +150,11 @@ proc.on('error', (e) => { out(`[spawn error] ${e.message}`); finish(1); });
 
 (async () => {
   try {
-    await rpc('initialize', {
+    const init = await rpc('initialize', {
       protocolVersion: 1,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     });
+    agentCaps = init?.agentCapabilities ?? null;
     await rpc('authenticate', { methodId: 'devin-browser', _meta: { api_key: API_KEY } });
     // 内蔵 issue-queue（mcp-server.mjs）＋ config.mcpServers を渡す。
     // 不正エントリは警告してスキップし、session/new を失敗させない
@@ -167,9 +184,11 @@ proc.on('error', (e) => { out(`[spawn error] ${e.message}`); finish(1); });
       prompt: [{ type: 'text', text: readFileSync(promptFile, 'utf8') }],
     });
     out(`\n[done] ${JSON.stringify(res ?? {})}`);
+    await closeSession();
     finish(0);
   } catch (e) {
     out(`[fatal] ${e.message}`);
+    await closeSession();
     finish(1);
   }
 })();

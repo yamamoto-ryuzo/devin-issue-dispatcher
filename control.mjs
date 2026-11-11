@@ -213,15 +213,32 @@ async function devinConfigOptions() {
     pending.clear();
     proc.kill();
   }, 45000);
+  let caps = null;
+  let sid = null;
   try {
-    await rpc('initialize', { protocolVersion: 1,
+    const init = await rpc('initialize', { protocolVersion: 1,
       clientCapabilities:
         { fs: { readTextFile: false, writeTextFile: false }, terminal: false } });
+    caps = init?.agentCapabilities ?? null;
     await rpc('authenticate',
       { methodId: 'devin-browser', _meta: { api_key: apiKey } });
     const s = await rpc('session/new', { cwd: ROOT, mcpServers: [] });
+    sid = s.sessionId;
     return s.configOptions ?? [];
-  } finally { clearTimeout(timer); proc.kill(); }
+  } finally {
+    clearTimeout(timer);
+    // ウォームアップで生成したセッションも devin 側一覧へ残さない
+    if (sid && caps?.sessionCapabilities?.close && config.autoCloseChats !== false
+        && proc.exitCode === null && !proc.killed) {
+      try {
+        await Promise.race([
+          rpc('session/close', { sessionId: sid }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000)),
+        ]);
+      } catch { /* noop */ }
+    }
+    proc.kill();
+  }
 }
 
 function makeChat(eng, restored = {}) {

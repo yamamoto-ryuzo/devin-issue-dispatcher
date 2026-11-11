@@ -321,7 +321,23 @@ export class AcpChat {
     this.push('sys', '[中断しました]');
   }
 
+  // devin 側セッション一覧に残さないよう session/close を best-effort で通知する。
+  // reset/close は savedSessionId を破棄して再開しない経路なので常に送る
+  // （abortTurn は再開用に保持するため送らない）
+  async closeRemote() {
+    if (this.proc && this.proc.exitCode === null && this.sessionId
+        && this.agentCaps?.sessionCapabilities?.close) {
+      try {
+        await Promise.race([
+          this.rpc('session/close', { sessionId: this.sessionId }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000)),
+        ]);
+      } catch { /* noop */ }
+    }
+  }
+
   async reset() {
+    await this.closeRemote();
     try { this.proc?.kill(); } catch { /* noop */ }
     this.proc = null; this.sessionId = null; this.ready = false;
     if (this.savedSessionId) {
@@ -332,16 +348,9 @@ export class AcpChat {
   }
 
   // セッションを閉じる（パネル「✕」）。devin 側のセッション一覧を掃除するため
-  // session/close を best-effort で通知してからローカルを畳む
+  // session/close を通知してからローカルを畳む（通知自体は reset 内の
+  // closeRemote が行う）
   async close() {
-    if (this.proc && this.sessionId && this.agentCaps?.sessionCapabilities?.close) {
-      try {
-        await Promise.race([
-          this.rpc('session/close', { sessionId: this.sessionId }),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000)),
-        ]);
-      } catch { /* noop */ }
-    }
     await this.reset();
   }
 
