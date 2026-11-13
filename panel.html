@@ -1831,16 +1831,15 @@ function taskLogToMessages(text) {
 }
 // 処理履歴「内容」列: 「何をどうしたか」を状態ラベル＋作業要約で端的に示す。
 // 要約は note（結果要約・中断事由）→ 評価 plan（実施した作業）→ reason
-// （判定理由）の先頭行を使う。ラベルは MM_TERMS のマーメイド状態名を流用して翻訳
+// （判定理由）を使い、複数行はそのまま全文表示する（セルは pre-wrap）。
+// ラベルは MM_TERMS のマーメイド状態名を流用して翻訳
 const mmTerm = (ja) => (MM_TERMS[LANG] ?? (LANG === 'ja' ? null : MM_TERMS.en))?.[ja] ?? ja;
-const firstLine = (s) =>
-  String(s ?? '').split('\n').map((x) => x.trim()).find(Boolean) ?? '';
 // queue_done の評価経路は note に verdict JSON をそのまま入れる
 // （assess にも記録済）。生 JSON は読めないので reason/plan へ読み替える
 function noteText(t) {
-  const s = firstLine(t.note);
+  const s = String(t.note ?? '').trim();
   if (!s.startsWith('{')) return s;
-  try { const j = JSON.parse(t.note); return firstLine(j?.reason) || firstLine(j?.plan); }
+  try { const j = JSON.parse(t.note); return String(j?.reason || j?.plan || '').trim(); }
   catch { return ''; }
 }
 function taskActionText(t) {
@@ -1858,10 +1857,9 @@ function taskActionText(t) {
     : t.status === 'rejected' ? mmTerm('対応困難・クローズ')
     : t.status === 'failed' ? mmTerm('失敗')
     : t.assess ? mmTerm('評価完了') : '';
-  const detail = [note, firstLine(t.assess?.plan) || firstLine(t.assess?.reason)]
-    .filter(Boolean).join(' — ');
-  const short = detail.length > 120 ? detail.slice(0, 120) + '…' : detail;
-  return label + (short ? ': ' + short : '');
+  const detail = [note, String(t.assess?.plan || t.assess?.reason || '').trim()]
+    .filter(Boolean).join('\n');
+  return label + (detail ? ': ' + detail : '');
 }
 // 「内容」列ホバー時の全文（note / plan / reason）
 function taskActionTip(t) {
@@ -2293,7 +2291,8 @@ async function refresh() {
     '<tr><td>' + (t.url ? '<a href="' + esc(t.url) + '" target="_blank" rel="noopener">' : '') +
     esc(taskShortLabel(t.key)) + (t.url ? '</a>' : '') +
     (t.title ? '<br><span style="color:#6b7280">' + esc(t.title) + '</span>' : '') + '</td>' +
-    '<td' + (taskActionTip(t) ? ' title="' + esc(taskActionTip(t)) + '"' : '') +
+    '<td style="white-space:pre-wrap;word-break:break-word"' +
+      (taskActionTip(t) ? ' title="' + esc(taskActionTip(t)) + '"' : '') +
       '>' + esc(taskActionText(t)) + '</td>' +
     '<td class="st-' + esc(t.status || '') + '">' +
     esc(t.status || '-') + '</td>' +
