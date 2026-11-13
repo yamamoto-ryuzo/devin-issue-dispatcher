@@ -818,6 +818,7 @@ function setLang(v) {
             <option value="openai">OpenAI 互換</option>
             <option value="anthropic">Anthropic（/v1/messages）</option>
             <option value="azure">Azure OpenAI（デプロイメント URL）</option>
+            <option value="gemini">Gemini（generateContent）</option>
           </select></label>
         <div id="api-provider-hint" style="color:#6b7280;margin-bottom:6px"></div>
         <div id="eng-azure" style="display:none">
@@ -832,6 +833,7 @@ function setLang(v) {
             <option value="https://api.anthropic.com/v1">【API】Anthropic</option>
             <option value="https://models.github.ai/inference/v1">【API】GitHub Models</option>
             <option value="https://generativelanguage.googleapis.com/v1beta/openai">【API】Gemini（OpenAI互換）</option>
+            <option value="https://generativelanguage.googleapis.com/v1beta">【API】Gemini（generateContent）</option>
           </select></label>
         <label style="display:block;margin-bottom:6px"><span data-i18n="エンドポイント">エンドポイント</span><br>
           <input id="set-apiurl" type="text" placeholder="https://…/v1（/chat/completions は自動付与）" style="width:320px" onchange="apiEndpointChanged()"></label>
@@ -1317,6 +1319,9 @@ function engPreset() {
   if (v === 'https://api.anthropic.com/v1') {
     document.getElementById('set-apiprovider').value = 'anthropic';
   }
+  if (v === 'https://generativelanguage.googleapis.com/v1beta') {
+    document.getElementById('set-apiprovider').value = 'gemini';
+  }
   engProviderChanged();
   apiEndpointChanged();
 }
@@ -1326,6 +1331,7 @@ function engProviderChanged() {
   document.getElementById('api-provider-hint').textContent =
     p === 'anthropic' ? 'x-api-key + anthropic-version で送信（max_tokens=8192・応答 content[]）。一覧は /models' :
     p === 'azure' ? 'apiUrl=リソース URL、モデル名=デプロイメント名。api-key ヘッダ + api-version で送信' :
+    p === 'gemini' ? 'x-goog-api-key で /models/{model}:generateContent へ送信（応答 candidates[].content.parts[]）。一覧は /models' :
     'OpenAI 互換（/chat/completions + Bearer）。モデル一覧は /models';
 }
 function apiEndpointChanged() {

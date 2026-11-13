@@ -32,6 +32,9 @@ export function assertApiUrlSafe(raw) {
 //            応答 content[].text 連結。一覧は /models（同ヘッダ）
 // azure:     apiUrl=リソースベース URL・apiModel=デプロイメント名。
 //            /openai/deployments/{model}/chat/completions?api-version= + api-key
+// gemini:    {apiUrl}/models/{model}:generateContent + x-goog-api-key。
+//            応答 candidates[0].content.parts[].text 連結。
+//            一覧は /models（name="models/xxx" → xxx へ正規化）
 const API_ADAPTERS = {
   openai: {
     chatUrl: (u) => u + '/chat/completions',
@@ -64,6 +67,19 @@ const API_ADAPTERS = {
     body: (cfg, prompt) => ({ messages: [{ role: 'user', content: prompt }] }),
     reply: (j) => j?.choices?.[0]?.message?.content || '',
     models: (j) => (j?.data ?? []).map((m) => m.id).filter(Boolean),
+    error: (j) => j?.error?.message,
+  },
+  gemini: {
+    chatUrl: (u, cfg) => u + '/models/' +
+      encodeURIComponent(cfg.apiModel) + ':generateContent',
+    modelsUrl: (u) => u + '/models',
+    headers: (key) => (key ? { 'x-goog-api-key': key } : {}),
+    body: (cfg, prompt) => ({ contents: [{ role: 'user',
+      parts: [{ text: prompt }] }] }),
+    reply: (j) => (j?.candidates?.[0]?.content?.parts ?? [])
+      .map((p) => p?.text || '').join(''),
+    models: (j) => (j?.models ?? [])
+      .map((m) => String(m?.name ?? '').replace(/^models\//, '')).filter(Boolean),
     error: (j) => j?.error?.message,
   },
 };

@@ -80,6 +80,18 @@ test('engineSend api: azure アダプタ（デプロイメント URL + api-key�
   assert.equal(JSON.parse(got.init.body).model, undefined); // デプロイメントは URL 内
 });
 
+test('engineSend api: gemini アダプタ（generateContent + x-goog-api-key + parts[]）', async () => {
+  let got;
+  const un = mockFetch(async (url, init) => { got = { url, init }; return res({ candidates: [{ content: { parts: [{ text: 'OK' }] } }] }); });
+  const out = await engineSendCore(
+    { apiUrl: 'https://generativelanguage.googleapis.com/v1beta/', apiModel: 'gemini-x', apiProvider: 'gemini' }, 'KEY', 'api', 'hi');
+  un();
+  assert.equal(out, 'OK');
+  assert.equal(got.url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-x:generateContent');
+  assert.equal(got.init.headers['x-goog-api-key'], 'KEY');
+  assert.equal(JSON.parse(got.init.body).contents[0].parts[0].text, 'hi');
+});
+
 test('apiListModels: プロバイダ別の一覧 URL・ヘッダ・パース', async () => {
   let got;
   const un = mockFetch(async (url, init) => { got = { url, init }; return res({ data: [{ id: 'm1' }] }); });
@@ -92,6 +104,11 @@ test('apiListModels: プロバイダ別の一覧 URL・ヘッダ・パース', a
   un2();
   assert.equal(got.url, 'https://res.openai.azure.com/openai/models?api-version=2024-10-21');
   assert.equal(got.init.headers['api-key'], 'K');
+  const un3 = mockFetch(async (url, init) => { got = { url, init }; return res({ models: [{ name: 'models/g1' }] }); });
+  const out3 = await apiListModels({ apiUrl: 'https://generativelanguage.googleapis.com/v1beta', apiProvider: 'gemini' }, 'K');
+  un3();
+  assert.deepEqual(out3, ['g1']);
+  assert.equal(got.init.headers['x-goog-api-key'], 'K');
 });
 
 test('injectExtraPrompt: 付与の有無', () => {

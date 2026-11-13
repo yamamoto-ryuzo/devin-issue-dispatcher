@@ -1257,35 +1257,117 @@ async function mcpToolCall(tool, args) {
 // OpenAI 互換 LLM のツール呼出ループ。ツール面は MCP_TOOLS を OpenAI tools
 // 形式で公開し、実行は mcpToolCall（自前 /api/* への内部プロキシ）で
 // 権限・検証ロジックを単一実装に保つ。
+const AI_SYS = 'あなたは Devin Agent Dispatcher の管理アシスタントです。' +
+  '課題一覧・状態確認・評価/対応のディスパッチ・設定参照などは提供ツールを使い、' +
+  '結果を日本語で簡潔に報告してください。' +
+  'kill・issue_close・stop などの破壊的ツールはユーザーが明示した場合のみ実行してください。';
+const oaiTools = () => MCP_TOOLS.map((t) => ({ type: 'function',
+  function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
+const parseToolArgs = (s) => { try { return JSON.parse(s || '{}'); } catch { return {}; } };
+// geo_driver の AI アシスタント同等: OpenAI 互換（openai/azure）に加え
+// anthropic（tool_use/tool_result）・gemini（functionCall/functionResponse）
+// でも同一の管理ツール呼出ループを回せるよう、プロバイダ別の送受信表現を定義。
+// init は会話コンテキスト、parse は応答から {text,raw,tools:[{id,name,args}]}、
+// pushTurn/pushResult はアシスタント発言とツール結果の履歴追加を担う
+const AI_TOOL_LOOPS = {
+  openai: {
+    init: (messages) => ({ msgs: [{ role: 'system', content: AI_SYS }, ...messages] }),
+    body: (ctx, cfg) => ({ model: cfg.apiModel, messages: ctx.msgs, tools: oaiTools() }),
+    parse: (j) => {
+      const m = j.choices?.[0]?.message ?? {};
+      return { text: m.content || '', raw: m,
+        tools: (m.tool_calls ?? []).map((tc) => ({ id: tc.id,
+          name: tc.function?.name, args: parseToolArgs(tc.function?.arguments) })) };
+    },
+    pushTurn: (ctx, m) => ctx.msgs.push({ role: 'assistant',
+      content: m.raw.content ?? null, tool_calls: m.raw.tool_calls }),
+    pushResult: (ctx, tc, out) => ctx.msgs.push({ role: 'tool',
+      tool_call_id: tc.id, content: JSON.stringify(out) }),
+  },
+  // openai と同一形式だがデプロイメントは URL 内のため model フィールドを送らない
+  azure: {
+    init: (messages) => ({ msgs: [{ role: 'system', content: AI_SYS }, ...messages] }),
+    body: (ctx) => ({ messages: ctx.msgs, tools: oaiTools() }),
+    parse: (j) => {
+      const m = j.choices?.[0]?.message ?? {};
+      return { text: m.content || '', raw: m,
+        tools: (m.tool_calls ?? []).map((tc) => ({ id: tc.id,
+          name: tc.function?.name, args: parseToolArgs(tc.function?.arguments) })) };
+    },
+    pushTurn: (ctx, m) => ctx.msgs.push({ role: 'assistant',
+      content: m.raw.content ?? null, tool_calls: m.raw.tool_calls }),
+    pushResult: (ctx, tc, out) => ctx.msgs.push({ role: 'tool',
+      tool_call_id: tc.id, content: JSON.stringify(out) }),
+  },
+  anthropic: {
+    init: (messages) => ({ msgs: messages.map((m) => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })) }),
+    body: (ctx, cfg) => ({ model: cfg.apiModel, max_tokens: 8192, system: AI_SYS,
+      messages: ctx.msgs,
+      tools: MCP_TOOLS.map((t) => ({ name: t.name, description: t.description,
+        input_schema: t.inputSchema })) }),
+    parse: (j) => {
+      const blocks = j.content ?? [];
+      return { text: blocks.filter((b) => b?.type === 'text')
+          .map((b) => b.text || '').join(''), raw: blocks,
+        tools: blocks.filter((b) => b?.type === 'tool_use')
+          .map((b) => ({ id: b.id, name: b.name, args: b.input ?? {} })) };
+    },
+    pushTurn: (ctx, m) => ctx.msgs.push({ role: 'assistant', content: m.raw }),
+    pushResult: (ctx, tc, out) => {
+      const blk = { type: 'tool_result', tool_use_id: tc.id,
+        content: JSON.stringify(out) };
+      const last = ctx.msgs[ctx.msgs.length - 1];
+      if (last?.role === 'user' && Array.isArray(last.content) &&
+          last.content[0]?.type === 'tool_result') last.content.push(blk);
+      else ctx.msgs.push({ role: 'user', content: [blk] });
+    },
+  },
+  gemini: {
+    init: (messages) => ({ contents: messages.map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: String(m.content ?? '') }] })) }),
+    body: (ctx) => ({ system_instruction: { parts: [{ text: AI_SYS }] },
+      contents: ctx.contents,
+      tools: [{ functionDeclarations: MCP_TOOLS.map((t) => ({
+        name: t.name, description: t.description, parameters: t.inputSchema })) }] }),
+    parse: (j) => {
+      const parts = j.candidates?.[0]?.content?.parts ?? [];
+      return { text: parts.filter((p) => p?.text != null)
+          .map((p) => p.text).join(''), raw: parts,
+        tools: parts.filter((p) => p?.functionCall)
+          .map((p) => ({ id: p.functionCall.name, name: p.functionCall.name,
+            args: p.functionCall.args ?? {} })) };
+    },
+    pushTurn: (ctx, m) => ctx.contents.push({ role: 'model', parts: m.raw }),
+    pushResult: (ctx, tc, out) => {
+      const part = { functionResponse: { name: tc.name,
+        response: { result: out } } };
+      const last = ctx.contents[ctx.contents.length - 1];
+      if (last?.role === 'user' && last.parts?.[0]?.functionResponse)
+        last.parts.push(part);
+      else ctx.contents.push({ role: 'user', parts: [part] });
+    },
+  },
+};
+
 async function aiChat(messages, maxSteps) {
   const url = (config.apiUrl || '').replace(/\/+$/, '');
   if (!url || !config.apiModel)
     throw new Error('apiUrl/apiModel 未設定（設定タブ「AI」で指定）');
   assertApiUrlSafe(url);
-  // ツール呼出ループは OpenAI 形式の tool_calls が前提のため anthropic は
-  // 明示エラー（課題処理の単発送信 engineSend は全プロバイダ対応済み）
   const apiProvider = String(config.apiProvider ?? 'openai').toLowerCase();
-  if (apiProvider === 'anthropic')
-    throw new Error('内蔵チャットのツールループは anthropic 未対応です（課題処理の api 送信は対応済み）');
+  const loop = AI_TOOL_LOOPS[apiProvider] ?? AI_TOOL_LOOPS.openai;
   const ad = apiAdapter(config);
   const limit = Math.min(Math.max(+maxSteps || +(config.toolMaxSteps ?? 10), 1), 20);
-  const tools = MCP_TOOLS.map((t) => ({ type: 'function',
-    function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
-  const msgs = [{ role: 'system',
-    content: 'あなたは Devin Agent Dispatcher の管理アシスタントです。' +
-      '課題一覧・状態確認・評価/対応のディスパッチ・設定参照などは提供ツールを使い、' +
-      '結果を日本語で簡潔に報告してください。' +
-      'kill・issue_close・stop などの破壊的ツールはユーザーが明示した場合のみ実行してください。' },
-    ...messages];
+  const ctx = loop.init(messages);
   const calls = [];
   for (let step = 0; step < limit; step++) {
     const r = await fetch(ad.chatUrl(url, config), {
       method: 'POST', redirect: 'manual',
       headers: { 'Content-Type': 'application/json',
         ...ad.headers(effectiveApiKey()) },
-      // azure はデプロイメントが URL 内のため model フィールドを送らない
-      body: JSON.stringify({ ...(apiProvider === 'azure' ? {} : { model: config.apiModel }),
-        messages: msgs, tools }),
+      body: JSON.stringify(loop.body(ctx, config)),
     });
     // Bearer キーがリダイレクト先の平文 http へ漏れないよう自動追跡しない
     if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) {
@@ -1293,21 +1375,19 @@ async function aiChat(messages, maxSteps) {
     }
     const j = await r.json();
     if (!r.ok) throw new Error(j.error?.message || 'api ' + r.status);
-    const m = j.choices?.[0]?.message ?? {};
-    const tcs = m.tool_calls ?? [];
-    if (!tcs.length) return { ok: true, reply: m.content || '', calls, steps: step + 1 };
-    msgs.push({ role: 'assistant', content: m.content ?? null, tool_calls: tcs });
-    for (const tc of tcs) {
-      const name = tc.function?.name;
-      let args = {};
-      try { args = JSON.parse(tc.function?.arguments || '{}'); } catch { /* noop */ }
+    const m = loop.parse(j);
+    if (!m.tools.length) return { ok: true, reply: m.text, calls, steps: step + 1 };
+    loop.pushTurn(ctx, m);
+    for (const tc of m.tools) {
+      const name = tc.name;
+      const args = tc.args ?? {};
       const tool = MCP_TOOLS.find((t) => t.name === name);
       let out;
       if (!tool) out = { error: 'unknown tool: ' + name };
       else { try { out = await mcpToolCall(tool, args); }
         catch (e) { out = { error: String(e?.message ?? e) }; } }
       calls.push({ name, args, result: out });
-      msgs.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(out) });
+      loop.pushResult(ctx, tc, out);
     }
   }
   return { ok: true, reply: '（ツール往復上限に達しました）', calls, steps: limit, truncated: true };
@@ -1538,8 +1618,8 @@ const server = createServer(async (req, res) => {
         const fresh = loadJson(CONFIG_PATH, config);
         // apiProvider は実装済みアダプタの種別のみ受理
         if (patch.apiProvider !== undefined &&
-            !['openai', 'anthropic', 'azure'].includes(String(patch.apiProvider))) {
-          return json(400, { ok: false, error: 'apiProvider は openai/anthropic/azure のみ' });
+            !['openai', 'anthropic', 'azure', 'gemini'].includes(String(patch.apiProvider))) {
+          return json(400, { ok: false, error: 'apiProvider は openai/anthropic/azure/gemini のみ' });
         }
         // mcpServers は ACP 形式 [{name,command|url,...}] のみ受理
         if (patch.mcpServers !== undefined && !(Array.isArray(patch.mcpServers) &&
