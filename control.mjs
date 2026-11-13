@@ -933,15 +933,24 @@ function watchImpl(key, ch) {
     recordWatchTimeout(key, 'impl'); }, 30 * 60 * 1000).unref?.();
 }
 
+// 課題キー "<repo> issue|pr#N" から GitHub 上の課題 URL を復元する。
+// issues.json/state.tasks に url が残っていない古い履歴でも履歴表をリンク化する
+function taskUrlFromKey(key) {
+  const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
+  if (!m) return null;
+  return 'https://github.com/' + m[1] + (m[2] === 'pr' ? '/pull/' : '/issues/') + m[3];
+}
+
 function status() {
   const state = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
   // 履歴表示の「何を」に使う課題タイトル・URL を issues.json ストアから付与
-  // （issues.json は発見時の一時ストア。無い履歴分は state.tasks の永続値を使う）
+  // （issues.json は発見時の一時ストア。無い履歴分は state.tasks の永続値、
+  // それも無ければ課題キーから復元する）
   const issues = readIssueStore(ISSUES_PATH).issues ?? {};
   const tasks = Object.entries(state.tasks ?? {})
     .map(([key, t]) => ({ key, ...t,
       title: issues[key]?.title ?? t.title ?? null,
-      url: issues[key]?.url ?? t.url ?? null }))
+      url: issues[key]?.url ?? t.url ?? taskUrlFromKey(key) }))
     .sort((a, b) => (b.startedAt ?? b.finishedAt ?? '').localeCompare(a.startedAt ?? a.finishedAt ?? ''))
     .slice(0, 30);
   return {
