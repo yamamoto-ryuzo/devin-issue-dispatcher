@@ -1861,10 +1861,6 @@ function taskActionText(t) {
     .filter(Boolean).join('\n');
   return label + (detail ? ': ' + detail : '');
 }
-// 「内容」列ホバー時の全文（note / plan / reason）
-function taskActionTip(t) {
-  return [t.note, t.assess?.plan, t.assess?.reason].filter(Boolean).join('\n');
-}
 
 async function loadSessions() {
   try {
@@ -2291,9 +2287,8 @@ async function refresh() {
     '<tr><td>' + (t.url ? '<a href="' + esc(t.url) + '" target="_blank" rel="noopener">' : '') +
     esc(taskShortLabel(t.key)) + (t.url ? '</a>' : '') +
     (t.title ? '<br><span style="color:#6b7280">' + esc(t.title) + '</span>' : '') + '</td>' +
-    '<td style="white-space:pre-wrap;word-break:break-word"' +
-      (taskActionTip(t) ? ' title="' + esc(taskActionTip(t)) + '"' : '') +
-      '>' + esc(taskActionText(t)) + '</td>' +
+    '<td style="white-space:pre-wrap;word-break:break-word">' +
+      esc(taskActionText(t)) + '</td>' +
     '<td class="st-' + esc(t.status || '') + '">' +
     esc(t.status || '-') + '</td>' +
     '<td title="' + esc(t.assess?.reason || t.assess?.error || '') + '">' +
