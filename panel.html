@@ -1829,24 +1829,43 @@ function taskLogToMessages(text) {
     .map((x) => ({ ...x, text: x.text.replace(/\n+$/, '') }))
     .filter((x) => x.role !== 'agent' || x.text.trim());
 }
-// 処理履歴「内容」列: タスク状態から「何をどうしたか」を端的に導出する。
-// ラベルはマーメイド状態名（MM_TERMS）を流用して翻訳する
+// 処理履歴「内容」列: 「何をどうしたか」を状態ラベル＋作業要約で端的に示す。
+// 要約は note（結果要約・中断事由）→ 評価 plan（実施した作業）→ reason
+// （判定理由）の先頭行を使う。ラベルは MM_TERMS のマーメイド状態名を流用して翻訳
 const mmTerm = (ja) => (MM_TERMS[LANG] ?? (LANG === 'ja' ? null : MM_TERMS.en))?.[ja] ?? ja;
+const firstLine = (s) =>
+  String(s ?? '').split('\n').map((x) => x.trim()).find(Boolean) ?? '';
+// queue_done の評価経路は note に verdict JSON をそのまま入れる
+// （assess にも記録済）。生 JSON は読めないので reason/plan へ読み替える
+function noteText(t) {
+  const s = firstLine(t.note);
+  if (!s.startsWith('{')) return s;
+  try { const j = JSON.parse(t.note); return firstLine(j?.reason) || firstLine(j?.plan); }
+  catch { return ''; }
+}
 function taskActionText(t) {
-  if (t.note) return t.note;
   const ph = t.inflight || t.phase;
+  const note = noteText(t);
   if (t.status === 'running' || t.inflight)
-    return mmTerm(ph === 'assess' ? '評価中' : ph === 'verify' ? '検証中' : '実装中');
-  switch (t.status) {
-    case 'closed': return mmTerm(t.createdPr || t.prAt ? '完了・クロース' : 'クローズ');
-    case 'done': return mmTerm('完了');
-    case 'impl-done': return mmTerm('実装完了・検証前');
-    case 'verify-ng': return mmTerm('差し戻し');
-    case 'needs-review': return mmTerm('要人間確認');
-    case 'rejected': return mmTerm('対応困難・クローズ');
-    case 'failed': return mmTerm('失敗');
-  }
-  return t.assess ? mmTerm('評価完了') : '';
+    return mmTerm(ph === 'assess' ? '評価中' : ph === 'verify' ? '検証中' : '実装中')
+      + (note ? ': ' + note : '');
+  const label =
+    t.status === 'closed' ? mmTerm(t.createdPr || t.prAt ? '完了・クロース' : 'クローズ')
+    : t.status === 'done' ? mmTerm('完了')
+    : t.status === 'impl-done' ? mmTerm('実装完了・検証前')
+    : t.status === 'verify-ng' ? mmTerm('差し戻し')
+    : t.status === 'needs-review' ? mmTerm('要人間確認')
+    : t.status === 'rejected' ? mmTerm('対応困難・クローズ')
+    : t.status === 'failed' ? mmTerm('失敗')
+    : t.assess ? mmTerm('評価完了') : '';
+  const detail = [note, firstLine(t.assess?.plan) || firstLine(t.assess?.reason)]
+    .filter(Boolean).join(' — ');
+  const short = detail.length > 120 ? detail.slice(0, 120) + '…' : detail;
+  return label + (short ? ': ' + short : '');
+}
+// 「内容」列ホバー時の全文（note / plan / reason）
+function taskActionTip(t) {
+  return [t.note, t.assess?.plan, t.assess?.reason].filter(Boolean).join('\n');
 }
 
 async function loadSessions() {
@@ -2274,7 +2293,8 @@ async function refresh() {
     '<tr><td>' + (t.url ? '<a href="' + esc(t.url) + '" target="_blank" rel="noopener">' : '') +
     esc(taskShortLabel(t.key)) + (t.url ? '</a>' : '') +
     (t.title ? '<br><span style="color:#6b7280">' + esc(t.title) + '</span>' : '') + '</td>' +
-    '<td>' + esc(taskActionText(t)) + '</td>' +
+    '<td' + (taskActionTip(t) ? ' title="' + esc(taskActionTip(t)) + '"' : '') +
+      '>' + esc(taskActionText(t)) + '</td>' +
     '<td class="st-' + esc(t.status || '') + '">' +
     esc(t.status || '-') + '</td>' +
     '<td title="' + esc(t.assess?.reason || t.assess?.error || '') + '">' +

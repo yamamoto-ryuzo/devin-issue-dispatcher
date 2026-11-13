@@ -75,6 +75,10 @@ const log = (msg) => {
   appendFileSync(join(LOG_DIR, 'dispatcher.log'), line + '\n');
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// 候補の課題タイトル/URL を state.tasks へ残す。issues.json は発見時の
+// 一時ストアで履歴分が消えるため、処理履歴の「何を」表示用に永続化する
+const candMeta = (t) => ({ ...(t?.title ? { title: t.title } : {}),
+  ...(t?.url ? { url: t.url } : {}) });
 
 function loadState() {
   try { return JSON.parse(readFileSync(STATE_PATH, 'utf8')); }
@@ -505,7 +509,7 @@ async function runTask(task, state, { skipAssess = false } = {}) {
       // impl/verify 委譲: chat 完了時に control 側 watchImpl が chatResult で
       // status を確定するまで running 表示を維持。chatId は停止要求
       // （kill-requests → /api/chat/cancel）用に記録する
-      state.tasks[key] = { ...cur,
+      state.tasks[key] = { ...cur, ...candMeta(task),
         inflight: dmode, inflightAt: now, engineUsed: deng,
         ...(j?.id != null ? { chatId: j.id } : {}),
         note: `エンジン ${deng} のためチャット経路へ委譲(${dmode})`,
@@ -534,7 +538,7 @@ async function runTask(task, state, { skipAssess = false } = {}) {
   running.set(key, { proc: null, logPath: base, startedAt: Date.now(),
     phase: task.verify ? 'verify' : 'assess', dest: task.verify ? 'verify' : 'impl' });
   // スプレッド保持: パネル保存の engineReq 等を消さない
-  state.tasks[key] = { ...(state.tasks[key] ?? {}),
+  state.tasks[key] = { ...(state.tasks[key] ?? {}), ...candMeta(task),
     status: 'running', phase: task.verify ? 'verify' : 'assess', startedAt: new Date().toISOString() };
   saveState(state);
 
@@ -1078,7 +1082,7 @@ async function doAssess(task, state) {
   const eng = resolveTaskEngine(key, 'assess', state);
   if (eng !== 'devin') {
     await dispatchViaChat(key, 'assess', eng);
-    state.tasks[key] = { ...(state.tasks[key] ?? {}),
+    state.tasks[key] = { ...(state.tasks[key] ?? {}), ...candMeta(task),
       inflight: 'assess', inflightAt: new Date().toISOString(), engineUsed: eng,
       note: `エンジン ${eng} のためチャット経路へ委譲` };
     saveState(state);
@@ -1088,7 +1092,7 @@ async function doAssess(task, state) {
     `${task.repo.github.replace('/', '_')}_${task.type}${task.number}_assess_${Date.now()}.log`);
   log(`ASSESS-ONLY ${key} -> ${ap}`);
   running.set(key, { proc: null, logPath: ap, startedAt: Date.now(), phase: 'assess', dest: 'assess' });
-  state.tasks[key] = { ...(state.tasks[key] ?? {}),
+  state.tasks[key] = { ...(state.tasks[key] ?? {}), ...candMeta(task),
     inflight: 'assess', inflightAt: new Date().toISOString() };
   saveState(state);
   try {
@@ -1192,7 +1196,7 @@ async function cycle(state) {
         || state.tasks[key]?.inflight) continue;
       queue.push({ ...t, assessOnly: true });
       // パネルの「待機中」表示・SSE 即時反映用に state へキュー待ちを記録する
-      state.tasks[key] = { ...(state.tasks[key] ?? {}),
+      state.tasks[key] = { ...(state.tasks[key] ?? {}), ...candMeta(t),
         queued: 'assess', queuedAt: new Date().toISOString() };
       qd = true;
       log(`queued assess ${key} "${t.title}"`);
@@ -1216,7 +1220,7 @@ async function cycle(state) {
     // 起票者ゲート: autoTriggerMode=trusted で非信頼 author の課題は自動起動しない
     // （候補一覧には出す。手動 dispatch・devin ラベル経路は別途起動可）
     if (t.autoBlocked) {
-      state.tasks[key] = { ...(state.tasks[key] ?? {}),
+      state.tasks[key] = { ...(state.tasks[key] ?? {}), ...candMeta(t),
         autoBlocked: t.autoBlocked, author: t.author ?? null };
       saveState(state);
       log('skip ' + key + ': autoBlocked (' + t.autoBlocked + ', author=' + (t.author ?? '?') + ')');
@@ -1234,7 +1238,7 @@ async function cycle(state) {
       // verify へ進めず永久滞留する
       if (!!queue[qi].verify !== !!t.verify) {
         queue.splice(qi, 1, t);
-        state.tasks[key] = { ...(state.tasks[key] ?? {}),
+        state.tasks[key] = { ...(state.tasks[key] ?? {}), ...candMeta(t),
           queued: t.verify ? 'verify' : 'impl' };
         saveState(state);
         log(`requeue ${key}: kind changed -> ${t.verify ? 'verify' : 'impl'}`);
@@ -1244,7 +1248,7 @@ async function cycle(state) {
     if (t.labels.includes(LABEL.running) && !running.has(key)) continue; // reclaimStale が処理
     queue.push(t);
     // パネルの「待機中」表示・SSE 即時反映用に state へキュー待ちを記録する
-    state.tasks[key] = { ...(state.tasks[key] ?? {}),
+    state.tasks[key] = { ...(state.tasks[key] ?? {}), ...candMeta(t),
       queued: t.verify ? 'verify' : 'impl', queuedAt: new Date().toISOString() };
     saveState(state);
     log(`queued ${key} "${t.title}"`);

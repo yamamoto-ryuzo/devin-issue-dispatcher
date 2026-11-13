@@ -431,7 +431,10 @@ async function dispatchChatTask(key, mode, skill, engine) {
   // 実際に使われたエンジンを記録（パネル/ログで追跡）
   {
     const st = loadJson(STATE_PATH, { tasks: {} });
+    const itMeta = readIssueStore(ISSUES_PATH).issues?.[key];
     const next = { ...(st.tasks[key] ?? {}),
+      ...(itMeta?.title ? { title: itMeta.title } : {}),
+      ...(itMeta?.url ? { url: itMeta.url } : {}),
       engineUsed: eng, engineUsedAt: new Date().toISOString() };
     // エンジン障害由来の failed は新規試行開始時に解除する（再評価の成功で
     // 自動連鎖できるように。engineError 未記録＝別経路の失敗は触らない）
@@ -933,10 +936,12 @@ function watchImpl(key, ch) {
 function status() {
   const state = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
   // 履歴表示の「何を」に使う課題タイトル・URL を issues.json ストアから付与
+  // （issues.json は発見時の一時ストア。無い履歴分は state.tasks の永続値を使う）
   const issues = readIssueStore(ISSUES_PATH).issues ?? {};
   const tasks = Object.entries(state.tasks ?? {})
-    .map(([key, t]) => ({ key, title: issues[key]?.title ?? null,
-      url: issues[key]?.url ?? null, ...t }))
+    .map(([key, t]) => ({ key, ...t,
+      title: issues[key]?.title ?? t.title ?? null,
+      url: issues[key]?.url ?? t.url ?? null }))
     .sort((a, b) => (b.startedAt ?? b.finishedAt ?? '').localeCompare(a.startedAt ?? a.finishedAt ?? ''))
     .slice(0, 30);
   return {

@@ -44,6 +44,8 @@ const call = (name, args) => {
     // （解除は queue_done または dispatcher の滞留回収が行う）
     const st = load(STATE, { tasks: {} });
     st.tasks[it.key] = { ...(st.tasks[it.key] ?? {}),
+      ...(it.title ? { title: it.title } : {}),
+      ...(it.url ? { url: it.url } : {}),
       status: 'running', inflight: it.mode, inflightAt: it.claimedAt };
     save(STATE, st);
     const common =
