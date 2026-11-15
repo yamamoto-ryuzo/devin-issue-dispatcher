@@ -1579,7 +1579,12 @@ async function toggleFlag(key) {
       method: 'POST', headers: H, body: JSON.stringify({ [key]: flags[key] }),
     });
     const j = await r.json();
-    toast(j.ok ? key + ' を ' + flags[key] + ' に変更しました' : '失敗: ' + (j.error || ''));
+    if (j.ok) {
+      toast(key + ' を ' + flags[key] + ' に変更しました');
+    } else {
+      flags[key] = !flags[key]; renderFlag(key);
+      toast('失敗: ' + (j.error || ''));
+    }
   } catch (e) { flags[key] = !flags[key]; renderFlag(key); toast(key + ': ' + e.message); }
   refresh();
   loadCandidates(false);
