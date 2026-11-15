@@ -35,6 +35,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { keyOf, discover, toCandidate, readIssueStore, ghJson } from './discover.mjs';
 import { resolveDelegatedStatus, isDelegatedStale, checklistOf } from './core-logic.mjs';
+import { recordProposals, listProposals } from './proposals.mjs';
 import { sweepQueue, queueStaleMs } from './work-queue.mjs';
 import { AcpChat } from './acp-chat.mjs';
 import { computeMetrics } from './metrics.mjs';
@@ -47,6 +48,7 @@ const CONFIG_PATH = join(ROOT, 'config.json');
 const DESIRED_PATH = join(ROOT, 'desired.json');
 const STATE_PATH = join(ROOT, 'state.json');
 const CANDS_PATH = join(ROOT, 'candidates.json');
+const PROPOSALS_PATH = join(ROOT, 'proposals.json');
 const GOALS_PATH = join(ROOT, 'goals.json');
 const ISSUES_PATH = join(ROOT, 'issues.json');
 const WORKQUEUE_PATH = join(ROOT, 'work-queue.json');
@@ -853,6 +855,10 @@ function watchAssess(key, ch) {
         }
         writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
         if (chainable) chatWait.push({ key, mode: chainMode });
+        // proposals（語彙・判定種別の新設提案）を proposals.json へ蓄積。
+        // 判定反映の後で行い、蓄積失敗が判定フローを壊さないようにする
+        try { recordProposals(PROPOSALS_PATH, key, v.proposals,
+          config.proposalThreshold ?? 3); } catch { /* noop */ }
       } catch { /* malformed JSON */ }
       break;
     }
@@ -993,6 +999,7 @@ function status() {
       extraPrompt: config.extraPrompt ?? '',
       repos: (config.repos || []).map((r) => r.github),
       assessMaxAgeHours: config.assessMaxAgeHours ?? 24,
+      proposalThreshold: config.proposalThreshold ?? 3,
       autoTriggerSince: config.autoTriggerSince ?? null,
       permissionMode: config.permissionMode ?? 'dangerous',
       toolMaxSteps: config.toolMaxSteps ?? 10,
@@ -1164,6 +1171,9 @@ async function candidates(force) {
     autoEnabled: config.autoTrigger ?? false,
     discoverEnabled: config.autoDiscover ?? true,
     openCounts,
+    // 評価提案（proposals）の蓄積束。閾値到達分は ready=true の「設定候補」
+    proposals: listProposals(PROPOSALS_PATH, config.proposalThreshold ?? 3),
+    proposalThreshold: config.proposalThreshold ?? 3,
     candidates: raw.map((c) => {
       const key = keyOf(c.repo, c.type, c.number);
       const t = state.tasks?.[key];
@@ -1560,7 +1570,8 @@ async function handleMcp(req, res, acao, readOnly = false) {
 const sseClients = new Set();
 let stateWatcher = null, sseTimer = null;
 const SSE_WATCH_FILES = new Set(
-  ['state.json', 'candidates.json', 'issues.json', 'desired.json', 'chats.json']);
+  ['state.json', 'candidates.json', 'issues.json', 'desired.json', 'chats.json',
+    'proposals.json']);
 function sseBroadcast(obj) {
   const data = 'data: ' + JSON.stringify(obj) + '\n\n';
   for (const res of sseClients) { try { res.write(data); } catch { /* noop */ } }
@@ -1730,7 +1741,8 @@ const server = createServer(async (req, res) => {
           'maxConcurrent', 'maxConcurrentAssess', 'maxConcurrentImpl', 'maxConcurrentPr',
           'autoDiscover', 'autoTrigger', 'autoTriggerMode', 'trustedAuthors', 'autoIssueOnFailure', 'failureDedupeHours', 'autoAssess', 'autoPr', 'autoCategory',
           'maxAutoRisk',
-          'assessMaxAgeHours', 'autoTriggerSince', 'permissionMode', 'implLoopMax',
+          'assessMaxAgeHours', 'proposalThreshold',
+          'autoTriggerSince', 'permissionMode', 'implLoopMax',
           'engine', 'bridgeHub', 'apiUrl', 'apiModel', 'extraPrompt', 'extraOrigins',
           'toolMaxSteps', 'apiModels', 'bridgeModels', 'acpOptions', 'plugins',
           'mcpServers', 'apiProvider', 'apiVersion',

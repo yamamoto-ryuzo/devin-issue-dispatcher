@@ -9,12 +9,14 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPolicy } from './task-prompts.mjs';
 import { sweepQueue, queueStaleMs } from './work-queue.mjs';
+import { recordProposals } from './proposals.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const QUEUE = join(ROOT, 'work-queue.json');
 const STATE = join(ROOT, 'state.json');
 const ISSUES = join(ROOT, 'issues.json');
 const CONFIG = join(ROOT, 'config.json');
+const PROPOSALS = join(ROOT, 'proposals.json');
 const load = (p, d) => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return d; } };
 const save = (p, v) => writeFileSync(p, JSON.stringify(v, null, 2));
 
@@ -102,6 +104,11 @@ const call = (name, args) => {
     st.tasks[args.key] = { ...(st.tasks[args.key] ?? {}), status: args.status,
       note: args.note ?? '', finishedAt: new Date().toISOString(), engine: 'ide',
       ...(assess?.category ? { assess, assessedAt: new Date().toISOString() } : {}) };
+    // assess note の proposals は proposals.json へ蓄積（蓄積失敗は完了記録を壊さない）
+    if (assess?.category && Array.isArray(assess.proposals)) {
+      try { recordProposals(PROPOSALS, args.key, assess.proposals,
+        load(CONFIG, {}).proposalThreshold ?? 3); } catch { /* noop */ }
+    }
     delete st.tasks[args.key].inflight;
     delete st.tasks[args.key].inflightAt;
     st.tasks[args.key].inflightClearedAt = new Date().toISOString();

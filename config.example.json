@@ -17,6 +17,7 @@
   "autoPr": true,
   "autoCategory": "review",
   "assessMaxAgeHours": 24,
+  "proposalThreshold": 3,
   "maxAutoRisk": "medium",
   "needsReviewLabel": "devin:needs-review",
   "rejectedLabel": "devin:rejected",

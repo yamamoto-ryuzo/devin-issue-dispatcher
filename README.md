@@ -254,7 +254,8 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 | `maxNewPerPoll` | 50 | 1ポーリングで自動起動キューに乗せる新規課題の上限（`autoTriggerSince:"all"` で backlog が全候補の場合でも `maxConcurrent` による直列実行なので実害なし） |
 | `staleRunningMinutes` | 180 | dispatcher 停止で取り残された `running` ラベルを failed に戻すまでの時間 |
 | `permissionMode` | `dangerous` | `devin -p` の権限モード。**無人運用には `dangerous` が事実上必須**（Windows は `--sandbox` 非対応のため）。リスクを下げたい場合は `smart`（承認待ちになりうる） |
-| `assessFirst` | `true` | 実装前に読み取り専用の**評価セッション**を実行（feasible/risk/category/reason/plan を JSON 出力させる） |
+| `assessFirst` | `true` | 実装前に読み取り専用の**評価セッション**を実行（feasible/risk/category/reason/plan を JSON 出力させる）。低確信度時は任意の `proposals[]`（語彙・判定種別の新設提案）も出力でき、`proposals.json` へ同じ `kind`+`target`+`neighbor_of` で束ねて蓄積する |
+| `proposalThreshold` | `3` | proposals の束内で `confidence:high` がこの件数に達するとパネルへ「設定候補」として表示（採否は人が語彙表/`_assess.md`/config の更新で判断。未達の束も消えない） |
 | `maxAutoRisk` | `medium` | 自動実装に進めるリスク上限 |
 | `autoPr` | `false` | `AI:impl-done` 付き課題の再検証（PR処理＝リモートへのコミット）を自動実行するか |
 | `implDoneLabel` | `AI:impl-done` | 実装済み・未検証のフラグラベル。付いた open issue が再検証候補になる |
@@ -330,6 +331,8 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 - `candidates.json` — 対応候補のキャッシュ（自動生成。`fetchedAt` + 軽量化した課題一覧）
 - `issues.json` — open 課題のローカルストア（自動生成。title/body/labels/日時を保持。
   `--task`・将来の消費者が gh 再取得せず使える）
+- `proposals.json` — 評価提案の蓄積ストア（自動生成。`kind`+`target`+`neighbor_of` で
+  束ねた提案と出典・confidence 集計。閾値到達分がパネルの「設定候補」になる）
 - `desired.json` — 「起動」状態の永続化（自動生成）
 - `chats.json` — パネル内蔵チャットの一覧と ACP `sessionId`（自動生成）。devin/copilot の
   ACP セッションは切断・control 再起動後も次の送信で `session/load` を試みて会話を再開する

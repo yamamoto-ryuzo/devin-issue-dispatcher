@@ -205,6 +205,7 @@ flowchart LR
 <tr><td><code>maxConcurrentAssess</code> / <code>Impl</code> / <code>Pr</code></td><td>5 / 1 / 5</td><td>モード別同時起動数（リポジトリ毎）</td></tr>
 <tr><td><code>implLoopMax</code></td><td>5</td><td>対応→検証 NG→修正ループの上限</td></tr>
 <tr><td><code>verifyLoopMax</code></td><td>3</td><td>再検証セッションのリトライ上限（到達で needs-review）</td></tr>
+<tr><td><code>proposalThreshold</code></td><td>3</td><td>評価出力の任意 proposals（語彙・判定種別の新設提案）を <code>proposals.json</code> へ kind+target+neighbor_of で束ね蓄積。束内の confidence:high 件数が閾値に達するとパネルへ「設定候補」として表示し人の採否を待つ</td></tr>
 <tr><td><code>implDoneLabel</code></td><td>AI:impl-done</td><td>実装済み・未検証のフラグラベル（付いた課題が再検証候補）</td></tr>
 <tr><td><code>autoDiscover/autoAssess/autoTrigger/autoPr</code></td><td>false</td><td>自動化フラグ（パネルのトグルと連動。autoPr=再検証の自動実行）</td></tr>
 <tr><td><code>repos</code></td><td>—</td><td>監視リポジトリ（path + github）</td></tr>

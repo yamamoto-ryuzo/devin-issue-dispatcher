@@ -11,6 +11,7 @@ logs/
 node_modules/
 *.tmp
 work-queue.json
+proposals.json
 goals.json
 secrets.json
 config.local.json

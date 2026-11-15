@@ -74,3 +74,26 @@ devin-assess-->
 
 このブロックが検出されるとパネル側で判定（auto/review/human/reject・risk）が即座に反映される。
 テキストでの報告だけで終わらせないこと。
+
+### proposals（省略可・後方互換）
+
+座標・判定の確信度が `low`/`medium` で判断に迷ったとき、「この軸に新しい値が要るか」
+「判定種別（category/risk/語彙）の新設が要るか」を提案として JSON に同梱してよい。
+提案は蓄積され、同じ `kind`+`target`+`neighbor_of` の束内で `confidence:high` が
+閾値に達するとパネルへ「設定候補」として提示される（採否は人が判断する）。
+
+```json
+"proposals":[{
+  "kind":"value|category|risk|label",
+  "target":"connection",
+  "neighbor_of":["connection.version","structure.representation"],
+  "statement":"機能名を含まない一文で、足したい語彙・判定が何を区別するか",
+  "confidence":"low|medium|high"
+}]
+```
+
+- `kind`: `value`=既存軸への新しい値 / `category`=判定種別の新設 / `risk`=リスク区分の新設 / `label`=ラベル・語彙の新設
+- `target`: 提案が属する軸・対象の名前
+- `neighbor_of`: 隣接する既存の値・座標（同じ語彙の字面でなく構造の近傍を挙げる）
+- `statement`: 機能名を含まない一文で「何を区別する判定・語彙か」を書く
+- 迷いが無い課題では `proposals` を出力しない（必須ではない）

@@ -101,7 +101,16 @@ ${HEAD(t)}
 ## 出力形式（応答の最後に必ずこのブロックを出力）
 <!--devin-assess
 {"feasible":"yes|needs-human|no","risk":"low|medium|high","category":"auto|review|human|reject","partial":true|false,"reason":"...","plan":"..."}
-devin-assess-->`,
+devin-assess-->
+
+### proposals（省略可・後方互換）
+座標・判定の確信度が low/medium で迷ったときだけ、語彙・判定種別の新設提案を
+上記 JSON へ "proposals" 配列として同梱してよい:
+"proposals":[{"kind":"value|category|risk|label","target":"<軸・対象名>",
+"neighbor_of":["<隣接する既存の値・座標>"],"statement":"機能名を含まない一文で何を区別するか",
+"confidence":"low|medium|high"}]
+同じ kind+target+neighbor_of の提案は束ねて蓄積され、confidence:high が閾値に達すると
+パネルへ「設定候補」として提示される（採否は人が判断）。迷いが無ければ出力しない`,
 
   split: (t) => `あなたは GitHub issue の実装状況を切り分けるエージェントです。
 このセッションでは【切り分けのみ】を行います。**コード変更・コミット・push・PR作成は禁止です。**

@@ -219,6 +219,7 @@ en: {
 '概要':'Overview','監視・共通':'Monitor & Common','ポーリング周期 (秒)':'Poll interval (s)',
 '候補キャッシュ有効 (秒)':'Candidate cache TTL (s)','新規候補の上限/回':'Max new per poll',
 '評価 同時起動数':'Concurrent assess','判定の鮮度 (時間)':'Verdict freshness (h)',
+'提案の候補化閾値 (high件数)':'Proposal threshold (high count)',
 '対応 同時起動数':'Concurrent impl','PR/再検証 同時起動数':'Concurrent PR/verify','検証ループ上限 (回)':'Verify loop max',
 '自動処理の判定範囲':'Auto verdict range','自動処理のリスク上限':'Auto risk limit',
 'auto のみ':'auto only','review まで':'up to review','human まで':'up to human','reject まで(全て)':'up to reject (all)',
@@ -241,6 +242,8 @@ en: {
 'フィルター:':'Filter:','判定:すべて':'Verdict: all','未評価':'Unassessed','リスク:すべて':'Risk: all','状態:すべて':'Status: all',
 '実行中':'Running','待機中':'Queued','非実行':'Idle','読み込み中…':'Loading…',
 '候補なし':'No candidates','監視リポジトリなし':'No watched repos',
+'設定候補（評価提案の蓄積）':'Config candidates (assess proposals)','件で候補化':'high-confidence items to qualify',
+'設定候補':'Config candidate','蓄積中':'Collecting',
 '評価待機中':'Waiting (assess)','実装待機中':'Waiting (impl)','検証待機中':'Waiting (verify)',
 '評価中':'Assessing','実装中':'Implementing','検証中':'Verifying','評価失敗':'Assess failed','PR中#':'In PR #',
 'テーブル':'Table','ボード':'Board','表示切替':'Toggle view','未着手':'Todo',
@@ -288,6 +291,7 @@ zh: {
 '概要':'概览','監視・共通':'监视/通用','ポーリング周期 (秒)':'轮询周期 (秒)',
 '候補キャッシュ有効 (秒)':'候选缓存有效期 (秒)','新規候補の上限/回':'每次新候选上限',
 '評価 同時起動数':'评估并发数','判定の鮮度 (時間)':'判定有效期 (小时)',
+'提案の候補化閾値 (high件数)':'提案候选化阈值 (high件数)',
 '対応 同時起動数':'处理并发数','PR/再検証 同時起動数':'PR/再验证并发数','検証ループ上限 (回)':'验证循环上限 (次)',
 '自動処理の判定範囲':'自动处理判定范围','自動処理のリスク上限':'自动处理风险上限',
 'auto のみ':'仅 auto','review まで':'至 review','human まで':'至 human','reject まで(全て)':'至 reject（全部）',
@@ -310,6 +314,8 @@ zh: {
 'フィルター:':'筛选:','判定:すべて':'判定:全部','未評価':'未评估','リスク:すべて':'风险:全部','状態:すべて':'状态:全部',
 '実行中':'运行中','待機中':'等待中','非実行':'未运行','読み込み中…':'加载中…',
 '候補なし':'无候选','監視リポジトリなし':'无监视仓库',
+'設定候補（評価提案の蓄積）':'设置候选（评估提案的积累）','件で候補化':'条高置信即成为候选',
+'設定候補':'设置候选','蓄積中':'积累中',
 '評価待機中':'等待评估','実装待機中':'等待实现','検証待機中':'等待验证',
 '評価中':'评估中','実装中':'实现中','検証中':'验证中','評価失敗':'评估失败','PR中#':'PR中#',
 '評価専用(api)':'仅评估(api)','自動(新規)':'自动(新建)','処理済み(要再検証)':'已处理(待再验证)','devin ラベル':'devin 标签',
@@ -352,6 +358,7 @@ ko: {
 '概要':'개요','監視・共通':'감시/공통','ポーリング周期 (秒)':'폴링 주기 (초)',
 '候補キャッシュ有効 (秒)':'후보 캐시 유효 (초)','新規候補の上限/回':'회당 신규 후보 상한',
 '評価 同時起動数':'평가 동시 실행 수','判定の鮮度 (時間)':'판정 유효 시간',
+'提案の候補化閾値 (high件数)':'제안 후보화 임계값 (high 건수)',
 '対応 同時起動数':'대응 동시 실행 수','PR/再検証 同時起動数':'PR/재검증 동시 실행 수','検証ループ上限 (回)':'검증 루프 상한 (회)',
 '自動処理の判定範囲':'자동 처리 판정 범위','自動処理のリスク上限':'자동 처리 리스크 상한',
 'auto のみ':'auto 만','review まで':'review 까지','human まで':'human 까지','reject まで(全て)':'reject 까지(전부)',
@@ -374,6 +381,8 @@ ko: {
 'フィルター:':'필터:','判定:すべて':'판정:전부','未評価':'미평가','リスク:すべて':'리스크:전부','状態:すべて':'상태:전부',
 '実行中':'실행 중','待機中':'대기 중','非実行':'미실행','読み込み中…':'로드 중…',
 '候補なし':'후보 없음','監視リポジトリなし':'감시 리포지토리 없음',
+'設定候補（評価提案の蓄積）':'설정 후보(평가 제안 축적)','件で候補化':'건의 high 확신으로 후보화',
+'設定候補':'설정 후보','蓄積中':'축적 중',
 '評価待機中':'평가 대기','実装待機中':'구현 대기','検証待機中':'검증 대기',
 '評価中':'평가 중','実装中':'구현 중','検証中':'검증 중','評価失敗':'평가 실패','PR中#':'PR #',
 '評価専用(api)':'평가 전용(api)','自動(新規)':'자동(신규)','処理済み(要再検証)':'처리 완료(재검증 필요)','devin ラベル':'devin 라벨',
@@ -416,6 +425,7 @@ es: {
 '概要':'Resumen','監視・共通':'Monitor y común','ポーリング周期 (秒)':'Intervalo (s)',
 '候補キャッシュ有効 (秒)':'Caché de candidatos (s)','新規候補の上限/回':'Máx. nuevos/poll',
 '評価 同時起動数':'Evaluación simultánea','判定の鮮度 (時間)':'Validez del veredicto (h)',
+'提案の候補化閾値 (high件数)':'Umbral de candidato (high)',
 '対応 同時起動数':'Implementación simultánea','PR/再検証 同時起動数':'PR/verificación simultánea','検証ループ上限 (回)':'Máx. bucles de verificación',
 '自動処理の判定範囲':'Rango de veredicto auto','自動処理のリスク上限':'Límite de riesgo auto',
 'auto のみ':'solo auto','review まで':'hasta review','human まで':'hasta human','reject まで(全て)':'hasta reject (todo)',
@@ -438,6 +448,8 @@ es: {
 'フィルター:':'Filtro:','判定:すべて':'Veredicto: todo','未評価':'Sin evaluar','リスク:すべて':'Riesgo: todo','状態:すべて':'Estado: todo',
 '実行中':'Ejecutando','待機中':'En cola','非実行':'Inactivo','読み込み中…':'Cargando…',
 '候補なし':'Sin candidatos','監視リポジトリなし':'Sin repos vigilados',
+'設定候補（評価提案の蓄積）':'Candidatos de config. (propuestas de eval.)','件で候補化':'elementos high para candidato',
+'設定候補':'Candidato config.','蓄積中':'Acumulando',
 '評価待機中':'Espera (eval.)','実装待機中':'Espera (impl.)','検証待機中':'Espera (verif.)',
 '評価中':'Evaluando','実装中':'Implementando','検証中':'Verificando','評価失敗':'Evaluación fallida','PR中#':'En PR #',
 '評価専用(api)':'Solo evaluación (api)','自動(新規)':'Auto (nuevo)','処理済み(要再検証)':'Impl hecho (verificar)','devin ラベル':'etiqueta devin',
@@ -480,6 +492,7 @@ fr: {
 '概要':'Aperçu','監視・共通':'Surveillance & commun','ポーリング周期 (秒)':'Intervalle (s)',
 '候補キャッシュ有効 (秒)':'Cache candidats (s)','新規候補の上限/回':'Max nouveaux/poll',
 '評価 同時起動数':'Évaluations simultanées','判定の鮮度 (時間)':'Fraîcheur verdict (h)',
+'提案の候補化閾値 (high件数)':'Seuil candidat (nb high)',
 '対応 同時起動数':'Traitements simultanés','PR/再検証 同時起動数':'PR/vérif. simultanées','検証ループ上限 (回)':'Boucles vérif. max',
 '自動処理の判定範囲':'Plage de verdict auto','自動処理のリスク上限':'Limite de risque auto',
 'auto のみ':'auto seul','review まで':'jusqu\'à review','human まで':'jusqu\'à human','reject まで(全て)':'jusqu\'à reject (tout)',
@@ -502,6 +515,8 @@ fr: {
 'フィルター:':'Filtre :','判定:すべて':'Verdict : tout','未評価':'Non évalué','リスク:すべて':'Risque : tout','状態:すべて':'État : tout',
 '実行中':'En cours','待機中':'En file','非実行':'Inactif','読み込み中…':'Chargement…',
 '候補なし':'Aucun candidat','監視リポジトリなし':'Aucun dépôt surveillé',
+'設定候補（評価提案の蓄積）':'Candidats config. (propositions d\'éval.)','件で候補化':'éléments high pour candidature',
+'設定候補':'Candidat config.','蓄積中':'Accumulation',
 '評価待機中':'Attente (éval.)','実装待機中':'Attente (impl.)','検証待機中':'Attente (vérif.)',
 '評価中':'Évaluation','実装中':'Implémentation','検証中':'Vérification','評価失敗':'Échec évaluation','PR中#':'PR #',
 '評価専用(api)':'Éval. seule (api)','自動(新規)':'Auto (nouveau)','処理済み(要再検証)':'Traitée (à vérifier)','devin ラベル':'label devin',
@@ -544,6 +559,7 @@ de: {
 '概要':'Übersicht','監視・共通':'Überwachung & Allgemein','ポーリング周期 (秒)':'Polling-Intervall (s)',
 '候補キャッシュ有効 (秒)':'Kandidaten-Cache (s)','新規候補の上限/回':'Max. neue/Poll',
 '評価 同時起動数':'Bewertung parallel','判定の鮮度 (時間)':'Verdict-Aktualität (h)',
+'提案の候補化閾値 (high件数)':'Kandidat-Schwelle (High-Anzahl)',
 '対応 同時起動数':'Umsetzung parallel','PR/再検証 同時起動数':'PR/Verifizierung parallel','検証ループ上限 (回)':'Verifizierungs-Loops max',
 '自動処理の判定範囲':'Auto-Verdict-Bereich','自動処理のリスク上限':'Auto-Risikolimit',
 'auto のみ':'nur auto','review まで':'bis review','human まで':'bis human','reject まで(全て)':'bis reject (alle)',
@@ -566,6 +582,8 @@ de: {
 'フィルター:':'Filter:','判定:すべて':'Verdict: alle','未評価':'Unbewertet','リスク:すべて':'Risiko: alle','状態:すべて':'Status: alle',
 '実行中':'Läuft','待機中':'Wartend','非実行':'Inaktiv','読み込み中…':'Laden…',
 '候補なし':'Keine Kandidaten','監視リポジトリなし':'Keine überwachten Repos',
+'設定候補（評価提案の蓄積）':'Konfig.-Kandidaten (Bewertungsvorschläge)','件で候補化':'High-Items bis Kandidat',
+'設定候補':'Konfig.-Kandidat','蓄積中':'Sammeln',
 '評価待機中':'Warten (Bewertung)','実装待機中':'Warten (Impl.)','検証待機中':'Warten (Verif.)',
 '評価中':'Bewertung läuft','実装中':'Implementierung','検証中':'Verifizierung','評価失敗':'Bewertung fehlgeschlagen','PR中#':'In PR #',
 '評価専用(api)':'Nur Bewertung (api)','自動(新規)':'Auto (neu)','処理済み(要再検証)':'Umgesetzt (prüfen)','devin ラベル':'devin-Label',
@@ -768,6 +786,7 @@ function setLang(v) {
       </select>
     </div>
     <div style="font-size:11px;color:#9ca3af;margin-bottom:6px" data-i18n="※ 個別「対応」ボタンは評価（assess）をスキップして直接実装します">※ 個別「対応」ボタンは評価（assess）をスキップして直接実装します</div>
+    <div id="proposals" style="display:none"></div>
     <div id="cands" style="color:#6b7280;overflow-x:auto" data-i18n="読み込み中…">読み込み中…</div>
   </div>
 
@@ -830,6 +849,7 @@ function setLang(v) {
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px;align-items:end">
         <label><span data-i18n="評価 同時起動数">評価 同時起動数</span><br><input id="set-maxc-assess" type="number" min="1" style="width:60px" title="リポジトリ毎の同時起動上限"></label>
         <label><span data-i18n="判定の鮮度 (時間)">判定の鮮度 (時間)</span><br><input id="set-assess-age" type="number" min="1" style="width:60px"></label>
+        <label><span data-i18n="提案の候補化閾値 (high件数)">提案の候補化閾値 (high件数)</span><br><input id="set-prop-th" type="number" min="1" style="width:60px" title="proposals の束で confidence:high がこの件数に達すると設定候補化"></label>
       </div>
     </div>
     </div>
@@ -1585,6 +1605,7 @@ function fillCfgForm() {
   if (rd) rd.innerHTML = (c.repos || []).map((r) => '<div>' + esc(r) + '</div>').join('');
   engFields();
   document.getElementById('set-assess-age').value = c.assessMaxAgeHours ?? 24;
+  document.getElementById('set-prop-th').value = c.proposalThreshold ?? 3;
 }
 
 async function saveCfg() {
@@ -1621,6 +1642,7 @@ async function saveCfg() {
     extraPrompt: document.getElementById('set-extraprompt').value,
     ...(document.getElementById('set-apikey').value ? { apiKey: document.getElementById('set-apikey').value } : {}),
     assessMaxAgeHours: +document.getElementById('set-assess-age').value || undefined,
+    proposalThreshold: +document.getElementById('set-prop-th').value || undefined,
   };
   try {
     const r = await fetch(API + '/api/config', {
@@ -2397,6 +2419,7 @@ async function refresh() {
       (c.autoTrigger ? '（起点: ' + (c.autoTriggerSince || status.deployedAt || '-') + '）' : '') + '</dd>' +
       '<dt>autoCategory</dt><dd>' + esc(c.autoCategory ?? 'review') + '</dd>' +
       '<dt>maxAutoRisk</dt><dd>' + esc(c.maxAutoRisk ?? 'medium') + '</dd>' +
+      '<dt>proposalThreshold</dt><dd>' + (c.proposalThreshold ?? 3) + '</dd>' +
     '<dt>permissionMode</dt><dd>' + c.permissionMode + '</dd>' +
     '<dt>' + t('同時起動(評価/対応/PR)') + '</dt><dd>' + (c.maxConcurrentAssess ?? c.maxConcurrent) +
       ' / ' + (c.maxConcurrentImpl ?? c.maxConcurrent) +
@@ -2469,6 +2492,34 @@ async function loadCandidates(force) {
     document.getElementById('cands-meta').textContent =
       '取得: ' + fmt(j.fetchedAt) + (j.cached ? '（キャッシュ）' : '（ライブ取得）');
     renderCandsMode(j.discoverEnabled !== false, !!j.autoEnabled);
+    // 評価提案（proposals）の蓄積束。閾値到達分を「設定候補」として提示し
+    // 人の採否を待つ（採用=語彙表/_assess.md/config の更新は人手または別課題）
+    const pe = document.getElementById('proposals');
+    if (pe) {
+      const props = j.proposals || [];
+      const th = j.proposalThreshold ?? 3;
+      pe.style.display = props.length ? '' : 'none';
+      if (props.length) {
+        pe.innerHTML = '<div style="border:1px solid #fde68a;background:#fffbeb;' +
+          'border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px">' +
+          '<div style="font-weight:600;color:#92400e;margin-bottom:4px">' +
+            t('設定候補（評価提案の蓄積）') + ' — high ' + th + ' ' + t('件で候補化') + '</div>' +
+          '<table style="width:100%"><tbody>' +
+          props.map((p) => '<tr>' +
+            '<td style="white-space:nowrap">' + (p.ready
+              ? '<span class="jd jd-human">' + t('設定候補') + '</span>'
+              : '<span style="color:#9ca3af">' + t('蓄積中') + '</span>') + '</td>' +
+            '<td style="white-space:nowrap">' + esc(p.kind) + ': ' + esc(p.target) + '</td>' +
+            '<td style="white-space:nowrap">' + p.high + '/' + p.count + '</td>' +
+            '<td title="' + esc((p.neighbor_of || []).join(', ')) + '">' +
+              esc((p.statements || []).at(-1) || '') +
+              ((p.sources || []).length
+                ? ' <span style="color:#9ca3af">(' +
+                  esc(p.sources.map((s) => String(s.key).split(' ').pop()).join(', ')) +
+                  ')</span>' : '') + '</td>' +
+          '</tr>').join('') + '</tbody></table></div>';
+      }
+    }
     const list = j.candidates || [];
     // dispatcher が自動起動した実行中課題を候補側で検出したらポーリングを開始
     // （常時ポーリングはしないため、気付きは候補一覧の更新周期に従う）

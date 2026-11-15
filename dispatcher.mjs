@@ -25,6 +25,7 @@ import { checkFailures } from './failure-watch.mjs';
 import { reapOrphanedInflight } from './inflight-reap.mjs';
 import { RISK_RANK, CAT_RANK, VERDICT_STEPS, escalateVerdict, parseIssueRef,
   resolveDelegatedStatus, isDelegatedStale } from './core-logic.mjs';
+import { recordProposals, validProposals } from './proposals.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
@@ -68,6 +69,7 @@ const LOG_DIR = join(ROOT, 'logs');
 const STATE_PATH = join(ROOT, 'state.json');
 const CANDS_PATH = join(ROOT, 'candidates.json');
 const ISSUES_PATH = join(ROOT, 'issues.json');
+const PROPOSALS_PATH = join(ROOT, 'proposals.json');
 const LOCK_PATH = join(LOG_DIR, 'dispatcher.pid');
 mkdirSync(LOG_DIR, { recursive: true });
 
@@ -295,11 +297,24 @@ function parseVerdict(logPath) {
       category = v.feasible === 'yes' && v.risk !== 'high' ? 'auto'
         : v.feasible === 'no' || v.risk === 'high' ? 'reject' : 'review';
     }
+    const proposals = validProposals(v.proposals);
     return { feasible: v.feasible, risk: v.risk, category,
       partial: v.partial === true || v.partial === 'true',
       scope: v.scope === 'multi' ? 'multi' : 'repo',
-      reason: v.reason ?? '', plan: v.plan ?? '' };
+      reason: v.reason ?? '', plan: v.plan ?? '',
+      // 語彙・判定種別の新設提案（省略可・後方互換。proposals.json へ集約する）
+      ...(proposals.length ? { proposals } : {}) };
   } catch { return null; }
+}
+
+// 評価 verdict に含まれる proposals を proposals.json へ蓄積する。
+// 判定記録の副産物なので、蓄積失敗で評価フロー自体を止めない
+function storeProposals(key, verdict) {
+  try {
+    const ready = recordProposals(PROPOSALS_PATH, key, verdict?.proposals,
+      (liveJson(configPath) ?? config).proposalThreshold ?? 3);
+    if (ready.length) log(`PROPOSAL-READY ${key}: ${ready.join(', ')}`);
+  } catch (e) { log(`PROPOSAL-STORE-ERR ${key}: ${e.message}`); }
 }
 
 // 切り分けセッションのログから <!--split--> ブロックを取り出す
@@ -675,6 +690,7 @@ async function runTask(task, state, { skipAssess = false } = {}) {
           config: liveJson(configPath) ?? config, task, mode: 'assess' })),
           task, ap, key, 'assess');
         verdict = code === 0 ? parseVerdict(ap) : null;
+        if (verdict) storeProposals(key, verdict);
         state.tasks[key] = { ...state.tasks[key], assessLog: ap,
           assess: verdict ?? { error: `exit ${code} or unparsed` },
           assessedAt: new Date().toISOString() };
@@ -1187,6 +1203,7 @@ async function doAssess(task, state) {
     }
     const code = await apRun;
     const verdict = code === 0 ? parseVerdict(ap) : null;
+    if (verdict) storeProposals(key, verdict);
     state.tasks[key] = {
       ...(state.tasks[key] ?? {}),
       assess: verdict ?? { error: `exit ${code} or unparsed` },
