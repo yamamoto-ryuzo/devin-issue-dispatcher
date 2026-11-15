@@ -33,7 +33,7 @@ import { readFileSync, writeFileSync, existsSync, openSync, readSync, closeSync,
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { keyOf, discover, toCandidate, readIssueStore, ghJson } from './discover.mjs';
-import { resolveDelegatedStatus, isDelegatedStale } from './core-logic.mjs';
+import { resolveDelegatedStatus, isDelegatedStale, checklistOf } from './core-logic.mjs';
 import { AcpChat } from './acp-chat.mjs';
 import { computeMetrics } from './metrics.mjs';
 import { createHash } from 'node:crypto';
@@ -1178,6 +1178,10 @@ async function candidates(force) {
         // 人間待ち（入力待ち・needs-review）状態と返答経路・直近の問い
         humanWait: humanWaitOf(key, t),
         createdPr, openPr,
+        // Issue 本文の受け入れ条件チェックリスト進捗（issue ストアの body から解析。
+        // gh 追加呼出しなし。チェックリスト無しの課題は null＝従来どおり）
+        checklist: c.type === 'issue'
+          ? checklistOf(issuesAll[key]?.body ?? '') : null,
         engineReq: t?.engineReq ?? null,
         engineIssue: issueEngine(key, issuesAll),
         engine: resolveEngine(key, null, null, state.tasks, issuesAll),

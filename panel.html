@@ -2488,6 +2488,11 @@ function detail(key) {
     (a.reason ? '<div class="kv"><b>判定理由</b>' + esc(a.reason) + '</div>' : '') +
     (a.plan ? '<div class="kv"><b>実施方針</b><pre>' + esc(a.plan) + '</pre></div>' : '') +
     (a.assessedAt ? '<div class="kv"><b>評価日時</b>' + fmt(a.assessedAt) + '</div>' : '') +
+    (c.checklist ? '<div class="kv"><b>受け入れ条件 ' + c.checklist.done + '/' +
+      c.checklist.total + '</b><div>' +
+      c.checklist.items.map((i) =>
+        '<div style="font-size:12px">' + (i.done ? '☑' : '☐') + ' ' +
+        esc(i.text) + '</div>').join('') + '</div></div>' : '') +
     (a.error ? '<div class="kv"><b>判定</b><span class="jd jd-err">評価失敗</span> ' + esc(a.error) + '</div>'
       : !a.category ? '<div class="kv">まだ評価されていません。「評価」ボタンで評価を実行できます。</div>' : '') +
     '<div class="kv" style="margin-top:10px">' +
@@ -3088,7 +3093,13 @@ function renderCandBody() {
           : esc(c.type) + ' #' + c.number) + '</a></td>' +
       '<td style="white-space:nowrap">' + assessCell + '</td>' +
       '<td style="white-space:normal;word-break:break-all"><a href="' + esc(c.url) +
-        '" target="_blank" rel="noopener">' + esc(c.title) + '</a></td>' +
+        '" target="_blank" rel="noopener">' + esc(c.title) + '</a>' +
+        (c.checklist ? ' <span class="badge" style="background:' +
+          (c.checklist.done === c.checklist.total ? '#16a34a' : '#6b7280') +
+          ';color:#fff;vertical-align:middle" title="受け入れ条件 ' +
+          c.checklist.done + '/' + c.checklist.total + ' 完了">' +
+          c.checklist.done + '/' + c.checklist.total + '</span>' : '') +
+        '</td>' +
       '<td style="white-space:normal" class="' + (c.trigger === 'auto-new' || c.trigger === 'impl-done' || c.trigger === 'active' ? 'trig-auto' : 'trig-label') + '">' +
         (c.trigger === 'auto-new' ? tr('自動(新規)') : c.trigger === 'impl-done' ? tr('処理済み(要再検証)') : c.trigger === 'active' ? tr('実行中') : tr('devin ラベル')) + (c.autoBlocked ? ' <span class="badge" style="background:#b45309;color:#fff" title="author: ' + esc(c.author || '') + '">' + tr('自動対象外（起票者）') + '</span>' : '') + '</td>' +
       '<td>' + implCell + '</td>' +

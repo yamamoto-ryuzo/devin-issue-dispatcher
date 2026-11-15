@@ -85,6 +85,23 @@ export function resolveDelegatedStatus(delegated,
 // 委譲滞留判定: chatDelegated が残り chatResult が無いまま
 // delegatedAt から staleMs 超過した課題は回収対象（control 起動時走査・
 // dispatcher スイープ共通の条件）
+/**
+ * Issue/PR 本文のチェックリスト（- [ ] / - [x]）を解析する。
+ * ブロッククォート内（> - [ ]）・字下げも拾う。行頭以外の - [ ] は対象外。
+ * @returns {{done:number,total:number,items:{done:boolean,text:string}[]}|null}
+ *          項目が1件も無ければ null（従来どおりの表示・判定の識別子）
+ */
+export function checklistOf(body) {
+  const items = [];
+  for (const m of String(body ?? '')
+    .matchAll(/^[ \t]*(?:>[ \t]*)*- \[( |x|X)\][ \t]+(\S.*)$/gm)) {
+    items.push({ done: m[1].toLowerCase() === 'x', text: m[2].trim() });
+  }
+  return items.length
+    ? { done: items.filter((i) => i.done).length, total: items.length, items }
+    : null;
+}
+
 export function isDelegatedStale(task, { now = Date.now(), staleMs = 90 * 60 * 1000 } = {}) {
   if (!task?.chatDelegated || task.chatResult || !task.delegatedAt) return false;
   const at = new Date(task.delegatedAt).getTime();
