@@ -2812,6 +2812,9 @@ async function surveyExtract() {
     `gh CLI で既存 Issue/PR とコードも確認し、既存と重複する課題は避けてください（起票自体はまだ行わない）。\n` +
     `最後に必ず <!--issues [{"title":"タイトル案","body":"本文案"},...] issues--> の JSON ブロックを出力してください。`;
   try {
+    // チャットセッションは再利用されるため、送信時刻以降の agent 出力のみを
+    // 今回の抽出結果として扱う（過去の課題整理で出た未採用候補の復活を防ぐ）
+    const since = new Date().toISOString();
     const r = await fetch(API + '/api/chat/send', {
       method: 'POST', headers: H, body: JSON.stringify({ id: null, text }),
     });
@@ -2819,7 +2822,7 @@ async function surveyExtract() {
     if (j.id) {
       surveyRepo = repo;
       surveyChatId = j.id;
-      chatSel = j.id; loadSessions(); pollIssues(j.id);
+      chatSel = j.id; loadSessions(); pollIssues(j.id, since);
       const b = document.getElementById('sv-extract');
       if (b) { b.disabled = true; b.textContent = '課題抽出中…'; }
       svExtracting(true);
@@ -2874,7 +2877,7 @@ function svReset() {
   if (issuePollIv) { clearInterval(issuePollIv); issuePollIv = null; }
   svExtracting(false);
 }
-function pollIssues(id) {
+function pollIssues(id, since) {
   const seen = new Set();
   const all = [];
   let quiet = 0;
@@ -2882,9 +2885,11 @@ function pollIssues(id) {
     try {
       const j = await (await fetch(API + '/api/chat?id=' + id)).json();
       const before = all.length;
-      // 全 agent メッセージの複数ブロックを重複排除しながらマージ
+      // 全 agent メッセージの複数ブロックを重複排除しながらマージ。
+      // since 指定時はそれ以降の出力のみ対象（再利用セッションの過去分は除外）
       for (const msg of j.messages || []) {
         if (msg.role !== 'agent') continue;
+        if (since && (!msg.ts || msg.ts < since)) continue;
         for (const m of msg.text.matchAll(/<!--issues\s*([\s\S]*?)issues-->/g)) {
           const arr = parseIssuesTxt(m[1]);
           if (arr) {
