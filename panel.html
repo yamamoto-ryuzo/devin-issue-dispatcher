@@ -265,7 +265,6 @@ en: {
 '※ 個別「対応」ボタンは評価（assess）をスキップして直接実装します':'* The per-issue "Implement" button skips assessment (assess) and goes straight to implementation',
 '「対応」は評価（assess）をスキップして直接実装します。実行しますか？':'"Implement" skips assessment (assess) and goes straight to implementation. Proceed?',
 '人間待ち':'Waiting for human','返答を入力（Enter で送信）':'Reply (Enter to send)',
-'チャットで確認':'Open in chat','該当チャットへ移動して文脈を確認・返答':'Jump to the related chat to review the context and reply',
 '（次回実行時にエージェントへ伝達）':'(delivered to the agent on the next run)',
 '（理由の記録なし）':'(no reason recorded)','返答を送信しました':'Reply sent',
 },
@@ -1891,9 +1890,6 @@ let chatSel = null;
 // 中断は /api/kill へ振り分ける（委譲チャット経路のタスクは実セッションとして出る）
 const isTaskSel = () => typeof chatSel === 'string' && chatSel.startsWith('task:');
 const taskSelKey = () => isTaskSel() ? chatSel.slice(5) : null;
-// 「人間待ち」ボタンから開いた終了済み task:<key> を autoClose で畳まないよう
-// ピン留めする課題キー（実セッションの選択で解除）
-let taskPin = null;
 const taskShortLabel = (key) =>
   key.split(' ')[0].split('/').pop() + ' ' + key.split(' ').slice(1).join(' ');
 const taskPhaseLabel = (ph) =>
@@ -2001,8 +1997,8 @@ async function loadSessions() {
     const autoClose = status?.config?.autoCloseChats !== false;
     const selKey = taskSelKey();
     const selFinished = selKey && !runTasks.some((x) => x.key === selKey);
-    if (selFinished && autoClose && taskPin !== selKey) chatSel = null;
-    const selDone = selFinished && (!autoClose || taskPin === selKey)
+    if (selFinished && autoClose) chatSel = null;
+    const selDone = selFinished && !autoClose
       ? "<span class=\"csess task active\" onclick='chatSelect(" + JSON.stringify(chatSel) + ")'>✓ " +
         esc(taskShortLabel(selKey)) + '</span>' : '';
     document.getElementById('chat-sessions').innerHTML =
@@ -2018,7 +2014,7 @@ async function loadSessions() {
       '<span class="csess" onclick="chatSelect(null)">＋新規</span>';
   } catch { /* noop */ }
 }
-function chatSelect(id) { chatSel = id; if (!isTaskSel()) taskPin = null; loadSessions(); loadChat(); }
+function chatSelect(id) { chatSel = id; loadSessions(); loadChat(); }
 async function chatClose(id) {
   if (typeof id === 'string' && id.startsWith('task:')) {
     if (chatSel === id) chatSel = null;
@@ -2305,25 +2301,6 @@ async function dispatch(key, verify) {
     }
   } catch (e) { toast('dispatch: ' + e.message); }
   setTimeout(loadCandidates, 1000);
-}
-
-// 「人間待ち」の「チャットで確認」: 判断材料となる会話・ログへそのまま移動する。
-// chat 経路（委譲セッションが idle = エージェントの返答待ち）はそのセッションを
-// 選択して文脈付きで返答。steer 経路（needs-review・実行終了済み）は
-// task:<key> 擬似セッションを開いてセッションログを表示し、チャット欄の送信が
-// chatSend 経由で /api/steer へ流れる（taskPin で autoClose 畳み込みを抑止）
-function hwGotoChat(btn) {
-  const chat = btn.dataset.chat;
-  if (chat != null && chat !== '') {
-    taskPin = null;
-    showTab('chat');
-    chatSelect(/^\d+$/.test(chat) ? +chat : chat);
-  } else {
-    taskPin = btn.dataset.key;
-    showTab('chat');
-    chatSelect('task:' + btn.dataset.key);
-  }
-  document.getElementById('chat-text')?.focus();
 }
 
 // 課題行の「人間待ち」返答欄からの直接返答。
@@ -3303,10 +3280,6 @@ function renderCandBody() {
         ' onkeydown="if(event.key===\'Enter\')candReply(this)">' +
         '<button class="mini primary" onclick="candReply(this.previousElementSibling)">' +
         tr('送信') + '</button>' +
-        '<button class="mini" data-key="' + esc(c.key) + '"' +
-        (hw.chatId != null ? ' data-chat="' + esc(String(hw.chatId)) + '"' : '') +
-        ' title="' + tr('該当チャットへ移動して文脈を確認・返答') +
-        '" onclick="hwGotoChat(this)">' + tr('チャットで確認') + '</button>' +
         (hw.route === 'steer'
           ? '<span class="hw-note">' + tr('（次回実行時にエージェントへ伝達）') + '</span>'
           : '') +
@@ -3363,16 +3336,11 @@ function renderCandBody() {
           '<div class="bops">' + assessCell + ' ' + implCell +
             (busy ? ' <button class="mini danger" onclick="candStop(\'' +
               esc(c.key) + '\')">' + tr('停止') + '</button>' : '') + '</div>' +
-          (hw ? '<div style="display:flex;gap:4px;margin-top:4px">' +
-            '<input class="hw-in" style="flex:1;min-width:0"' +
+          (hw ? '<input class="hw-in" style="width:100%;min-width:0;margin-top:4px"' +
             ' data-key="' + esc(c.key) + '"' +
             (hw.chatId != null ? ' data-chat="' + esc(String(hw.chatId)) + '"' : '') +
             ' placeholder="' + tr('返答を入力（Enter で送信）') + '"' +
-            ' onkeydown="if(event.key===\'Enter\')candReply(this)">' +
-            '<button class="mini" data-key="' + esc(c.key) + '"' +
-            (hw.chatId != null ? ' data-chat="' + esc(String(hw.chatId)) + '"' : '') +
-            ' title="' + tr('該当チャットへ移動して文脈を確認・返答') +
-            '" onclick="hwGotoChat(this)">' + tr('チャットで確認') + '</button></div>' : '') +
+            ' onkeydown="if(event.key===\'Enter\')candReply(this)">' : '') +
           '</div>');
         return '';
       }
