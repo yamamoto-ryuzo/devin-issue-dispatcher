@@ -752,6 +752,20 @@ async function runTask(task, state, { skipAssess = false } = {}) {
                 ? `課題はクローズ済みです（対応困難として終了）。`
                 : `最終報告はセッションログの末尾を参照してください。`)
         : `Devin セッションが異常終了しました（exit ${code}）。ログ: \`${ip}\`\n\n再試行はパネルの「再実行」ボタンまたは \`POST /api/dispatch\` から行えます。`);
+    // 実装完了（impl-done 確定）は次ポーリングのラベル検出を待たず、再検証
+    // （PR処理）を即座にキューへ連鎖する。検出待ちの間（最大 poll 間隔）は
+    // unpushed ゲートで同 repo の実装待機が無稼働で止まるため、ここで積めば
+    // finally の drainQueue から verify が起動し、push 完了時に次の実装へ繋がる
+    if (post === 'impl-done' && task.type === 'issue'
+        && liveConfig('autoTrigger', AUTO_TRIGGER) && liveConfig('autoPr', false)
+        && !queue.some((q) => keyOf(q.repo.github, q.type, q.number) === key)) {
+      queue.push({ ...task, verify: true,
+        labels: [...new Set([...(task.labels ?? []), LABEL.implDone])] });
+      state.tasks[key] = { ...(state.tasks[key] ?? {}),
+        queued: 'verify', queuedAt: new Date().toISOString() };
+      saveState(state);
+      log(`queued verify ${key} (impl-done chain)`);
+    }
   } catch (e) {
     // 予期しない例外（コード不具合・外部コマンド失敗等）で中断した課題を
     // status='running' のまま残さない。stale 回収と同じ failed 終端へ寄せる
@@ -903,12 +917,18 @@ function drainQueueBody(state) {
     }
     // running.set は runTask/doAssess 内で非同期に行われるため、ここで先行登録して
     // 続く findIndex の busy/repoBusy 判定へ即時反映する
-    running.set(key, { proc: null, logPath: null,
+    const rent = { proc: null, logPath: null,
       startedAt: Date.now(), phase: task.verify ? 'verify' : 'assess',
-      dest: task.verify ? 'verify' : task.assessOnly ? 'assess' : 'impl' });
+      dest: task.verify ? 'verify' : task.assessOnly ? 'assess' : 'impl' };
+    running.set(key, rent);
     (task.assessOnly ? doAssess(task, state) : runTask(task, state))
       .catch((e) => log(`runTask error ${key}: ${e.message}`))
-      .finally(() => { running.delete(key); drainQueue(state); });
+      // 同 key が drainQueue 内で再登録される連鎖（impl→verify 等）では、
+      // 起動元側の delete が新エントリを消し実行中タスクを不可視化するため
+      // 自分が登録したエントリの場合のみ削除する（runTask は途中で自前の
+      // running.set を行うため早期 return 経路のみ同オブジェクトが残る）
+      .finally(() => { if (running.get(key) === rent) running.delete(key);
+        drainQueue(state); });
   }
   // 起動できず滞留しているタスクへ待機理由を記録する
   // （/api/candidates 経由でパネルの「待機中」表示に理由を出すため。
