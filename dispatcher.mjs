@@ -438,6 +438,15 @@ async function handleDelegatedKills(state) {
   if (dirty) try { writeFileSync(KILL_PATH, JSON.stringify(kr)); } catch { /* noop */ }
 }
 
+function startPhase(task, state, key, skipAssess = false) {
+  if (task.verify) return 'verify';
+  if (task.assessOnly) return 'assess';
+  const cur = state.tasks[key];
+  const fresh = cur?.assess && !cur.assess.error && cur.assessedAt
+    && Date.now() - new Date(cur.assessedAt).getTime() < ASSESS_MAX_AGE_MS;
+  return (skipAssess || config.assessFirst === false || fresh) ? 'impl' : 'assess';
+}
+
 async function runTask(task, state, { skipAssess = false } = {}) {
   const key = keyOf(task.repo.github, task.type, task.number);
   // キュー滞留中に close された課題は起動しない。/api/close・GitHub 上の
@@ -535,11 +544,12 @@ async function runTask(task, state, { skipAssess = false } = {}) {
   await comment(task.repo.github, task.number, task.type,
     `Devin エージェントが起動しました。完了時に結果を報告します。`);
 
+  const phase = startPhase(task, state, key, skipAssess);
   running.set(key, { proc: null, logPath: base, startedAt: Date.now(),
-    phase: task.verify ? 'verify' : 'assess', dest: task.verify ? 'verify' : 'impl' });
+    phase, dest: task.verify ? 'verify' : 'impl' });
   // スプレッド保持: パネル保存の engineReq 等を消さない
   state.tasks[key] = { ...(state.tasks[key] ?? {}), ...candMeta(task),
-    status: 'running', phase: task.verify ? 'verify' : 'assess', startedAt: new Date().toISOString() };
+    status: 'running', phase, startedAt: new Date().toISOString() };
   saveState(state);
 
   try {
@@ -918,7 +928,7 @@ function drainQueueBody(state) {
     // running.set は runTask/doAssess 内で非同期に行われるため、ここで先行登録して
     // 続く findIndex の busy/repoBusy 判定へ即時反映する
     const rent = { proc: null, logPath: null,
-      startedAt: Date.now(), phase: task.verify ? 'verify' : 'assess',
+      startedAt: Date.now(), phase: startPhase(task, state, key),
       dest: task.verify ? 'verify' : task.assessOnly ? 'assess' : 'impl' };
     running.set(key, rent);
     (task.assessOnly ? doAssess(task, state) : runTask(task, state))
