@@ -36,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { keyOf, discover, toCandidate, readIssueStore, ghJson } from './discover.mjs';
 import { resolveDelegatedStatus, isDelegatedStale, checklistOf } from './core-logic.mjs';
 import { recordProposals, listProposals } from './proposals.mjs';
+import { hasKnowledge } from './issue-knowledge.mjs';
 import { sweepQueue, queueStaleMs } from './work-queue.mjs';
 import { AcpChat } from './acp-chat.mjs';
 import { computeMetrics } from './metrics.mjs';
@@ -1192,6 +1193,8 @@ async function candidates(force) {
         chatDelegated: t?.chatDelegated ?? null,
         queued: t?.queued ?? null,
         queuedAt: t?.queuedAt ?? null,
+        // #103: 課題ナレッジの蓄積有無（パネルの「知識」バッジ表示用）
+        knowledge: hasKnowledge(ROOT, c.repo, c.number),
         // autoAssess 有効時の未評価・未起動の新規候補 = 次回検出で評価キューへ
         // 積まれる「評価待機中」として出す応答専用フラグ。state には書かない
         // （queued を立てると discover が active 扱いし autoAssess がスキップする。

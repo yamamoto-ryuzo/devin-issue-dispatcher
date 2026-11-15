@@ -231,6 +231,32 @@ ${HEAD(t)}
 // 'verify' は 'pr' のエイリアス（dispatcher 側の呼び名）
 BODIES.verify = BODIES.pr;
 
+// #103: impl/verify セッションへ、最終報告末尾でのナレッジブロック出力を求める
+// （dispatcher がログから抽出し validateKnowledge で検証して issue-knowledge/ へ保存）
+const KNOWLEDGE_OUT = `## ナレッジ記録（必須）
+最終報告の末尾に、処理結果のナレッジを以下の HTML コメント形式で1ブロック出力してください
+（dispatcher がログから抽出して issue-knowledge/ へ蓄積します。複数ある場合は最後のものを採用）:
+
+\`\`\`
+<!--issue-knowledge
+{"discovery":{"perspective":["<discovery 語彙>"]},
+ "resolution":{"perspective":["<resolution 語彙>"],
+  "verification":{"methods":["<methods 語彙>"],"unverified":["残る未確認範囲"]},
+  "principles":[{"principle":"<slug>","use":"consulted|extracted","note":"<任意>"}]},
+ "classification":{"axes":{"<軸>":"<値>"}},
+ "status":"resolved"}
+issue-knowledge-->
+\`\`\`
+
+語彙（語彙外の値・必須キー欠落は記録時に機械的に弾かれ、そのブロックは保存されません）:
+- discovery.perspective: symptom_report / invariant_audit / boundary_walk / doc_code_diff / data_inspection / trace_walk / adversarial_review / inventory / guardrail_failure / reproduction / external_constraint
+- resolution.perspective: single_point_fix / canonical_source / explicit_contract / required_argument / vocabulary_table / first_class_state / representation_change / responsibility_move / carry_through / fail_closed / state_transition / order_and_budget / guardrail_fix / doc_correction / deferred_decision / pending
+- verification.methods: guardrail / ci_all_paths / scratch_db / docker_e2e / manual_ui / reproduction_rerun / not_verified（not_verified は単独のみ）
+- status: resolved（完了）/ rejected（対応困難で断念）/ deferred（先送り・未完）
+issue/repo/number・landed_in・classification.review は dispatcher が付与するため出力不要です。
+unverified キーは省略しないでください（「残る未確認なし」は空配列 [] で宣言）。
+principles は skills/principles.md を当てた場合のみ記載（無ければキーごと省略可）`;
+
 /**
  * 課題タスクのプロンプト本文を生成する。
  * @param {object} o
@@ -262,7 +288,10 @@ export function buildTaskPrompt({ ROOT, config, task, mode, skillFile = null, im
     : '';
   // #105: assess は末尾へ「過去の同型課題」セクションを差し込む（該当無しなら出さない）
   const knowledge = mode === 'assess' ? knowledgeSection(ROOT, task) : '';
+  // #103: impl/verify は最終報告へのナレッジブロック出力指示を差し込む
+  const knowledgeOut = mode === 'impl' || mode === 'verify' || mode === 'pr'
+    ? `\n${KNOWLEDGE_OUT}` : '';
   return body +
     (policy ? `\n## このリポジトリ固有の対応指針\n${policy}\n` : '') +
-    skills + loopLine + (knowledge ? `\n${knowledge}` : '');
+    skills + loopLine + knowledgeOut + (knowledge ? `\n${knowledge}` : '');
 }

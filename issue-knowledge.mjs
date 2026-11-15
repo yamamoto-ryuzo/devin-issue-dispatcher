@@ -11,8 +11,9 @@
  *     status:"resolved|rejected|deferred", history:[] }
  * `issue` フィールドを持たないレコード（例: 失敗イベント分類）は対象外。
  */
-import { readdirSync, readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync }
+  from 'node:fs';
+import { dirname, join } from 'node:path';
 
 // プロンプト肥大化防止の上限（#105 受け入れ条件）
 export const MAX_ENTRIES = 5;
@@ -141,4 +142,142 @@ export function knowledgeSection(rootDir, task, {
     section = HEADER + lines.join('\n') + '\n';
   }
   return section.length > maxChars ? section.slice(0, maxChars) : section;
+}
+
+// ---------------------------------------------------------------------------
+// #103 記録側: 完了課題のナレッジを検証して issue-knowledge/ へ蓄積する
+// ---------------------------------------------------------------------------
+
+// 語彙（taxonomy §4/§5/§8 借用。語彙外の値は validateKnowledge が機械的に弾く）
+export const DISCOVERY_PERSPECTIVES = [
+  'symptom_report', 'invariant_audit', 'boundary_walk', 'doc_code_diff',
+  'data_inspection', 'trace_walk', 'adversarial_review', 'inventory',
+  'guardrail_failure', 'reproduction', 'external_constraint',
+];
+export const RESOLUTION_PERSPECTIVES = [
+  'single_point_fix', 'canonical_source', 'explicit_contract', 'required_argument',
+  'vocabulary_table', 'first_class_state', 'representation_change',
+  'responsibility_move', 'carry_through', 'fail_closed', 'state_transition',
+  'order_and_budget', 'guardrail_fix', 'doc_correction', 'deferred_decision',
+  'pending',
+];
+export const VERIFICATION_METHODS = [
+  'guardrail', 'ci_all_paths', 'scratch_db', 'docker_e2e', 'manual_ui',
+  'reproduction_rerun', 'not_verified',
+];
+export const KNOWLEDGE_STATUSES = ['resolved', 'rejected', 'deferred'];
+export const REVIEW_VALUES = ['candidate', 'confirmed'];
+
+const list = (v) => (Array.isArray(v) ? v.map(String) : v == null ? [] : [String(v)]);
+
+/** 記録ファイルのパス: <dir>/<repo-key>/<issue#>.json（repo-key は / → _） */
+export function knowledgePath(rootDir, repo, number,
+  dir = join(rootDir, 'issue-knowledge')) {
+  return join(dir, String(repo ?? 'unknown').replaceAll('/', '_'), `${number}.json`);
+}
+
+/** 蓄積済みかどうか（候補 API / パネル表示用） */
+export function hasKnowledge(rootDir, repo, number) {
+  return existsSync(knowledgePath(rootDir, repo, number));
+}
+
+/**
+ * ログ等のテキストから <!--issue-knowledge {json} issue-knowledge--> を抽出。
+ * 複数ある場合は最後のブロックを採用。無し・JSON 不正は null。
+ */
+export function extractKnowledgeBlock(text) {
+  const re = /<!--issue-knowledge\s*([\s\S]*?)\s*issue-knowledge-->/g;
+  let m, last = null;
+  while ((m = re.exec(String(text ?? ''))) !== null) last = m[1];
+  if (last == null) return null;
+  try {
+    const j = JSON.parse(last);
+    return j && typeof j === 'object' ? j : null;
+  } catch { return null; }
+}
+
+/** 語彙・必須キーの最低限バリデーション。{ ok, errors[] } を返す */
+export function validateKnowledge(rec) {
+  const errors = [];
+  const chk = (vals, vocab, name) => {
+    for (const v of list(vals))
+      if (!vocab.includes(v)) errors.push(`${name}: 語彙外 '${v}'`);
+  };
+  chk(rec?.discovery?.perspective, DISCOVERY_PERSPECTIVES, 'discovery.perspective');
+  chk(rec?.resolution?.perspective, RESOLUTION_PERSPECTIVES, 'resolution.perspective');
+  const methods = rec?.resolution?.verification?.methods;
+  chk(methods, VERIFICATION_METHODS, 'verification.methods');
+  if (list(methods).includes('not_verified') && list(methods).length > 1)
+    errors.push("verification.methods: 'not_verified' は単独でのみ使用可");
+  // 「残る未確認範囲なし」の宣言（空配列）と省略を区別するためキー必須
+  if (!Array.isArray(rec?.resolution?.verification?.unverified))
+    errors.push('resolution.verification.unverified キーは必須（配列。無ければ空配列）');
+  if (rec?.status != null && !KNOWLEDGE_STATUSES.includes(rec.status))
+    errors.push(`status: 語彙外 '${rec.status}'`);
+  if (rec?.classification?.review != null
+      && !REVIEW_VALUES.includes(rec.classification.review))
+    errors.push(`classification.review: 語彙外 '${rec.classification.review}'`);
+  return { ok: errors.length === 0, errors };
+}
+
+/** セッション出力ブロック（または機械生成 {}）を保存用レコードへ正規化する */
+export function normalizeKnowledge(raw, task, {
+  status = null, landedIn = null, unverified = null,
+} = {}) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const res = r.resolution && typeof r.resolution === 'object' ? r.resolution : {};
+  const ver = res.verification && typeof res.verification === 'object'
+    ? res.verification : {};
+  // unverified: 明示配列 > 呼び出し側既定 > 省略マーカー（「無し」との混同防止）
+  const unv = Array.isArray(ver.unverified) ? ver.unverified
+    : Array.isArray(unverified) ? unverified
+    : [unverified ?? '（セッションが unverified を省略）'];
+  return {
+    // issue 識別は dispatcher 側の正を使う（セッションの自己申告を信用しない）
+    issue: { repo: task.repo.github, number: task.number, title: task.title ?? '' },
+    discovery: { perspective: list(r.discovery?.perspective) },
+    resolution: {
+      perspective: list(res.perspective),
+      verification: { methods: list(ver.methods), unverified: unv.map(String) },
+      ...(res.landed_in || landedIn
+        ? { landed_in: String(res.landed_in ?? landedIn) } : {}),
+      ...(Array.isArray(res.principles) ? { principles: res.principles } : {}),
+    },
+    classification: {
+      axes: r.classification?.axes && typeof r.classification.axes === 'object'
+        ? r.classification.axes : {},
+      // AI 起票は常に candidate。人の確定はパネル操作で confirmed + reviewed_* へ
+      review: 'candidate', reviewed_by: null, reviewed_at: null,
+    },
+    status: status ?? (typeof r.status === 'string' ? r.status : 'resolved'),
+    recorded_at: new Date().toISOString(),
+    history: Array.isArray(r.history) ? r.history : [],
+  };
+}
+
+/**
+ * 記録を検証してファイルへ保存する。語彙違反は { error: [...] } で弾き書かない。
+ * 既存記録があれば前版を history へ繰り越し、confirmed 済み review は維持する。
+ * @returns {{path:string, record:object}|{error:string[]}}
+ */
+export function recordKnowledge(rootDir, task, raw, {
+  status = null, landedIn = null, unverified = null,
+  dir = join(rootDir, 'issue-knowledge'),
+} = {}) {
+  const rec = normalizeKnowledge(raw, task, { status, landedIn, unverified });
+  const { ok, errors } = validateKnowledge(rec);
+  if (!ok) return { error: errors };
+  const p = knowledgePath(rootDir, task.repo.github, task.number, dir);
+  let prev = null;
+  try { prev = JSON.parse(readFileSync(p, 'utf8')); } catch { /* 新規 */ }
+  if (prev && typeof prev === 'object') {
+    if (prev.classification?.review === 'confirmed')
+      rec.classification = { ...prev.classification, axes: rec.classification.axes };
+    rec.history = [...(Array.isArray(prev.history) ? prev.history : []),
+      { replaced_at: rec.recorded_at, status: prev.status ?? null,
+        landed_in: prev.resolution?.landed_in ?? null }];
+  }
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, JSON.stringify(rec, null, 2) + '\n');
+  return { path: p, record: rec };
 }

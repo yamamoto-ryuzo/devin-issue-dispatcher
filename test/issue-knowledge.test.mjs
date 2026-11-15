@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { loadKnowledgeEntries, knowledgeSection, MAX_ENTRIES, MAX_SECTION_CHARS }
-  from '../issue-knowledge.mjs';
+import { dirname, join } from 'node:path';
+import { loadKnowledgeEntries, knowledgeSection, MAX_ENTRIES, MAX_SECTION_CHARS,
+  validateKnowledge, extractKnowledgeBlock, recordKnowledge, hasKnowledge,
+  knowledgePath } from '../issue-knowledge.mjs';
 import { buildTaskPrompt } from '../task-prompts.mjs';
 
 const REPO = 'yamamoto-ryuzo/xxx';
@@ -81,4 +82,75 @@ test('assess プロンプト末尾へ差し込まれ、他モード・該当無�
   assert.doesNotMatch(impl, /過去の同型課題/);
   const empty = buildTaskPrompt({ ROOT: mkroot(), config: {}, task, mode: 'assess' });
   assert.doesNotMatch(empty, /過去の同型課題/);
+});
+
+// ---- #103 記録側 ----
+
+test('validateKnowledge: 語彙外・unverified 欠落・not_verified 併記を弾く', () => {
+  const base = {
+    discovery: { perspective: ['symptom_report'] },
+    resolution: { perspective: ['single_point_fix'],
+      verification: { methods: ['guardrail'], unverified: [] } },
+    classification: { axes: {}, review: 'candidate' },
+    status: 'resolved', history: [],
+  };
+  assert.equal(validateKnowledge(base).ok, true);
+  const bad = structuredClone(base);
+  bad.discovery.perspective = ['bogus_value'];
+  assert.match(validateKnowledge(bad).errors.join(' '), /語彙外/);
+  const noUn = structuredClone(base);
+  delete noUn.resolution.verification.unverified;
+  assert.match(validateKnowledge(noUn).errors.join(' '), /unverified/);
+  const nv = structuredClone(base);
+  nv.resolution.verification.methods = ['not_verified', 'guardrail'];
+  assert.match(validateKnowledge(nv).errors.join(' '), /not_verified/);
+});
+
+test('extractKnowledgeBlock: 最後のブロックを JSON として取り出す', () => {
+  const text = 'a <!--issue-knowledge {"status":"resolved"} issue-knowledge--> b' +
+    '<!--issue-knowledge\n{"status":"deferred"}\nissue-knowledge--> c';
+  assert.equal(extractKnowledgeBlock(text).status, 'deferred');
+  assert.equal(extractKnowledgeBlock('no block here'), null);
+  assert.equal(extractKnowledgeBlock('<!--issue-knowledge {oops issue-knowledge-->'),
+    null);
+});
+
+test('recordKnowledge: 正規化して保存・unverified 省略補完・語彙違反は弾く', () => {
+  const root = mkroot();
+  const r = recordKnowledge(root, task, { status: 'resolved',
+    resolution: { perspective: ['guardrail_fix'],
+      verification: { methods: ['reproduction_rerun'] } } }); // unverified 省略
+  assert.ok(r.path, JSON.stringify(r));
+  assert.ok(hasKnowledge(root, REPO, 999));
+  const saved = JSON.parse(readFileSync(r.path, 'utf8'));
+  assert.equal(saved.issue.number, 999);
+  assert.equal(saved.issue.repo, REPO);
+  assert.equal(saved.resolution.verification.unverified.length, 1); // 省略補完
+  assert.equal(saved.classification.review, 'candidate');
+  assert.ok(recordKnowledge(root, task,
+    { discovery: { perspective: ['out_of_vocab'] } }).error);
+});
+
+test('recordKnowledge: 既存 confirmed の review を維持し前版を history へ', () => {
+  const root = mkroot();
+  const p = knowledgePath(root, REPO, 999);
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, JSON.stringify({ ...entry(999),
+    classification: { axes: {}, review: 'confirmed',
+      reviewed_by: 'user', reviewed_at: 'x' } }));
+  recordKnowledge(root, task, {}, { status: 'deferred' });
+  const saved = JSON.parse(readFileSync(p, 'utf8'));
+  assert.equal(saved.classification.review, 'confirmed');
+  assert.equal(saved.classification.reviewed_by, 'user');
+  assert.equal(saved.history.length, 1);
+  assert.equal(saved.history[0].status, 'resolved');
+});
+
+test('impl/verify プロンプトへナレッジブロック出力指示が入る', () => {
+  const root = mkroot();
+  for (const mode of ['impl', 'verify']) {
+    const p = buildTaskPrompt({ ROOT: root, config: {}, task, mode });
+    assert.match(p, /<!--issue-knowledge/);
+    assert.match(p, /unverified/);
+  }
 });

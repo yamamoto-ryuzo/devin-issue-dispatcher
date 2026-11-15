@@ -26,6 +26,7 @@ import { reapOrphanedInflight } from './inflight-reap.mjs';
 import { RISK_RANK, CAT_RANK, VERDICT_STEPS, escalateVerdict, parseIssueRef,
   resolveDelegatedStatus, isDelegatedStale } from './core-logic.mjs';
 import { recordProposals, validProposals } from './proposals.mjs';
+import { extractKnowledgeBlock, recordKnowledge } from './issue-knowledge.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
@@ -241,6 +242,25 @@ const readKillRequests = () => {
   try { return JSON.parse(readFileSync(KILL_PATH, 'utf8')); }
   catch { return { keys: [] }; }
 };
+
+// #103: セッション終了時にナレッジを蓄積する。ログ末尾の
+// <!--issue-knowledge {...} issue-knowledge--> を検証して保存し、
+// ブロック無し・語彙違反・JSON 不正のときは fallback の機械生成最小記録を書く
+function captureKnowledge(task, logPath, key, opts = {}) {
+  try {
+    let block = null;
+    try {
+      // ログは大きいため末尾だけ読む（ブロックは最終報告＝末尾に出力される）
+      if (existsSync(logPath))
+        block = extractKnowledgeBlock(readFileSync(logPath, 'utf8').slice(-262144));
+    } catch { /* 読み取り失敗は機械生成記録へ */ }
+    let r = block ? recordKnowledge(ROOT, task, block, opts) : null;
+    if (r?.error) log(`KNOWLEDGE-REJECT ${key}: ${r.error.join('; ')}`);
+    if (!r || r.error) r = recordKnowledge(ROOT, task, {}, opts);
+    if (r?.path) log(`KNOWLEDGE ${key} -> ${r.path}`);
+    else if (r?.error) log(`KNOWLEDGE-SKIP ${key}: ${r.error.join('; ')}`);
+  } catch (e) { log(`KNOWLEDGE-ERR ${key}: ${e.message}`); }
+}
 
 function spawnDevin(prompt, task, logPath, key, phase = 'impl') {
   // ACP ランナー経由: devin.exe acp に authenticate(windsurf_api_key) →
@@ -656,6 +676,11 @@ async function runTask(task, state, { skipAssess = false } = {}) {
         status: st2, finishedAt: new Date().toISOString(), exitCode: vcode };
       saveState(state);
       log(`VERIFY-${st2.toUpperCase()} ${key} (exit ${vcode})`);
+      // #103: 再検証終了時点のナレッジを蓄積（done=resolved、その他は deferred）
+      captureKnowledge(task, vp, key, {
+        status: st2 === 'done' ? 'resolved' : 'deferred',
+        landedIn: st2 === 'done' ? '既定ブランチへ push 済み' : null,
+        unverified: st2 === 'done' ? [] : ['再検証を通っていない'] });
       // needs-review（vMax 到達・結果確定不能）は自動再検証を諦める終端。
       // implDone を残すと discover が verify 候補へ戻して試行上限を迂回する
       // （failed ＜ vMax は implDone 維持で次ポーリングに自動再試行させる）
@@ -807,6 +832,11 @@ async function runTask(task, state, { skipAssess = false } = {}) {
       status: post, finishedAt: new Date().toISOString(), exitCode: code };
     saveState(state);
     log(`${!ok ? 'FAIL' : post === 'impl-done' ? 'IMPL-DONE' : post.toUpperCase()} ${key} (exit ${code})`);
+    // #103: 対応終了時点のナレッジを蓄積
+    captureKnowledge(task, ip, key, {
+      status: post === 'impl-done' ? 'resolved'
+        : post === 'closed' || post === 'failed' ? 'rejected' : 'deferred',
+      unverified: post === 'impl-done' ? ['再検証（verify）未実施'] : ['対応未完了'] });
     await setLabel(task.repo.github, task.number, task.type,
       post === 'impl-done' ? [LABEL.implDone]
         : post === 'needs-review' ? [LABEL.needsReview]
