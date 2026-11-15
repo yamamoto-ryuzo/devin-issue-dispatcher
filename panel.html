@@ -3155,10 +3155,17 @@ function renderCandBody() {
           : quedAssess || c.queued === 'assess' ? 'q-assess'
           : c.queued === 'verify' || quedPr || c.verify ? 'q-verify'
           : quedImpl || c.queued ? 'q-impl'
+          // 評価で不可・要人間の判定が出た課題は要確認列（feasible=no/risk=high は
+          // マーメイド上 needs-review/reject 扱い。queued が無くても未着手へ戻さない）
           : hw || a?.error || a?.category === 'human' || a?.category === 'reject'
+            || a?.feasible === 'no' || a?.risk === 'high'
             || c.state === 'failed' || c.state === 'needs-review'
             || c.state === 'rejected' || c.state === 'verify-ng' ? 'check'
-          : prM || c.state === 'done' || c.state === 'closed' ? 'done' : 'todo';
+          : prM || c.state === 'done' || c.state === 'closed' ? 'done'
+          // 評価済み（verdict 記録済み）で未起動は「実装待機中」。queued マーカーは
+          // 揮発状態で付かない場合がある（autoTrigger OFF・起票者ゲート・ポーリング
+          // 間の隙間）ため、未着手へ落とさずフロー上の待機位置で表示する
+          : a ? 'q-impl' : 'todo';
         boardCards[colId].push('<div class="bcard' +
           (rowBg === ' class="row-no"' ? ' bcard-no' : '') + '">' +
           '<div class="bhead"><a href="' + esc(c.url) +
