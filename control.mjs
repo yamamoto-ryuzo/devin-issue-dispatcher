@@ -13,6 +13,7 @@
  *   GET  /api/status    状態 { running, pid, startedAt, desired, config, tasks }
  *   GET  /api/log?n=200 dispatcher.log の末尾 n 行
  *   GET  /api/metrics?days=7  state.json tasks の期間集計（件数・判定分布・所要時間）
+ *   GET  /api/failures    dispatcher 失敗イベントの4軸分類・集計（issue-knowledge/failures.jsonl）
  *   POST /api/start     dispatcher 起動（desired.enabled=true を永続化）
  *   POST /api/stop      dispatcher 停止（desired.enabled=false）
  *   POST /api/control/restart  control 自身を再起動（起動後のコード更新を反映）
@@ -38,6 +39,7 @@ import { resolveDelegatedStatus, isDelegatedStale, checklistOf } from './core-lo
 import { sweepQueue, queueStaleMs } from './work-queue.mjs';
 import { AcpChat } from './acp-chat.mjs';
 import { computeMetrics } from './metrics.mjs';
+import { readFailures, aggregateFailures } from './failure-taxonomy.mjs';
 import { initCodeWatch, codeDrift } from './code-watch.mjs';
 import { createHash } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
@@ -2288,6 +2290,9 @@ const server = createServer(async (req, res) => {
           .map((f) => ({ name: f, content: readFileSync(join(dir, f), 'utf8') }));
       } catch { /* noop */ }
       return json(200, { files });
+    }
+    if (url.pathname === '/api/failures') {
+      return json(200, { ok: true, ...aggregateFailures(readFailures()) });
     }
     if (url.pathname === '/api/metrics') {
       const days = Math.min(Math.max(parseInt(url.searchParams.get('days') ?? '7', 10) || 7, 1), 365);

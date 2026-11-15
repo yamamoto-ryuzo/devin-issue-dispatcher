@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 import { gh, ghJson, keyOf, discover, toCandidate, readIssueStore } from './discover.mjs';
 import { buildTaskPrompt } from './task-prompts.mjs';
 import { checkFailures } from './failure-watch.mjs';
+import { recordFailure } from './failure-taxonomy.mjs';
+import { tryAcquireLock, releaseLock } from './instance-lock.mjs';
 import { reapOrphanedInflight } from './inflight-reap.mjs';
 import { RISK_RANK, CAT_RANK, VERDICT_STEPS, escalateVerdict, parseIssueRef,
   resolveDelegatedStatus, isDelegatedStale } from './core-logic.mjs';
@@ -637,6 +639,10 @@ async function runTask(task, state, { skipAssess = false } = {}) {
         status: st2, finishedAt: new Date().toISOString(), exitCode: vcode };
       saveState(state);
       log(`VERIFY-${st2.toUpperCase()} ${key} (exit ${vcode})`);
+      if (st2 === 'verify-ng' || st2 === 'failed')
+        recordFailure({ key, repo: task.repo.github, number: task.number, type: task.type,
+          kind: st2 === 'verify-ng' ? 'verify-ng' : 'verify-failed',
+          note: ngNote || `verify exit ${vcode}` });
       // needs-review（vMax 到達・結果確定不能）は自動再検証を諦める終端。
       // implDone を残すと discover が verify 候補へ戻して試行上限を迂回する
       // （failed ＜ vMax は implDone 維持で次ポーリングに自動再試行させる）
@@ -787,6 +793,9 @@ async function runTask(task, state, { skipAssess = false } = {}) {
       status: post, finishedAt: new Date().toISOString(), exitCode: code };
     saveState(state);
     log(`${!ok ? 'FAIL' : post === 'impl-done' ? 'IMPL-DONE' : post.toUpperCase()} ${key} (exit ${code})`);
+    if (post === 'failed')
+      recordFailure({ key, repo: task.repo.github, number: task.number, type: task.type,
+        kind: 'impl-failed', note: `impl exit ${code}` });
     await setLabel(task.repo.github, task.number, task.type,
       post === 'impl-done' ? [LABEL.implDone]
         : post === 'needs-review' ? [LABEL.needsReview]
@@ -822,6 +831,8 @@ async function runTask(task, state, { skipAssess = false } = {}) {
     // 予期しない例外（コード不具合・外部コマンド失敗等）で中断した課題を
     // status='running' のまま残さない。stale 回収と同じ failed 終端へ寄せる
     log(`runTask error ${key}: ${e.message}`);
+    recordFailure({ key, repo: task.repo.github, number: task.number, type: task.type,
+      kind: 'run-abort', note: e.message });
     state.tasks[key] = { ...(state.tasks[key] ?? {}), status: 'failed', phase: null,
       note: `runTask 中断: ${e.message}`, finishedAt: new Date().toISOString() };
     saveState(state);
@@ -1027,6 +1038,8 @@ async function reclaimStale(state) {
           `前回の Devin セッションが中断しました（dispatcher 停止またはタイムアウト）。再試行はパネルの「再実行」ボタンまたは \`POST /api/dispatch\` から行えます。`);
         state.tasks[key] = { ...(state.tasks[key] ?? {}),
           status: 'failed', note: 'stale running label reclaimed', finishedAt: new Date().toISOString() };
+        recordFailure({ key, repo: r.github, number: it.number, type,
+          kind: 'stale-running', note: `running ${Math.round(age / 60000)}min` });
         delete state.tasks[key].chatDelegated;
         delete state.tasks[key].delegatedAt;
         delete state.tasks[key].chatId;
@@ -1096,6 +1109,8 @@ async function sweepOrphanedRuns(state) {
     } catch { /* 判定不能なら failed 扱い */ }
     const post = closed ? 'done' : 'failed';
     log(`orphaned run reclaimed: ${key} -> ${post}`);
+    if (!closed) recordFailure({ key, repo: m[1], number: +m[3], type: m[2],
+      kind: 'orphaned-run', note: 'dispatcher 停止により中断' });
     state.tasks[key] = { ...t, status: post, phase: null,
       note: 'dispatcher 停止により中断', finishedAt: new Date().toISOString() };
     saveState(state);
