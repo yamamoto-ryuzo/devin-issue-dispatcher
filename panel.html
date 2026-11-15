@@ -61,6 +61,17 @@
   .hw-in { width: 30%; min-width: 220px; font-size: 12px; padding: 3px 6px;
     border: 1px solid #c4b5fd; border-radius: 6px; margin-right: 4px; vertical-align: middle; }
   .hw-note { font-size: 11px; color: #7c6bb3; margin-left: 6px; }
+  /* 人間待ち課題を上部へボタンで一覧し、押下で該当の返答欄へ誘導するバー */
+  #hw-bar { display: none; gap: 6px; align-items: center; flex-wrap: wrap;
+            margin: 0 0 8px; }
+  .hw-btn { background: #7c3aed; border: 1px solid #6d28d9; color: #fff;
+            border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 700;
+            cursor: pointer; max-width: 320px; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; }
+  .hw-btn:hover { background: #6d28d9; }
+  tr.hw-flash > td, .bcard.hw-flash, .hw-in.hw-flash { animation: hwflash 1.6s ease; }
+  @keyframes hwflash { 0% { background-color: #ddd6fe; }
+                       100% { background-color: transparent; } }
   .trig-auto { color: #7c3aed; } .trig-label { color: #2563eb; }
   #chat-box { height: 420px; overflow-y: auto; border: 1px solid #dfe3ea; border-radius: 8px;
               background: #f8fafc; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -265,6 +276,7 @@ en: {
 '※ 個別「対応」ボタンは評価（assess）をスキップして直接実装します':'* The per-issue "Implement" button skips assessment (assess) and goes straight to implementation',
 '「対応」は評価（assess）をスキップして直接実装します。実行しますか？':'"Implement" skips assessment (assess) and goes straight to implementation. Proceed?',
 '人間待ち':'Waiting for human','返答を入力（Enter で送信）':'Reply (Enter to send)',
+'対象の課題が見つかりません':'Target issue not found',
 '（次回実行時にエージェントへ伝達）':'(delivered to the agent on the next run)',
 '（理由の記録なし）':'(no reason recorded)','返答を送信しました':'Reply sent',
 },
@@ -768,6 +780,7 @@ function setLang(v) {
         </select>
         <button class="mini" onclick="loadCandidates(true)" data-i18n="今すぐ取得">今すぐ取得</button>
       </span></div>
+    <div id="hw-bar"></div>
     <div class="subtabs" id="cand-tabs"></div>
     <div id="cand-filters" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px">
       <span style="color:#6b7280" data-i18n="フィルター:">フィルター:</span>
@@ -3142,7 +3155,46 @@ function fmtAge(s) {
   return Math.floor(m / 1440) + 'd';
 }
 
+// 人間待ち（candidates API の humanWait）の課題を上部バーへボタンで一覧する。
+// 現在の一覧表示（テーブル/ボード・タブ・フィルター）とは別に全リポジトリ分を
+// 常時出して対応を促し、押下で該当の返答欄（.hw-in[data-key]）へ誘導する
+function renderHwBar() {
+  const el = document.getElementById('hw-bar');
+  if (!el) return;
+  const items = [];
+  for (const arr of candGroups.values())
+    for (const c of arr) if (c.humanWait) items.push(c);
+  if (!items.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = 'flex';
+  el.innerHTML = '<span class="badge" style="background:#7c3aed;color:#fff">' +
+    tr('人間待ち') + ' ' + items.length + '</span>' +
+    items.map((c) => '<button class="hw-btn" title="' +
+      esc(c.humanWait.question || c.humanWait.reason || c.title || '') +
+      '" onclick="hwJump(\'' + esc(c.key) + '\')">' +
+      esc('#' + c.number + ' ' + (c.title || '')) + '</button>').join('');
+}
+// バーのボタン押下: 対象が現タブで見えなければ「すべて」へ切替えて探し直し、
+// 返答入力欄へスクロール・フォーカスする（見つからない場合は通知のみ）
+function hwJump(key) {
+  const find = () => [...document.querySelectorAll('.hw-in')]
+    .find((el) => el.dataset.key === key);
+  let inp = find();
+  if (!inp && candTab !== '__all__') {
+    candTab = '__all__'; renderCandTabs(); renderCandBody(); inp = find();
+  }
+  if (!inp) { toast(tr('対象の課題が見つかりません')); return; }
+  const host = inp.closest('.bcard') || inp.closest('tr') || inp;
+  host.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  for (const el2 of [host, inp]) {
+    el2.classList.remove('hw-flash'); void el2.offsetWidth;
+    el2.classList.add('hw-flash');
+  }
+  setTimeout(() => [host, inp].forEach((x) => x.classList.remove('hw-flash')), 1700);
+  inp.focus();
+}
+
 function renderCandBody() {
+  renderHwBar();
   const manual = new Set(status?.manualRuns || []);
   const entries = candTab === '__all__'
     ? [...candGroups.entries()]
