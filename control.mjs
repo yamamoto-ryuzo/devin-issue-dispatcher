@@ -988,6 +988,7 @@ function status() {
     config: {
       pollIntervalSec: config.pollIntervalSec ?? 120,
       candidateCacheSec: config.candidateCacheSec ?? config.pollIntervalSec ?? 120,
+      autoIssueCreate: config.autoIssueCreate ?? false,
       autoDiscover: config.autoDiscover ?? true,
       autoTrigger: config.autoTrigger ?? false,
       autoAssess: config.autoAssess ?? false,
@@ -1749,7 +1750,7 @@ const server = createServer(async (req, res) => {
         // config.json の一部キーを更新（ファイル + メモリ両方）
         const allowed = ['pollIntervalSec', 'candidateCacheSec', 'maxNewPerPoll',
           'maxConcurrent', 'maxConcurrentAssess', 'maxConcurrentImpl', 'maxConcurrentPr',
-          'autoDiscover', 'autoTrigger', 'autoTriggerMode', 'trustedAuthors', 'autoIssueOnFailure', 'failureDedupeHours', 'autoAssess', 'autoPr', 'autoCategory',
+          'autoIssueCreate', 'autoDiscover', 'autoTrigger', 'autoTriggerMode', 'trustedAuthors', 'autoIssueOnFailure', 'failureDedupeHours', 'autoAssess', 'autoPr', 'autoCategory',
           'maxAutoRisk',
           'assessMaxAgeHours', 'proposalThreshold',
           'autoTriggerSince', 'permissionMode', 'implLoopMax',

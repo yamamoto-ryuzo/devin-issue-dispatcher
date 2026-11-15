@@ -166,7 +166,7 @@ flowchart LR
 <h2 id="panel">管理パネル</h2>
 <table>
 <tr><th>タブ</th><th>役割</th></tr>
-<tr><td><b>課題整理</b></td><td>2つのサブタブで構成。「AI課題整理＞課題整理へ反映」:「やりたいこと・目的」を入力（スクリーンショット貼付可・リポジトリ単位で保存/再編集）→「課題抽出」で AI が起票候補を整理 → 候補ごとに ISSUE登録。「通常の課題整理」: タイトル・本文を直接入力して起票</td></tr>
+<tr><td><b>課題整理</b></td><td>2つのサブタブで構成。「AI課題整理＞課題整理へ反映」:「やりたいこと・目的」を入力（スクリーンショット貼付可・リポジトリ単位で保存/再編集）→「課題抽出」で AI が起票候補を整理 → 候補ごとに ISSUE登録（ヘッダの「ISSUE登録 自動」ON なら抽出完了時に全候補を自動登録）。「通常の課題整理」: タイトル・本文を直接入力して起票</td></tr>
 <tr><td><b>課題処理</b></td><td>issue 候補の一覧。評価/対応ボタン・判定セレクト・実行中/待機中バッジ・リポジトリサブタブ・フィルター。ボード列の意味: 「未着手」= autoAssess 無効で評価も実装も自動で行われない真の未着手。autoAssess 有効な未評価課題は起票直後から「評価待機中」列（応答専用フラグ <code>assessWait</code>）</td></tr>
 <tr><td><b>PR処理</b></td><td>pr 候補を集約（課題処理と同じUI、`_pr*` スキル使用。AI:impl-done 付き課題の再検証もこの枠）</td></tr>
 <tr><td><b>処理履歴</b></td><td>state.json のタスク状態一覧。課題列はタイトル＋リンク、「内容」列は「何をどうしたか」（状態ラベル＋note/評価plan・reason の作業要約、ホバーで全文）</td></tr>
@@ -175,7 +175,7 @@ flowchart LR
 <tr><td><b>スキル</b></td><td><code>skills/*.md</code> の閲覧（Markdown プレビュー）/編集の切替</td></tr>
 <tr><td><b>ログ</b></td><td>dispatcher.log の末尾表示</td></tr>
 </table>
-<p>ヘッダ右のトグル: <b>ISSUE取得自動</b>(autoDiscover) / <b>判定</b>(autoAssess) / <b>課題対応自動</b>(autoTrigger) / <b>PR対応自動</b>(autoPr)。</p>
+<p>ヘッダ右のトグル: <b>ISSUE登録自動</b>(autoIssueCreate) / <b>ISSUE取得自動</b>(autoDiscover) / <b>判定</b>(autoAssess) / <b>課題対応自動</b>(autoTrigger) / <b>PR対応自動</b>(autoPr)。</p>
 
 <h2 id="skills">スキル（注入順: _all → モード別 → _done）</h2>
 <table>
@@ -207,7 +207,7 @@ flowchart LR
 <tr><td><code>verifyLoopMax</code></td><td>3</td><td>再検証セッションのリトライ上限（到達で needs-review）</td></tr>
 <tr><td><code>proposalThreshold</code></td><td>3</td><td>評価出力の任意 proposals（語彙・判定種別の新設提案）を <code>proposals.json</code> へ kind+target+neighbor_of で束ね蓄積。束内の confidence:high 件数が閾値に達するとパネルへ「設定候補」として表示し人の採否を待つ</td></tr>
 <tr><td><code>implDoneLabel</code></td><td>AI:impl-done</td><td>実装済み・未検証のフラグラベル（付いた課題が再検証候補）</td></tr>
-<tr><td><code>autoDiscover/autoAssess/autoTrigger/autoPr</code></td><td>false</td><td>自動化フラグ（パネルのトグルと連動。autoPr=再検証の自動実行）</td></tr>
+<tr><td><code>autoIssueCreate/autoDiscover/autoAssess/autoTrigger/autoPr</code></td><td>false</td><td>自動化フラグ（パネルのトグルと連動。autoIssueCreate=課題抽出候補の自動登録、autoPr=再検証の自動実行）</td></tr>
 <tr><td><code>repos</code></td><td>—</td><td>監視リポジトリ（path + github）</td></tr>
 <tr><td><code>permissionMode</code></td><td>dangerous</td><td>devin -p の権限モード</td></tr>
 </table>

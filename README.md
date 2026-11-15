@@ -248,6 +248,7 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
 | `pollIntervalSec` | 120 | ポーリング間隔（秒） |
 | `maxConcurrent` | 1 | 同時起動セッション数（リポジトリ毎。評価で `scope:"multi"` と判定された課題のみ全リポジトリ合算で判定） |
 | `triggerLabel` 他 | `devin` / `devin:running` / `devin:done` / `devin:failed` | 状態ラベル（初回起動時に各 repo へ自動作成） |
+| `autoIssueCreate` | `false` | `true` なら課題抽出の完了時に抽出された全候補を自動で ISSUE 登録（パネルの「ISSUE登録 自動」トグル） |
 | `autoDiscover` | `true` | `true` なら全 open Issue/PR を定期検出して `candidates.json` を更新 |
 | `autoTrigger` | `true` | `true` なら検出した候補を自動起動（評価→実装）。検出自体は `autoDiscover` 側 |
 | `autoTriggerSince` | `"all"` | 自動トリガーの起点。`"all"`=全 open Issue/PR が対象 / ISO8601時刻=それ以降の作成のみ / `null` なら dispatcher 初回起動時刻（`deployedAt`）以降のみ |

@@ -620,7 +620,7 @@ function setLang(v) {
   LANG = v; localStorage.setItem('kadai-lang', v);
   applyI18n();
   // 生成コンテンツは再描画で言語反映（未定義なら次回ポーリングで追従）
-  try { renderFlag && ['autoDiscover','autoAssess','autoTrigger','autoPr'].forEach(renderFlag); } catch { /* noop */ }
+  try { renderFlag && ['autoIssueCreate','autoDiscover','autoAssess','autoTrigger','autoPr'].forEach(renderFlag); } catch { /* noop */ }
   try { renderCandBody && renderCandBody(); } catch { /* noop */ }
   try { refreshStatus && refreshStatus(); } catch { /* noop */ }
   try {
@@ -659,6 +659,10 @@ function setLang(v) {
   </div>
   <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:8px">
     <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end">
+    <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
+      <button id="btn-reg" class="toggle off" onclick="toggleFlag('autoIssueCreate')">…</button>
+      <span id="reg-desc" style="display:none"></span>
+    </div>
     <div style="display:flex;flex-direction:column;gap:2px;align-items:center;max-width:180px">
       <button id="btn-disc" class="toggle off" onclick="toggleFlag('autoDiscover')">…</button>
       <span id="disc-desc" style="display:none"></span>
@@ -1509,7 +1513,7 @@ async function restartDispatcher() {
 }
 
 let cfgInit = false;
-const flags = { autoDiscover: false, autoAssess: false, autoTrigger: false, autoPr: false };
+const flags = { autoIssueCreate: false, autoDiscover: false, autoAssess: false, autoTrigger: false, autoPr: false };
 let logKey = null;
 function viewLog(key) { logKey = key; showTab('log'); }
 // devin.exe CLI ログインは IDE エンジン方式では不要（実行は Devin IDE セッションが担う）
@@ -1526,6 +1530,12 @@ async function killActive() {
   toast('停止要求を送信しました');
 }
 const FLAG_UI = {
+  autoIssueCreate: {
+    btn: 'btn-reg', desc: 'reg-desc',
+    on: 'ISSUE登録 自動 ON', off: 'ISSUE登録 自動 OFF',
+    onDesc: '課題抽出が完了した時点で、抽出された全候補を自動で ISSUE 登録します',
+    offDesc: '抽出候補の登録は手動のみ（各候補の「ISSUE登録」ボタン）',
+  },
   autoDiscover: {
     btn: 'btn-disc', desc: 'disc-desc',
     on: 'ISSUE取得 自動 ON', off: 'ISSUE取得 自動 OFF',
@@ -2405,10 +2415,12 @@ async function refresh() {
   lastTaskSig = taskSig;
   lastAnyActive = anyActive;
   fillCfgForm();
+  flags.autoIssueCreate = !!status.config.autoIssueCreate;
   flags.autoDiscover = !!status.config.autoDiscover;
   flags.autoAssess = !!status.config.autoAssess;
   flags.autoTrigger = !!status.config.autoTrigger;
   flags.autoPr = !!status.config.autoPr;
+  renderFlag('autoIssueCreate');
   renderFlag('autoDiscover');
   renderFlag('autoAssess');
   renderFlag('autoTrigger');
@@ -2913,6 +2925,8 @@ function pollIssues(id, since) {
           b.disabled = false;
         }
         svExtracting(false);
+        // ISSUE登録 自動 ON なら抽出完了時点で全候補をそのまま登録する
+        if (all.length && flags.autoIssueCreate) issueCreateAll();
       }
     } catch { /* noop */ }
   }, 3000);
