@@ -3032,7 +3032,8 @@ function renderCandBody() {
         !!(c.phase || c.inflight || c.chatDelegated);
       const qued = (status.chatWaiting || []).includes(c.key + ' assess') ||
         (status.chatWaiting || []).includes(c.key + ' impl') ||
-        localWait.has(c.key + ' assess') || localWait.has(c.key + ' impl') || !!c.queued;
+        localWait.has(c.key + ' assess') || localWait.has(c.key + ' impl') || !!c.queued
+        || !!c.assessWait;
       if (fStat === 'busy' && !ph) return false;
       if (fStat === 'queued' && !qued) return false;
       if (fStat === 'idle' && (ph || qued)) return false;
@@ -3102,6 +3103,8 @@ function renderCandBody() {
         : ph?.endsWith(' assess') || c.phase === 'assess' || c.inflight === 'assess' ? 'assess' : null;
       const assessCell = runKind === 'assess' ? badge('#b45309', tr('評価中'))
         : quedAssess || c.queued === 'assess' ? waitBadge(c, '評価待機中')
+        : c.assessWait ? badge('#6b7280', tr('評価待機中'),
+            'autoAssess 有効: dispatcher の次回検出で自動評価されます（停止中は起動後に評価）')
         : '<button class="mini" ' + (busy ? 'disabled' : '') +
           ' onclick="assess(\'' + esc(c.key) + '\')">' + (c.assess ? tr('再評価') : tr('評価')) + '</button>';
       const prM = c.openPr ? String(c.openPr).match(/^(\S+)\s+pr#(\d+)$/) : null;
@@ -3152,7 +3155,9 @@ function renderCandBody() {
         const colId = runKind === 'assess' ? 'assess'
           : runKind === 'impl' ? 'impl'
           : runKind === 'verify' ? 'verify'
-          : quedAssess || c.queued === 'assess' ? 'q-assess'
+          // assessWait = autoAssess 有効で未評価の新規課題（起票〜次検出の隙間も
+          // 未着手に落とさず評価待機中として表示。candidates API の応答専用フラグ）
+          : quedAssess || c.queued === 'assess' || c.assessWait ? 'q-assess'
           : c.queued === 'verify' || quedPr || c.verify ? 'q-verify'
           : quedImpl || c.queued ? 'q-impl'
           // 評価で不可・要人間の判定が出た課題は要確認列（feasible=no/risk=high は

@@ -132,6 +132,11 @@ node control.mjs    # http://127.0.0.1:8585/ に管理パネルが立つ
   `dispatcher.mjs --task "owner/repo issue#N"` が単一課題だけを即時起動
   （ポーリングを待たない・他課題は起動しない）。`devin:running` 付きは二重起動防止で
   スキップ。処理履歴の failed 行には「再実行」ボタンも出る
+- **ボード列の意味（未着手 / 評価待機中）**: `autoAssess` 有効時は、未評価の新規課題を
+  起票直後から「評価待機中」として表示する（`/api/candidates` 応答の `assessWait`
+  フラグ。state には書かない表示専用で、次回検出で実キューへ積まれると本物の
+  `queued:'assess'` に置き換わる。dispatcher 停止中は「次回起動時の評価待ち」の意味）。
+  `autoAssess` 無効時の「未着手」は、評価・実装とも自動では行われない真の未着手を意味する
 
 - `control.mjs` が dispatcher の**親（スーパーバイザー）**。常駐・タスクスケジューラ登録するのはこちら
 - 「起動」すると `desired.json` に `enabled:true` が残るため、PC 再起動後も

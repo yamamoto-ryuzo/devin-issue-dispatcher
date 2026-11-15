@@ -1173,6 +1173,13 @@ async function candidates(force) {
         chatDelegated: t?.chatDelegated ?? null,
         queued: t?.queued ?? null,
         queuedAt: t?.queuedAt ?? null,
+        // autoAssess 有効時の未評価・未起動の新規候補 = 次回検出で評価キューへ
+        // 積まれる「評価待機中」として出す応答専用フラグ。state には書かない
+        // （queued を立てると discover が active 扱いし autoAssess がスキップする。
+        //  dispatcher 停止中は「次回起動時の評価待ち」の意味）
+        assessWait: (config.autoAssess ?? false) && !c.verify && !c.runningLabel
+          && !t?.status && !t?.assess && !t?.queued && !t?.inflight
+          && !t?.phase && !t?.chatDelegated && !t?.waitReason ? true : null,
         // 実行開始時刻（ボード表示の経過時間用）
         startedAt: t?.startedAt ?? null,
         // dispatcher の待機キュー滞留理由（concurrency/repo-serial/unpushed）
