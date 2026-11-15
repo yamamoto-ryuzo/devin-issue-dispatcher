@@ -54,6 +54,13 @@
   th { color: #6b7280; font-weight: 500; }
   .st-done { color: #16a34a; } .st-failed { color: #dc2626; } .st-running { color: #ca8a04; }
   .st-needs-review { color: #7c3aed; } .st-rejected { color: #991b1b; } .st-closed { color: #4b5563; }
+  /* 課題行直下の「人間待ち」返答行（candidates API の humanWait） */
+  .hw-row td { background: #f5f3ff; padding: 4px 8px; white-space: normal; }
+  .hw-q { display: inline-block; max-width: 46%; margin: 0 8px; font-size: 12px;
+    color: #4c1d95; white-space: pre-wrap; word-break: break-word; vertical-align: middle; }
+  .hw-in { width: 30%; min-width: 220px; font-size: 12px; padding: 3px 6px;
+    border: 1px solid #c4b5fd; border-radius: 6px; margin-right: 4px; vertical-align: middle; }
+  .hw-note { font-size: 11px; color: #7c6bb3; margin-left: 6px; }
   .trig-auto { color: #7c3aed; } .trig-label { color: #2563eb; }
   #chat-box { height: 420px; overflow-y: auto; border: 1px solid #dfe3ea; border-radius: 8px;
               background: #f8fafc; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -233,6 +240,9 @@ en: {
 '（必要時）':'(if needed)','モデル名':'model name','（既定）':'(default)',
 '※ 個別「対応」ボタンは評価（assess）をスキップして直接実装します':'* The per-issue "Implement" button skips assessment (assess) and goes straight to implementation',
 '「対応」は評価（assess）をスキップして直接実装します。実行しますか？':'"Implement" skips assessment (assess) and goes straight to implementation. Proceed?',
+'人間待ち':'Waiting for human','返答を入力（Enter で送信）':'Reply (Enter to send)',
+'（次回実行時にエージェントへ伝達）':'(delivered to the agent on the next run)',
+'（理由の記録なし）':'(no reason recorded)','返答を送信しました':'Reply sent',
 },
 zh: {
 '課題エージェント ディスパッチャー':'Issue 智能体 Dispatcher',
@@ -2204,6 +2214,37 @@ async function dispatch(key, verify) {
   setTimeout(loadCandidates, 1000);
 }
 
+// 課題行の「人間待ち」返答欄からの直接返答。
+// data-chat（委譲チャット経路）なら /api/chat/send で同一セッションを
+// 継続・再開し、無ければ /api/steer で次回実行セッションへ注入する。
+// 送信後はセッション busy/状態変化が SSE・ポーリング経由で反映され
+// humanWait が解消された時点で返答行も消える
+async function candReply(inp) {
+  const text = inp.value.trim();
+  if (!text) return;
+  const chat = inp.dataset.chat;
+  const key = inp.dataset.key;
+  inp.disabled = true;
+  try {
+    const r = await fetch(API + (chat != null ? '/api/chat/send' : '/api/steer'), {
+      method: 'POST', headers: H,
+      body: JSON.stringify(chat != null
+        ? { id: /^\d+$/.test(chat) ? +chat : chat, text }
+        : { key, text }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.error || j.ok === false) {
+      toast(tr('送信失敗: ') + (j.error || r.status));
+      inp.disabled = false;
+      return;
+    }
+    inp.value = '';
+    toast(tr('返答を送信しました'));
+    ensurePolling();
+    setTimeout(refresh, 800);
+  } catch (e) { toast('reply: ' + e.message); inp.disabled = false; }
+}
+
 async function refresh() {
   try {
     status = await (await fetch(API + '/api/status')).json();
@@ -3020,6 +3061,26 @@ function renderCandBody() {
             : '<button class="mini primary" ' + (busy ? 'disabled' : '') +
               ' title="' + tr('※ 個別「対応」ボタンは評価（assess）をスキップして直接実装します') +
               '" onclick="dispatch(\'' + esc(c.key) + '\')">' + tr('対応') + '</button>';
+      // 人間待ち（入力待ち・needs-review）: 直近の問い/理由と返答欄を行直下へ出す。
+      // 待機中でない課題には出さない（誤送信防止）。返信先は candidates API の
+      // humanWait.route が決める（chat=/api/chat/send / steer=/api/steer）
+      const hw = c.humanWait;
+      const hwRow = !hw ? '' :
+        '<tr class="hw-row"><td colspan="8">' +
+        '<span class="badge" style="background:#7c3aed;color:#fff;vertical-align:middle">' +
+        tr('人間待ち') + '</span>' +
+        '<span class="hw-q" title="' + esc(hw.question || hw.reason || '') + '">' +
+        esc(hw.question || hw.reason || tr('（理由の記録なし）')) + '</span>' +
+        '<input class="hw-in" data-key="' + esc(c.key) + '"' +
+        (hw.chatId != null ? ' data-chat="' + esc(String(hw.chatId)) + '"' : '') +
+        ' placeholder="' + tr('返答を入力（Enter で送信）') + '"' +
+        ' onkeydown="if(event.key===\'Enter\')candReply(this)">' +
+        '<button class="mini primary" onclick="candReply(this.previousElementSibling)">' +
+        tr('送信') + '</button>' +
+        (hw.route === 'steer'
+          ? '<span class="hw-note">' + tr('（次回実行時にエージェントへ伝達）') + '</span>'
+          : '') +
+        '</td></tr>';
       return '<tr' + rowBg + '><td><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">' +
         (c.type === 'pr'
@@ -3038,7 +3099,7 @@ function renderCandBody() {
         (remPr ? ' → <a href="https://github.com/' + esc(remPr[1]) + '/pull/' + remPr[2] +
           '" target="_blank" rel="noopener">pr#' + remPr[2] + '</a>'
           : c.createdPr ? ' → ' + esc(String(c.createdPr).split(' ').pop()) : '') +
-        '</td></tr>';
+        '</td></tr>' + hwRow;
     }).join('');
     return head + '<table><colgroup>' +
       '<col style="width:92px"><col style="width:108px"><col>' +

@@ -1035,6 +1035,78 @@ function closingIssueNums(body, repo) {
   return [...out];
 }
 
+// 課題キーに対応する最新セッションログの末尾（/api/tasklog と同一命名規則）。
+// needs-review の「直近の問い」復元用（委譲チャットが畳まれていても
+// エージェントの最終発言をログから拾える）
+function taskLogTail(key, n = 40) {
+  const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
+  if (!m) return '';
+  const dir = join(ROOT, 'logs');
+  const prefix = `${m[1].replace('/', '_')}_${m[2]}${m[3]}`;
+  let files = [];
+  try {
+    files = readdirSync(dir)
+      .filter((f) => f.startsWith(prefix) && f.endsWith('.log'))
+      .map((f) => ({ f, mt: statSync(join(dir, f)).mtimeMs }))
+      .sort((a, b) => b.mt - a.mt);
+  } catch { return ''; }
+  return files.length ? tailLines(join(dir, files[0].f), n) : '';
+}
+
+// ログ末尾からマーカー行（[tool →]/[steer]/[done] 等）とデーモン診断
+// レコードを除いたエージェント最終発言を返す
+function lastAgentLogText(log) {
+  const SYS = /^\[(tool [→✗]|plan|steer|session |done|stopped|option|option失敗|fatal|mcp|auth|spawn error|steer error|acp spawn)/;
+  const DM = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:[\d.]+Z\s+(INFO|WARN|ERROR|DEBUG|TRACE)\b/;
+  const lines = String(log).split('\n')
+    .filter((l) => l.trim() && !SYS.test(l.trim()) && !DM.test(l.trim()));
+  return lines.slice(-6).join('\n').trim().slice(0, 600) || null;
+}
+
+// 人間待ちの理由。note は queue_done 経由で JSON 文字列が入る場合があるため
+// reason/plan へ読み替える（panel.html の noteText と同一規則）
+function waitReasonText(t) {
+  if (!t) return null;
+  if (t.engineError) return String(t.engineError).slice(0, 600);
+  const note = String(t.note ?? '').trim();
+  if (note) {
+    if (!note.startsWith('{')) return note.slice(0, 600);
+    try {
+      const j = JSON.parse(note);
+      return String(j?.reason || j?.plan || '').slice(0, 600) || null;
+    } catch { /* fall through */ }
+  }
+  const r = String(t.assess?.reason ?? '').trim();
+  return r ? r.slice(0, 600) : null;
+}
+
+// 「人間待ち」状態の判定。返答は新規経路を作らず既存のものを再利用する:
+//   route=chat  → /api/chat/send（課題に紐づく委譲/自動セッションが
+//                 アイドル＝エージェントが返答待ちでターンを終えた状態。
+//                 送信で同一セッションを継続・再開する）
+//   route=steer → /api/steer（needs-review で実行セッションは終了済み。
+//                 次回その課題が起動した際にエージェントへ注入される）
+function humanWaitOf(key, t) {
+  const needsHuman = t?.status === 'needs-review';
+  const inFlight = !!t &&
+    (t.status === 'running' || !!t.inflight || !!t.chatDelegated);
+  if (!needsHuman && !inFlight) return null;
+  const entry = [...chats.entries()].find(([, s]) =>
+    !s.chat.busy && typeof s.label === 'string' && s.label.startsWith(key + ' '));
+  if (entry) {
+    const msgs = entry[1].chat.messages ?? [];
+    const last = [...msgs].reverse().find((m) => m.role === 'agent' && m.text?.trim());
+    return { route: 'chat', chatId: entry[0],
+      reason: waitReasonText(t),
+      question: last?.text?.trim().slice(0, 600) || null };
+  }
+  if (needsHuman) {
+    return { route: 'steer', reason: waitReasonText(t),
+      question: lastAgentLogText(taskLogTail(key)) };
+  }
+  return null;
+}
+
 async function candidates(force) {
   const labels = candLabels();
   const cacheMs = (config.candidateCacheSec ?? config.pollIntervalSec ?? 120) * 1000;
@@ -1103,6 +1175,8 @@ async function candidates(force) {
         queuedAt: t?.queuedAt ?? null,
         // dispatcher の待機キュー滞留理由（concurrency/repo-serial/unpushed）
         waitReason: t?.waitReason ?? null,
+        // 人間待ち（入力待ち・needs-review）状態と返答経路・直近の問い
+        humanWait: humanWaitOf(key, t),
         createdPr, openPr,
         engineReq: t?.engineReq ?? null,
         engineIssue: issueEngine(key, issuesAll),
