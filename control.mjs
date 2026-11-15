@@ -34,6 +34,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { keyOf, discover, toCandidate, readIssueStore, ghJson } from './discover.mjs';
 import { resolveDelegatedStatus, isDelegatedStale, checklistOf } from './core-logic.mjs';
+import { sweepQueue, queueStaleMs } from './work-queue.mjs';
 import { AcpChat } from './acp-chat.mjs';
 import { computeMetrics } from './metrics.mjs';
 import { createHash } from 'node:crypto';
@@ -46,6 +47,7 @@ const STATE_PATH = join(ROOT, 'state.json');
 const CANDS_PATH = join(ROOT, 'candidates.json');
 const GOALS_PATH = join(ROOT, 'goals.json');
 const ISSUES_PATH = join(ROOT, 'issues.json');
+const WORKQUEUE_PATH = join(ROOT, 'work-queue.json');
 const CHATS_PATH = join(ROOT, 'chats.json'); // チャットのラベル・エンジン・ACP sessionId（再開用）
 const SECRETS_PATH = join(ROOT, 'secrets.json'); // apiKey・MCP トークン等（gitignore 済。config.json へは書かない）
 const LOG_PATH = join(ROOT, 'logs', 'dispatcher.log');
@@ -2098,7 +2100,22 @@ const server = createServer(async (req, res) => {
           return json(400, { ok: false,
             error: 'api エンジンは評価(assess)専用です。impl は起動できません' });
         }
-        const q = loadJson(join(ROOT, 'work-queue.json'), { items: [] });
+        const q = loadJson(WORKQUEUE_PATH, { items: [] });
+        // 滞留アイテム回収: closed/終端ラベルの課題を除去し、放置された
+        // in-progress を pending へ戻す（dedupe 409 ブロックと inflight 固定の解消）
+        {
+          const labels = candLabels();
+          const st = loadJson(STATE_PATH, { tasks: {} });
+          const istore = readIssueStore(ISSUES_PATH);
+          const sw = sweepQueue(q, { issues: istore.issues, fetchedAt: istore.fetchedAt,
+            terminalLabels: [labels.done, labels.failed, labels.needsReview,
+              labels.rejected, labels.implDone],
+            stateTasks: st.tasks, staleMs: queueStaleMs(config) });
+          if (sw.removed.length || sw.requeued.length) {
+            writeFileSync(WORKQUEUE_PATH, JSON.stringify(q, null, 2));
+            if (sw.cleared.length) writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+          }
+        }
         if (q.items.some((i) => i.key === key && i.mode === (isAssess ? 'assess' : 'impl'))) {
           return json(409, { ok: false, error: 'already queued: ' + key });
         }
@@ -2110,7 +2127,7 @@ const server = createServer(async (req, res) => {
           ...(eng ? { engine: eng } : {}),
           status: 'pending', queuedAt: new Date().toISOString(),
         });
-        writeFileSync(join(ROOT, 'work-queue.json'), JSON.stringify(q, null, 2));
+        writeFileSync(WORKQUEUE_PATH, JSON.stringify(q, null, 2));
         return json(200, { ok: true, queued: key });
       }
       if (url.pathname === '/api/login') {

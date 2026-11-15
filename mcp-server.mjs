@@ -8,10 +8,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPolicy } from './task-prompts.mjs';
+import { sweepQueue, queueStaleMs } from './work-queue.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const QUEUE = join(ROOT, 'work-queue.json');
 const STATE = join(ROOT, 'state.json');
+const ISSUES = join(ROOT, 'issues.json');
+const CONFIG = join(ROOT, 'config.json');
 const load = (p, d) => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return d; } };
 const save = (p, v) => writeFileSync(p, JSON.stringify(v, null, 2));
 
@@ -29,8 +32,28 @@ const tools = [
       note: { type: 'string' } }, required: ['key', 'status'] } },
 ];
 
+// 滞留アイテム回収: closed/終端ラベルの課題の除去と、放置された
+// in-progress の pending 復帰＋state.tasks の status/inflight 解除。
+// queue 提供（list/claim/done）の度に実行し、死んだタスクの提示と
+// dedupe 409 ブロック・inflight 固定を防ぐ
+const sweep = (q) => {
+  const cfg = load(CONFIG, {});
+  const st = load(STATE, { tasks: {} });
+  const iss = load(ISSUES, { fetchedAt: null, issues: {} });
+  const r = sweepQueue(q, { issues: iss.issues, fetchedAt: iss.fetchedAt,
+    terminalLabels: [cfg.doneLabel ?? 'devin:done', cfg.failedLabel ?? 'devin:failed',
+      cfg.needsReviewLabel ?? 'devin:needs-review', cfg.rejectedLabel ?? 'devin:rejected',
+      cfg.implDoneLabel ?? 'AI:impl-done'],
+    stateTasks: st.tasks, staleMs: queueStaleMs(cfg) });
+  if (r.removed.length || r.requeued.length) {
+    save(QUEUE, q);
+    if (r.cleared.length) save(STATE, st);
+  }
+};
+
 const call = (name, args) => {
   const q = load(QUEUE, { items: [] });
+  sweep(q);
   if (name === 'queue_list') {
     const pend = q.items.filter((i) => i.status === 'pending');
     return pend.length ? pend : 'キューは空です';

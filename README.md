@@ -304,6 +304,7 @@ Start-ScheduledTask -TaskName DevinAgentDispatcher           # 今すぐ起動
     - **api エンジンの課題処理**: 単発応答でツール往復が無いため実効なし（UI 注記あり）
   - `chatStallMinutes`: ACP チャットのターン無応答とみなす分数（既定 30・0/負で無効）。busy のまま session/update が途絶えたターンを `session/cancel`→プロセス kill で中断し `busy=false` へ戻す（委譲課題の watcher が完了を検出できるようにする上流防御）。control 起動時の委譲再武装が孤児ターンへ与える猶予窓としても使う
   - `delegatedSweepMinutes`: 委譲課題（`chatDelegated`）が `chatResult` 未記入のまま滞留した場合に dispatcher が gh 実状態で終端判定する分数（既定 90）。control の watcher 全喪失・control 停止時の最終セーフティネット。終端化は `chatResult{via:'delegated-sweep'}` を書く方式で既存の消費経路へ一本化
+  - `queueStaleMinutes`: work-queue.json の `in-progress`（IDE エージェントが queue_claim 済み）アイテムを放置とみなして `pending` へ戻す分数（既定 90）。復帰時に `state.tasks` の `status:'running'`+`inflight` も解除する。キュー提供・投入（`/api/queue` 系・MCP `queue_*`）の度に、closed・終端ラベル（devin:done/failed/needs-review/rejected・AI:impl-done）付き課題のアイテムも併せて除去され、同 key の再投入 409 ブロックを防ぐ（work-queue.mjs `sweepQueue`）
   - `apiProvider`: api エンジンのプロバイダ種別（`openai` 既定 / `anthropic` / `azure`）。anthropic=`{apiUrl}/messages`+`x-api-key`+`anthropic-version`（max_tokens 必須・応答 `content[]` 連結、一覧は `/models`）。azure=`apiUrl`=リソースベース URL・`apiModel`=デプロイメント名で `/openai/deployments/{model}/chat/completions?api-version={apiVersion}`（既定 `2024-10-21`・`config.apiVersion` で上書き可）+`api-key` ヘッダ。パネル内蔵 AI チャットのツールループは OpenAI 形式前提のため openai/azure のみ（anthropic 選択時は明示エラー。課題処理の単発送信は全プロバイダ対応）
 - `config.example.json` — config.json の構成例（追跡対象へキーが入らない形）
 - `secrets.json` — APIキー等のシークレット（自動生成・gitignore 済）
