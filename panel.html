@@ -235,6 +235,7 @@ en: {
 'フィルター:':'Filter:','判定:すべて':'Verdict: all','未評価':'Unassessed','リスク:すべて':'Risk: all','状態:すべて':'Status: all',
 '実行中':'Running','待機中':'Queued','非実行':'Idle','読み込み中…':'Loading…',
 '候補なし':'No candidates','監視リポジトリなし':'No watched repos',
+'評価待機中':'Waiting (assess)','実装待機中':'Waiting (impl)','検証待機中':'Waiting (verify)',
 '評価中':'Assessing','実装中':'Implementing','検証中':'Verifying','評価失敗':'Assess failed','PR中#':'In PR #',
 'テーブル':'Table','ボード':'Board','表示切替':'Toggle view','未着手':'Todo',
 '要確認・失敗':'Needs check / Failed','完了':'Done','開始/登録からの経過':'Elapsed since start/created',
@@ -303,6 +304,7 @@ zh: {
 'フィルター:':'筛选:','判定:すべて':'判定:全部','未評価':'未评估','リスク:すべて':'风险:全部','状態:すべて':'状态:全部',
 '実行中':'运行中','待機中':'等待中','非実行':'未运行','読み込み中…':'加载中…',
 '候補なし':'无候选','監視リポジトリなし':'无监视仓库',
+'評価待機中':'等待评估','実装待機中':'等待实现','検証待機中':'等待验证',
 '評価中':'评估中','実装中':'实现中','検証中':'验证中','評価失敗':'评估失败','PR中#':'PR中#',
 '評価専用(api)':'仅评估(api)','自動(新規)':'自动(新建)','処理済み(要再検証)':'已处理(待再验证)','devin ラベル':'devin 标签',
   '自動対象外（起票者）':'非自动对象（起票者）',
@@ -366,6 +368,7 @@ ko: {
 'フィルター:':'필터:','判定:すべて':'판정:전부','未評価':'미평가','リスク:すべて':'리스크:전부','状態:すべて':'상태:전부',
 '実行中':'실행 중','待機中':'대기 중','非実行':'미실행','読み込み中…':'로드 중…',
 '候補なし':'후보 없음','監視リポジトリなし':'감시 리포지토리 없음',
+'評価待機中':'평가 대기','実装待機中':'구현 대기','検証待機中':'검증 대기',
 '評価中':'평가 중','実装中':'구현 중','検証中':'검증 중','評価失敗':'평가 실패','PR中#':'PR #',
 '評価専用(api)':'평가 전용(api)','自動(新規)':'자동(신규)','処理済み(要再検証)':'처리 완료(재검증 필요)','devin ラベル':'devin 라벨',
   '自動対象外（起票者）':'자동 대상 제외(작성자)',
@@ -429,6 +432,7 @@ es: {
 'フィルター:':'Filtro:','判定:すべて':'Veredicto: todo','未評価':'Sin evaluar','リスク:すべて':'Riesgo: todo','状態:すべて':'Estado: todo',
 '実行中':'Ejecutando','待機中':'En cola','非実行':'Inactivo','読み込み中…':'Cargando…',
 '候補なし':'Sin candidatos','監視リポジトリなし':'Sin repos vigilados',
+'評価待機中':'Espera (eval.)','実装待機中':'Espera (impl.)','検証待機中':'Espera (verif.)',
 '評価中':'Evaluando','実装中':'Implementando','検証中':'Verificando','評価失敗':'Evaluación fallida','PR中#':'En PR #',
 '評価専用(api)':'Solo evaluación (api)','自動(新規)':'Auto (nuevo)','処理済み(要再検証)':'Impl hecho (verificar)','devin ラベル':'etiqueta devin',
   '自動対象外（起票者）':'Excluido de auto (autor)',
@@ -492,6 +496,7 @@ fr: {
 'フィルター:':'Filtre :','判定:すべて':'Verdict : tout','未評価':'Non évalué','リスク:すべて':'Risque : tout','状態:すべて':'État : tout',
 '実行中':'En cours','待機中':'En file','非実行':'Inactif','読み込み中…':'Chargement…',
 '候補なし':'Aucun candidat','監視リポジトリなし':'Aucun dépôt surveillé',
+'評価待機中':'Attente (éval.)','実装待機中':'Attente (impl.)','検証待機中':'Attente (vérif.)',
 '評価中':'Évaluation','実装中':'Implémentation','検証中':'Vérification','評価失敗':'Échec évaluation','PR中#':'PR #',
 '評価専用(api)':'Éval. seule (api)','自動(新規)':'Auto (nouveau)','処理済み(要再検証)':'Traitée (à vérifier)','devin ラベル':'label devin',
   '自動対象外（起票者）':'Hors perimetre auto (auteur)',
@@ -555,6 +560,7 @@ de: {
 'フィルター:':'Filter:','判定:すべて':'Verdict: alle','未評価':'Unbewertet','リスク:すべて':'Risiko: alle','状態:すべて':'Status: alle',
 '実行中':'Läuft','待機中':'Wartend','非実行':'Inaktiv','読み込み中…':'Laden…',
 '候補なし':'Keine Kandidaten','監視リポジトリなし':'Keine überwachten Repos',
+'評価待機中':'Warten (Bewertung)','実装待機中':'Warten (Impl.)','検証待機中':'Warten (Verif.)',
 '評価中':'Bewertung läuft','実装中':'Implementierung','検証中':'Verifizierung','評価失敗':'Bewertung fehlgeschlagen','PR中#':'In PR #',
 '評価専用(api)':'Nur Bewertung (api)','自動(新規)':'Auto (neu)','処理済み(要再検証)':'Umgesetzt (prüfen)','devin ラベル':'devin-Label',
   '自動対象外（起票者）':'Auto-Ausschluss (Autor)',
@@ -2973,12 +2979,14 @@ function renderCandTabs() {
 
 // テーブル ⇔ ボード 表示切替（localStorage に永続化、既定テーブル）
 let candView = localStorage.getItem('candView') || 'table';
-// ボード列 = state.tasks・candidates の既存分類（runKind/queued/state/人間待ち）
+// ボード列 = state.tasks・candidates の既存分類（runKind/queued/state/人間待ち）。
+// 待機中はフロー（マーメイド）順に評価/実装/検証の3列へ分ける
 const BCOLS = [
-  ['todo', '未着手', '#64748b'], ['queued', '待機中', '#6b7280'],
-  ['assess', '評価中', '#b45309'], ['impl', '実装中', '#b45309'],
-  ['verify', '検証中', '#b45309'], ['check', '要確認・失敗', '#dc2626'],
-  ['done', '完了', '#16a34a'],
+  ['todo', '未着手', '#64748b'],
+  ['q-assess', '評価待機中', '#6b7280'], ['assess', '評価中', '#b45309'],
+  ['q-impl', '実装待機中', '#6b7280'], ['impl', '実装中', '#b45309'],
+  ['q-verify', '検証待機中', '#6b7280'], ['verify', '検証中', '#b45309'],
+  ['check', '要確認・失敗', '#dc2626'], ['done', '完了', '#16a34a'],
 ];
 function setCandView(v) {
   candView = v === 'board' ? 'board' : 'table';
@@ -3137,11 +3145,16 @@ function renderCandBody() {
           : '') +
         '</td></tr>';
       if (boardCards) {
-        // ボード表示: 既存の状態分類でカードの列を決定し、操作は行と同じボタンを使う
+        // ボード表示: 既存の状態分類でカードの列を決定し、操作は行と同じボタンを使う。
+        // 待機は ' pr' 待ち・AI:impl-done(c.verify) が検証待機中、' impl' 待ちが実装待機中
+        const quedPr = (status.chatWaiting || []).includes(c.key + ' pr') ||
+          localWait.has(c.key + ' pr');
         const colId = runKind === 'assess' ? 'assess'
           : runKind === 'impl' ? 'impl'
-          : runKind === 'verify' || c.queued === 'verify' || c.verify ? 'verify'
-          : quedAssess || quedImpl || c.queued ? 'queued'
+          : runKind === 'verify' ? 'verify'
+          : quedAssess || c.queued === 'assess' ? 'q-assess'
+          : c.queued === 'verify' || quedPr || c.verify ? 'q-verify'
+          : quedImpl || c.queued ? 'q-impl'
           : hw || a?.error || a?.category === 'human' || a?.category === 'reject'
             || c.state === 'failed' || c.state === 'needs-review'
             || c.state === 'rejected' || c.state === 'verify-ng' ? 'check'
