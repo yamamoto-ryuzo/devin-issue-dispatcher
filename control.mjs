@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { keyOf, discover, toCandidate, readIssueStore, ghJson } from './discover.mjs';
 import { resolveDelegatedStatus, isDelegatedStale, checklistOf } from './core-logic.mjs';
 import { recordProposals, listProposals } from './proposals.mjs';
-import { hasKnowledge } from './issue-knowledge.mjs';
+import { hasKnowledge, validCause } from './issue-knowledge.mjs';
 import { sweepQueue, queueStaleMs } from './work-queue.mjs';
 import { AcpChat } from './acp-chat.mjs';
 import { computeMetrics } from './metrics.mjs';
@@ -618,7 +618,9 @@ function taskPrompt(key, mode, skillFile) {
   if (!repo) return { error: 'repo not monitored: ' + m[1] };
   const it = readIssueStore(ISSUES_PATH).issues?.[key] ?? {};
   const task = { repo, type: m[2], number: +m[3],
-    title: it.title ?? '', body: it.body ?? '', url: it.url ?? '' };
+    title: it.title ?? '', body: it.body ?? '', url: it.url ?? '',
+    // #102: ストアに残る前回評価の原因座標（同型課題マッチ用。無ければ省略）
+    ...(it.cause && typeof it.cause === 'object' ? { cause: it.cause } : {}) };
   return { key, text: buildTaskPrompt({ ROOT, config, task, mode, skillFile,
     implLoopMax: config.implLoopMax ?? 5 }) };
 }
@@ -824,8 +826,13 @@ function watchAssess(key, ch) {
       try {
         const v = JSON.parse(m[1].trim());
         const st = loadJson(STATE_PATH, { deployedAt: null, tasks: {} });
+        // #102: 4軸原因座標（省略可・後方互換。語彙外の値は正規化し、
+        // 座標自体が無効なら落として従来形式の判定として保存する）
+        const { cause: rawCause, ...rest } = v;
+        const cause = validCause(rawCause);
         st.tasks[key] = { ...(st.tasks[key] ?? {}),
-          assess: v, assessedAt: new Date().toISOString(), engine: 'chat' };
+          assess: cause ? { ...rest, cause } : rest,
+          assessedAt: new Date().toISOString(), engine: 'chat' };
         // 正常な判定が得られたら過去のエンジン障害記録を整理し、
         // failed-by-engine が残っていれば解除して自動連鎖を解放する
         if (st.tasks[key].status === 'failed' && st.tasks[key].engineError) {

@@ -68,14 +68,19 @@ export async function fetchAllOpen(config, log = () => {}) {
  * 手動 dispatch (--task) や他経路が gh 再取得せずに課題の詳細を使えるようにする。
  * ストアには open 中の課題のみ保持（クローズされたものは次回書込で消える）。
  */
-export function writeIssueStore(storePath, allItems) {
+export function writeIssueStore(storePath, allItems, state = null) {
   const issues = {};
   for (const t of allItems) {
-    issues[keyOf(t.ghRepo, t.type, t.number)] = {
+    const key = keyOf(t.ghRepo, t.type, t.number);
+    // #102: 最新の評価座標（assess.cause）をストアへ残し、
+    // 次回 assess プロンプトの同型課題マッチ（knowledgeSection の task.cause）へ渡す
+    const cause = state?.tasks?.[key]?.assess?.cause;
+    issues[key] = {
       repo: t.ghRepo, type: t.type, number: t.number,
       title: t.title, body: t.body, url: t.url,
       labels: t.labels, createdAt: t.createdAt, updatedAt: t.updatedAt,
       author: t.author ?? null,
+      ...(cause && typeof cause === 'object' ? { cause } : {}),
     };
   }
   const tmp = storePath + '.tmp';
@@ -122,7 +127,13 @@ export async function discover({ config, labels, state, autoTrigger, maxNewPerPo
   const collabCache = new Map(); // 起票者信頼判定のサイクル内キャッシュ
 
   const all = await fetchAllOpen(config, log);
-  if (storePath) writeIssueStore(storePath, all);
+  if (storePath) writeIssueStore(storePath, all, state);
+  // #102: 前回評価の原因座標を課題オブジェクトへ付与（assess プロンプトの
+  // 同型課題マッチに使う。未評価課題は undefined のまま）
+  const causeOf = (key) => {
+    const c = state.tasks?.[key]?.assess?.cause;
+    return c && typeof c === 'object' ? { cause: c } : {};
+  };
 
   const found = [];
   let newCount = 0;
@@ -145,7 +156,8 @@ export async function discover({ config, labels, state, autoTrigger, maxNewPerPo
       && !names.includes(labels.done) && st !== 'closed') {
       found.push({ repo: r, type: it.type, number: it.number, title: it.title,
         body: it.body, url: it.url, labels: names,
-        createdAt: it.createdAt, updatedAt: it.updatedAt, auto: true, verify: true });
+        createdAt: it.createdAt, updatedAt: it.updatedAt, auto: true, verify: true,
+        ...causeOf(key) });
       continue;
     }
     // 終端ラベル付きは除外（needs-review/rejected はラベル除去で再候補化）
@@ -162,7 +174,8 @@ export async function discover({ config, labels, state, autoTrigger, maxNewPerPo
       if (isLifecycleActive(state.tasks?.[key])) {
         found.push({ repo: r, type: it.type, number: it.number, title: it.title,
           body: it.body, url: it.url, labels: names,
-          createdAt: it.createdAt, updatedAt: it.updatedAt, author: it.author, active: true });
+          createdAt: it.createdAt, updatedAt: it.updatedAt, author: it.author, active: true,
+          ...causeOf(key) });
       }
       continue;
     }
@@ -171,6 +184,7 @@ export async function discover({ config, labels, state, autoTrigger, maxNewPerPo
       body: it.body, url: it.url, labels: names,
       createdAt: it.createdAt, updatedAt: it.updatedAt, auto: true,
       author: it.author,
+      ...causeOf(key),
       // trusted モードの起票者ゲート（all では評価せず現行と同一）
       ...((config.autoTriggerMode ?? 'all') === 'trusted' &&
           !(await authorTrusted(config, r, it.author, collabCache))
@@ -189,6 +203,7 @@ export const toCandidate = (t, labels) => ({
   trigger: t.verify ? 'impl-done' : t.active ? 'active' : 'auto-new',
   createdAt: t.createdAt,
   author: t.author ?? null,
+  ...(t.cause ? { cause: t.cause } : {}),
   ...(t.autoBlocked ? { autoBlocked: t.autoBlocked } : {}),
   runningLabel: t.labels.includes(labels.running),
   ...(t.active ? { active: true } : {}),

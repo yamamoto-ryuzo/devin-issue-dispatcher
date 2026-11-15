@@ -96,11 +96,17 @@ ${HEAD(t)}
      （受け入れ条件チェックリストがある課題は、その未完了項目を残作業量の目安として参照する）
    - **reason**: 判定理由（日本語・1-2文）
    - **plan**: category=auto の場合の実施方針（1-3文）。それ以外は空文字
+   - **cause**: 原因の4軸座標（#102。語彙・status/confidence/basis の規則は
+     _assess スキルの「cause（原因の4軸座標）」に従う。不明な軸は unknown）
 3. 判定のためにファイルを読むのは可。実行による副作用（ビルド・ネットワーク書き込み等）は避ける
 
 ## 出力形式（応答の最後に必ずこのブロックを出力）
 <!--devin-assess
-{"feasible":"yes|needs-human|no","risk":"low|medium|high","category":"auto|review|human|reject","partial":true|false,"reason":"...","plan":"..."}
+{"feasible":"yes|needs-human|no","risk":"low|medium|high","category":"auto|review|human|reject","partial":true|false,"reason":"...","plan":"...",
+ "cause":{"status":"confirmed|hypothesis",
+  "axes":{"processing":["input_handling"],"structure":"none","connection":"none","governance":"none"},
+  "confidence":{"processing":"high","structure":"high","connection":"medium","governance":"low"},
+  "basis":"各軸の根拠（確認手段・file:line など）"}}
 devin-assess-->
 
 ### proposals（省略可・後方互換）

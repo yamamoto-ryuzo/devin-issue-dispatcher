@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { loadKnowledgeEntries, knowledgeSection, MAX_ENTRIES, MAX_SECTION_CHARS,
   validateKnowledge, extractKnowledgeBlock, recordKnowledge, hasKnowledge,
-  knowledgePath } from '../issue-knowledge.mjs';
+  knowledgePath, validCause, CAUSE_AXES } from '../issue-knowledge.mjs';
 import { buildTaskPrompt } from '../task-prompts.mjs';
 
 const REPO = 'yamamoto-ryuzo/xxx';
@@ -153,4 +153,58 @@ test('impl/verify プロンプトへナレッジブロック出力指示が入�
     assert.match(p, /<!--issue-knowledge/);
     assert.match(p, /unverified/);
   }
+});
+
+// --- #102: validCause（assess 出力の 4 軸原因座標バリデーション） ---
+
+test('validCause: 正規の cause をそのまま正規化する', () => {
+  const c = validCause({
+    status: 'confirmed',
+    axes: { processing: ['input_handling'], structure: 'none',
+      connection: 'none', governance: 'none' },
+    confidence: { processing: 'high', structure: 'high',
+      connection: 'medium', governance: 'low' },
+    basis: 'dispatcher.mjs:123 で分岐確認',
+  });
+  assert.equal(c.status, 'confirmed');
+  assert.deepEqual(c.axes.processing, ['input_handling']);
+  assert.deepEqual(c.axes.structure, ['none']);
+  assert.equal(c.confidence.governance, 'low');
+  assert.equal(c.basis, 'dispatcher.mjs:123 で分岐確認');
+});
+
+test('validCause: unknown を含む場合は status を hypothesis へ強制する', () => {
+  const c = validCause({
+    status: 'confirmed',
+    axes: { processing: 'unknown', structure: 'none',
+      connection: 'none', governance: 'none' },
+    confidence: { processing: 'high' },
+  });
+  assert.equal(c.status, 'hypothesis');
+  assert.deepEqual(c.axes.processing, ['unknown']);
+  // unknown の軸に high は不可 → low へ降格
+  assert.equal(c.confidence.processing, 'low');
+});
+
+test('validCause: 語彙外の値を落とし欠落軸は none 扱い（後方互換）', () => {
+  const c = validCause({
+    status: 'bogus',
+    axes: { processing: ['logic', 'out_of_vocab', 'resource', 'extra'] },
+    confidence: { processing: 'nonsense' },
+  });
+  // 語彙内の値のみ残り 2 値まで。語彙外 status は hypothesis
+  assert.deepEqual(c.axes.processing, ['logic', 'resource']);
+  assert.deepEqual(c.axes.structure, ['none']);
+  assert.equal(c.status, 'hypothesis');
+  assert.equal(c.confidence.processing, 'low');
+  assert.equal(c.basis, '');
+  // 4 軸すべて存在する
+  assert.deepEqual(Object.keys(c.axes), CAUSE_AXES);
+});
+
+test('validCause: cause 欠落・非オブジェクトは null（従来動作を壊さない）', () => {
+  assert.equal(validCause(undefined), null);
+  assert.equal(validCause(null), null);
+  assert.equal(validCause('cause'), null);
+  assert.equal(validCause(42), null);
 });

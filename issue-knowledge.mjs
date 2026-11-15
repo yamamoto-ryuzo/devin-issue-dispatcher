@@ -281,3 +281,50 @@ export function recordKnowledge(rootDir, task, raw, {
   writeFileSync(p, JSON.stringify(rec, null, 2) + '\n');
   return { path: p, record: rec };
 }
+
+// ---------------------------------------------------------------------------
+// #102: assess 出力の 4 軸原因座標（cause）バリデーション
+// ---------------------------------------------------------------------------
+
+// 語彙（episteme-graph taxonomy §2 借用）。各軸は 1〜2 値 or none/unknown
+export const CAUSE_AXIS_VOCAB = {
+  processing: ['input_handling', 'logic', 'resource', 'wording', 'regression'],
+  structure: ['representation', 'responsibility', 'decomposition', 'aggregation'],
+  connection: ['information', 'meaning', 'condition', 'target', 'version', 'contract'],
+  governance: ['ordering', 'budget', 'resume', 'assignment', 'review', 'completion'],
+};
+export const CAUSE_AXES = Object.keys(CAUSE_AXIS_VOCAB);
+
+/**
+ * assess 出力 JSON の cause を保存用レコードへ正規化する（省略可・後方互換）。
+ * cause 欠落・語彙外の値は従来動作を壊さないよう寛容にフォールバックする:
+ * - 各軸: 語彙内 1〜2 値 or 'none'/'unknown'。語彙外の値は落とし、
+ *   有効値が無い軸は 'none' 扱い。'none'/'unknown' は他値と混在させない
+ * - status: 'confirmed'|'hypothesis'（'unknown' を含む場合は必ず hypothesis）
+ * - confidence: 軸ごと 'high'|'medium'|'low'（'unknown' の軸に high は不可）
+ * @returns {object|null} 正規化済み cause。cause 自体が無い/非オブジェクトなら null
+ */
+export function validCause(c) {
+  if (!c || typeof c !== 'object') return null;
+  const axes = {};
+  let hasUnknown = false;
+  for (const ax of CAUSE_AXES) {
+    const vals = [...new Set(list(c.axes?.[ax]).map((s) => s.trim()))]
+      .filter((v) => CAUSE_AXIS_VOCAB[ax].includes(v)
+        || v === 'none' || v === 'unknown');
+    if (vals.includes('unknown')) hasUnknown = true;
+    const real = vals.filter((v) => v !== 'none' && v !== 'unknown').slice(0, 2);
+    axes[ax] = real.length ? real : [vals[0] ?? 'none'];
+  }
+  // unknown を含む出力は原因未確定として扱う（語彙外 status も hypothesis へ）
+  const status = !hasUnknown && ['confirmed', 'hypothesis'].includes(c.status)
+    ? c.status : 'hypothesis';
+  const confidence = {};
+  for (const ax of CAUSE_AXES) {
+    const cf = ['high', 'medium', 'low'].includes(c.confidence?.[ax])
+      ? c.confidence[ax] : 'low';
+    confidence[ax] = axes[ax].includes('unknown') && cf === 'high' ? 'low' : cf;
+  }
+  return { status, axes, confidence,
+    basis: String(c.basis ?? '').trim().slice(0, 600) };
+}

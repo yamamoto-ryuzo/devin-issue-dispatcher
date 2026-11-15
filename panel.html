@@ -2603,6 +2603,21 @@ function detail(key) {
     (a.feasible ? '<div class="kv"><b>実現可否</b>' + esc(a.feasible) + '</div>' : '') +
     (a.reason ? '<div class="kv"><b>判定理由</b>' + esc(a.reason) + '</div>' : '') +
     (a.plan ? '<div class="kv"><b>実施方針</b><pre>' + esc(a.plan) + '</pre></div>' : '') +
+    // #102: 原因の4軸座標（座標=axes / 確度=confidence / 確信度=status）。旧形式の
+    // 判定（cause 無し）ではこの行自体を出さない
+    (a.cause ? '<div class="kv"><b>原因座標</b><div>' +
+      '<div style="font-size:12px">確信度: <b>' +
+        esc(a.cause.status === 'confirmed' ? 'confirmed（確認済み）' : 'hypothesis（仮説）') +
+        '</b></div>' +
+      ['processing', 'structure', 'connection', 'governance'].map((ax) =>
+        '<div style="font-size:12px"><b>' + ax + '</b>: ' +
+        esc((Array.isArray(a.cause.axes?.[ax]) ? a.cause.axes[ax]
+          : [a.cause.axes?.[ax] ?? 'none']).join(', ')) +
+        ' <span style="color:#9ca3af">(確度: ' +
+        esc(a.cause.confidence?.[ax] ?? '-') + ')</span></div>').join('') +
+      (a.cause.basis ? '<div style="font-size:12px;color:#6b7280">根拠: ' +
+        esc(a.cause.basis) + '</div>' : '') +
+      '</div></div>' : '') +
     (a.assessedAt ? '<div class="kv"><b>評価日時</b>' + fmt(a.assessedAt) + '</div>' : '') +
     (c.knowledge ? '<div class="kv"><b>' + tr('ナレッジ') + '</b>' +
       tr('蓄積済み（issue-knowledge）') + '</div>' : '') +

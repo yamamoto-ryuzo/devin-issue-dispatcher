@@ -26,7 +26,7 @@ import { reapOrphanedInflight } from './inflight-reap.mjs';
 import { RISK_RANK, CAT_RANK, VERDICT_STEPS, escalateVerdict, parseIssueRef,
   resolveDelegatedStatus, isDelegatedStale } from './core-logic.mjs';
 import { recordProposals, validProposals } from './proposals.mjs';
-import { extractKnowledgeBlock, recordKnowledge } from './issue-knowledge.mjs';
+import { extractKnowledgeBlock, recordKnowledge, validCause } from './issue-knowledge.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
@@ -318,12 +318,15 @@ function parseVerdict(logPath) {
         : v.feasible === 'no' || v.risk === 'high' ? 'reject' : 'review';
     }
     const proposals = validProposals(v.proposals);
+    const cause = validCause(v.cause);
     return { feasible: v.feasible, risk: v.risk, category,
       partial: v.partial === true || v.partial === 'true',
       scope: v.scope === 'multi' ? 'multi' : 'repo',
       reason: v.reason ?? '', plan: v.plan ?? '',
       // 語彙・判定種別の新設提案（省略可・後方互換。proposals.json へ集約する）
-      ...(proposals.length ? { proposals } : {}) };
+      ...(proposals.length ? { proposals } : {}),
+      // #102: 4軸原因座標（省略可・後方互換。語彙外の値は validCause が正規化）
+      ...(cause ? { cause } : {}) };
   } catch { return null; }
 }
 

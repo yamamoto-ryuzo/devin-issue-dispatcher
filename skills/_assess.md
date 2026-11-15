@@ -41,6 +41,28 @@
 
 `yes`=実装可能 / `needs-human`=人間の判断が必要 / `no`=実現不能
 
+### cause（原因の4軸座標）
+
+判定した原因を構造化して出力する。`reason`（自由文の判定理由）とは別に、
+原因箇所の「座標」を4軸で記録する。後続の自動化ゲート・ナレッジ蓄積・
+失敗分類の基盤データになるため、不明な軸は省略せず `unknown` と出す。
+
+- **axes**（必須・4軸すべて出力）: 各軸 1〜2 値 or `none`（該当なし）/ `unknown`（不明）
+  語彙は episteme-graph taxonomy §2 を借用:
+
+  | 軸 | 値 |
+  |---|---|
+  | `processing` | `input_handling` / `logic` / `resource` / `wording` / `regression` |
+  | `structure` | `representation` / `responsibility` / `decomposition` / `aggregation` |
+  | `connection` | `information` / `meaning` / `condition` / `target` / `version` / `contract` |
+  | `governance` | `ordering` / `budget` / `resume` / `assignment` / `review` / `completion` |
+
+- **status**: `confirmed`（原因をコード・再現で確認済み）/ `hypothesis`（未確定）。
+  `unknown` を含む場合は必ず `hypothesis`
+- **confidence**: 軸ごとの確度 `high`/`medium`/`low`。`unknown` の軸に `high` は付けない
+- **basis**: 分類根拠（確認手段・file:line など）。症状の場所・修正行数・手段を
+  根拠にしない（taxonomy §1.3）
+
 ### scope（影響範囲）
 
 | 値 | 意味 |
@@ -68,7 +90,11 @@
 
 ```
 <!--devin-assess
-{"feasible":"yes|needs-human|no","risk":"low|medium|high","category":"auto|review|human|reject","partial":true|false,"scope":"repo|multi","reason":"判定理由（1-2文）","plan":"実施方針（箇条書き）"}
+{"feasible":"yes|needs-human|no","risk":"low|medium|high","category":"auto|review|human|reject","partial":true|false,"scope":"repo|multi","reason":"判定理由（1-2文）","plan":"実施方針（箇条書き）",
+ "cause":{"status":"confirmed|hypothesis",
+  "axes":{"processing":["input_handling"],"structure":"none","connection":"none","governance":"none"},
+  "confidence":{"processing":"high","structure":"high","connection":"medium","governance":"low"},
+  "basis":"各軸の根拠（確認手段・file:line など）"}}
 devin-assess-->
 ```
 
