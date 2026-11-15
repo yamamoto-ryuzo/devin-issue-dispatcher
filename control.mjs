@@ -2268,7 +2268,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/api/skills') {
       // skills/ の *.md を一覧（既知名＋存在するファイル）
       const dir = join(ROOT, 'skills');
-      const names = new Set(['_all.md', '_assess.md', '_impl.md', '_pr.md', '_split.md', '_done.md', '_survey.md']);
+      const names = new Set(['_all.md', '_assess.md', '_impl.md', '_pr.md', '_split.md', '_done.md', '_survey.md', 'principles.md']);
       try { for (const f of readdirSync(dir)) if (f.endsWith('.md')) names.add(f); } catch { /* noop */ }
       const files = [...names].sort().map((f) => ({
         name: f,

@@ -1117,7 +1117,8 @@ const skillModeOf = (n) =>
   n.startsWith('_assess') ? '評価' :
   n.startsWith('_impl') ? '対応' :
   n.startsWith('_pr') ? 'PR' :
-  n.startsWith('_split') ? '切り分け' : 'カスタム';
+  n.startsWith('_split') ? '切り分け' :
+  n.startsWith('principles') ? '原理' : 'カスタム';
 async function renderExtraPane() {
   const el = document.getElementById('eng-extra-skills');
   if (el) {
@@ -1661,7 +1662,8 @@ async function loadSkills() {
       n.startsWith('_assess') ? '評価' :
       n.startsWith('_impl') ? '対応' :
       n.startsWith('_pr') ? 'PR' :
-      n.startsWith('_split') ? '切り分け' : '';
+      n.startsWith('_split') ? '切り分け' :
+      n.startsWith('principles') ? '原理' : '';
     document.getElementById('skill-tabs').innerHTML = names.map((n) => {
       const purp = skillPurpose(n);
       return '<span class="csess' + (n === skillSel ? ' active' : '') + '" title="' + esc(n) + '" ' +
