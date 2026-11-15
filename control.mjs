@@ -51,6 +51,9 @@ const WORKQUEUE_PATH = join(ROOT, 'work-queue.json');
 const CHATS_PATH = join(ROOT, 'chats.json'); // チャットのラベル・エンジン・ACP sessionId（再開用）
 const SECRETS_PATH = join(ROOT, 'secrets.json'); // apiKey・MCP トークン等（gitignore 済。config.json へは書かない）
 const LOG_PATH = join(ROOT, 'logs', 'dispatcher.log');
+// ISSUE 起票成功時に書き込むキックファイル。dispatcher が logs/ を fs.watch し
+// 検出次第ポーリングを前倒しする（補助経路。dispatcher 停止中は残置されるだけで無害）
+const KICK_PATH = join(ROOT, 'logs', 'dispatcher.kick');
 const PANEL_PATH = join(ROOT, 'panel.html');
 // 判定カテゴリの自動処理しきい値: autoCategory までの判定を自動処理する
 const CAT_ORDER = ['auto', 'review', 'human', 'reject'];
@@ -1575,6 +1578,15 @@ function ensureStateWatcher() {
   } catch { /* 監視不可環境では無イベントのまま（パネル側は周期取得へフォールバック） */ }
 }
 
+// /api/issue 起票成功 → dispatcher の次ポーリングを前倒しするキックを書き込む。
+// ディスパッチ保証ではない補助経路なので、書き込み失敗は起票結果へ影響させない
+function kickDispatcher() {
+  try {
+    mkdirSync(join(ROOT, 'logs'), { recursive: true });
+    writeFileSync(KICK_PATH, new Date().toISOString() + '\n');
+  } catch { /* noop */ }
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const acao = corsOrigin(req);
@@ -2037,6 +2049,7 @@ const server = createServer(async (req, res) => {
               '--title', title, '--body', bodyText],
               (e, so, se) => e ? rej(new Error(se || e.message)) : res2(so));
           });
+          kickDispatcher();
           return json(200, { ok: true, url: String(out).trim() });
         } catch (e) { return json(500, { ok: false, error: e.message }); }
       }

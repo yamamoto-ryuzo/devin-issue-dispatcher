@@ -13,7 +13,7 @@
  * 状態は state.json、セッション出力は logs/ に保存する。
  */
 import { spawn, execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, appendFileSync, existsSync, renameSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, existsSync, renameSync, mkdirSync, watch } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gh, ghJson, keyOf, discover, toCandidate, readIssueStore } from './discover.mjs';
@@ -65,6 +65,33 @@ const STATE_PATH = join(ROOT, 'state.json');
 const CANDS_PATH = join(ROOT, 'candidates.json');
 const ISSUES_PATH = join(ROOT, 'issues.json');
 mkdirSync(LOG_DIR, { recursive: true });
+
+// ---- kick: ISSUE 起票直後の即時サイクル起動 ----
+// control.mjs が /api/issue 成功時に logs/dispatcher.kick を書き込む。
+// 常駐ループのポーリング待機を検出次第打ち切る「次ポーリング前倒し」専用の軽量経路
+// （ディスパッチ保証ではない。dispatcher 停止中のキックは残置されるだけで無害）
+const KICK_NAME = 'dispatcher.kick';
+let kickWaiter = null;   // ポーリング待機中にキックを受けた時の待機打ち切り関数
+let kickPending = false; // cycle 実行中など待機外で届いたキックの保留フラグ
+let kickWatcher = null;
+function armKickWatch() {
+  if (kickWatcher || ONCE) return;
+  try {
+    kickWatcher = watch(LOG_DIR, (_ev, filename) => {
+      if (String(filename) !== KICK_NAME) return;
+      if (kickWaiter) { const w = kickWaiter; kickWaiter = null; w(); }
+      else kickPending = true;
+    });
+    kickWatcher.on('error', () => { kickWatcher = null; });
+  } catch { /* 監視不可環境では通常ポーリングのみ */ }
+}
+function waitNextCycle(poll) {
+  if (kickPending) { kickPending = false; return Promise.resolve(); }
+  return new Promise((res) => {
+    const t = setTimeout(() => { kickWaiter = null; res(); }, poll);
+    kickWaiter = () => { clearTimeout(t); log('kick: ISSUE 起票を検出、次サイクルを前倒し'); res(); };
+  });
+}
 
 // ---------- utils ----------
 
@@ -1329,13 +1356,14 @@ async function main() {
     await reclaimStale(state);
     await sweepOrphanedRuns(state);
   }
+  armKickWatch();
   await cycle(state);
   while (!ONCE) {
     // ポーリング周期は毎回 config.json を読み直す（パネルからの変更を即時反映）
     let poll = POLL_MS;
     try { poll = (JSON.parse(readFileSync(configPath, 'utf8')).pollIntervalSec ?? (POLL_MS / 1000)) * 1000; }
     catch { /* 読み込み失敗時は既定値 */ }
-    await sleep(poll);
+    await waitNextCycle(poll);
     try { await cycle(state); }
     catch (e) { log(`cycle error: ${e.message}`); }
   }

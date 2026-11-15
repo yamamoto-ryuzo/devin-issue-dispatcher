@@ -204,6 +204,11 @@ node dispatcher.mjs --once      # 1サイクル実行（見つけた課題は実
 node dispatcher.mjs             # 常駐ループ（管理パネル経由と同じ。どちらか一方で使う）
 ```
 
+また、管理パネルからの ISSUE 起票（`POST /api/issue`）が成功すると control が
+`logs/dispatcher.kick` を書き込み、常駐 dispatcher が fs.watch で検出して次
+ポーリングを前倒し実行する。起票から検出まで最大 `pollIntervalSec` 秒待たない
+ための軽量キックで、ディスパッチを保証するものではない（dispatcher 停止中は無視される）。
+
 open な Issue/PR はすべて自動的に対応候補として検出される（ラベル不要）。
 自動起動させるにはパネルの「自動処理」を ON にする。特定の課題だけ即時処理したい
 場合は候補行の「対応」ボタン（評価フェーズはスキップ）。
