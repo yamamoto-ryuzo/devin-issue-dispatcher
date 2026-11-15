@@ -171,6 +171,18 @@
          background: #eef2ff; color: #4338ca; }
   .cnt.zero { background: #f1f4f9; color: #9ca3af; }
   .repo-empty { color: #9ca3af; font-size: 12px; padding: 2px 8px 4px; }
+  .bwrap { display: flex; gap: 8px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; }
+  .bcol { flex: 1 0 148px; min-width: 148px; background: #f6f8fb; border: 1px solid #e9edf3;
+          border-radius: 8px; padding: 6px; }
+  .bcol-h { font-size: 12px; font-weight: 600; padding: 0 2px 6px; display: flex;
+            justify-content: space-between; align-items: center; }
+  .bcard { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+           padding: 6px 8px; margin-bottom: 6px; font-size: 12px; }
+  .bcard-no { border-color: #fca5a5; background: #fef2f2; }
+  .bhead { display: flex; gap: 6px; align-items: center; }
+  .bmeta { color: #9ca3af; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .btitle { margin: 3px 0 4px; word-break: break-all; }
+  .bops { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; align-items: center; }
 </style>
 <script>
 // ---- i18n: 日本語キー → 言語別辞書（未登録キーは日本語のまま表示）----
@@ -224,6 +236,8 @@ en: {
 '実行中':'Running','待機中':'Queued','非実行':'Idle','読み込み中…':'Loading…',
 '候補なし':'No candidates','監視リポジトリなし':'No watched repos',
 '評価中':'Assessing','実装中':'Implementing','検証中':'Verifying','評価失敗':'Assess failed','PR中#':'In PR #',
+'テーブル':'Table','ボード':'Board','表示切替':'Toggle view','未着手':'Todo',
+'要確認・失敗':'Needs check / Failed','完了':'Done','開始/登録からの経過':'Elapsed since start/created',
 '評価専用(api)':'Assess only (api)','自動(新規)':'Auto (new)','処理済み(要再検証)':'Impl-done (needs verify)','devin ラベル':'devin label',
   '自動対象外（起票者）':'Excluded from auto (author)',
 'running ラベル付き(起動中/取残し)':'running label present (active/stale)',
@@ -733,6 +747,10 @@ function setLang(v) {
       <select id="f-status" onchange="renderCandBody()">
         <option value="" data-i18n="状態:すべて">状態:すべて</option><option value="busy" data-i18n="実行中">実行中</option>
         <option value="queued" data-i18n="待機中">待機中</option><option value="idle" data-i18n="非実行">非実行</option>
+      </select>
+      <select id="cand-view" onchange="setCandView(this.value)" data-i18n-title="表示切替" title="表示切替">
+        <option value="table" data-i18n="テーブル">テーブル</option>
+        <option value="board" data-i18n="ボード">ボード</option>
       </select>
     </div>
     <div style="font-size:11px;color:#9ca3af;margin-bottom:6px" data-i18n="※ 個別「対応」ボタンは評価（assess）をスキップして直接実装します">※ 個別「対応」ボタンは評価（assess）をスキップして直接実装します</div>
@@ -2953,6 +2971,36 @@ function renderCandTabs() {
       mk(r, r.split('/')[1], items.length, openCounts[r] ?? 0)).join('');
 }
 
+// テーブル ⇔ ボード 表示切替（localStorage に永続化、既定テーブル）
+let candView = localStorage.getItem('candView') || 'table';
+// ボード列 = state.tasks・candidates の既存分類（runKind/queued/state/人間待ち）
+const BCOLS = [
+  ['todo', '未着手', '#64748b'], ['queued', '待機中', '#6b7280'],
+  ['assess', '評価中', '#b45309'], ['impl', '実装中', '#b45309'],
+  ['verify', '検証中', '#b45309'], ['check', '要確認・失敗', '#dc2626'],
+  ['done', '完了', '#16a34a'],
+];
+function setCandView(v) {
+  candView = v === 'board' ? 'board' : 'table';
+  localStorage.setItem('candView', candView);
+  renderCandBody();
+}
+{ const cv = document.getElementById('cand-view'); if (cv) cv.value = candView; }
+async function candStop(key) {
+  try {
+    await fetch(API + '/api/kill', { method: 'POST', headers: H, body: JSON.stringify({ key }) });
+    toast('停止要求を送信しました');
+    refresh(); loadCandidates(false); ensurePolling();
+  } catch (e) { toast('kill: ' + e.message); }
+}
+function fmtAge(s) {
+  if (!s) return '-';
+  const m = Math.max(0, (Date.now() - Date.parse(s)) / 60000);
+  if (m < 60) return Math.floor(m) + 'm';
+  if (m < 1440) return Math.floor(m / 60) + 'h';
+  return Math.floor(m / 1440) + 'd';
+}
+
 function renderCandBody() {
   const manual = new Set(status?.manualRuns || []);
   const entries = candTab === '__all__'
@@ -2962,6 +3010,8 @@ function renderCandBody() {
   const fRisk = document.getElementById('f-risk')?.value || '';
   const fStat = document.getElementById('f-status')?.value || '';
   const renderEntries = (wantType) => entries.map(([repo, items]) => {
+    const boardCards = wantType === 'issue' && candView === 'board'
+      ? Object.fromEntries(BCOLS.map(([id]) => [id, []])) : null;
     const filtered = items.filter((c) => {
       const a = c.assess;
       if (c.type !== wantType) return false;
@@ -3086,6 +3136,49 @@ function renderCandBody() {
           ? '<span class="hw-note">' + tr('（次回実行時にエージェントへ伝達）') + '</span>'
           : '') +
         '</td></tr>';
+      if (boardCards) {
+        // ボード表示: 既存の状態分類でカードの列を決定し、操作は行と同じボタンを使う
+        const colId = runKind === 'assess' ? 'assess'
+          : runKind === 'impl' ? 'impl'
+          : runKind === 'verify' || c.queued === 'verify' || c.verify ? 'verify'
+          : quedAssess || quedImpl || c.queued ? 'queued'
+          : hw || a?.error || a?.category === 'human' || a?.category === 'reject'
+            || c.state === 'failed' || c.state === 'needs-review'
+            || c.state === 'rejected' || c.state === 'verify-ng' ? 'check'
+          : prM || c.state === 'done' || c.state === 'closed' ? 'done' : 'todo';
+        boardCards[colId].push('<div class="bcard' +
+          (rowBg === ' class="row-no"' ? ' bcard-no' : '') + '">' +
+          '<div class="bhead"><a href="' + esc(c.url) +
+            '" target="_blank" rel="noopener">' +
+            (c.type === 'pr' ? '<span class="badge-pr">pr #' + c.number + '</span>'
+              : '#' + c.number) + '</a>' +
+            '<span class="bmeta" title="' + esc(repo) + '">' +
+            esc(repo.split('/').pop()) + '</span>' +
+            '<span class="bmeta" title="' + tr('開始/登録からの経過') + '">' +
+            fmtAge(c.startedAt || c.queuedAt || c.createdAt) + '</span></div>' +
+          '<div class="btitle"><a href="' + esc(c.url) +
+            '" target="_blank" rel="noopener">' + esc(c.title) + '</a>' +
+            (c.checklist ? ' <span class="badge" style="background:' +
+              (c.checklist.done === c.checklist.total ? '#16a34a' : '#6b7280') +
+              ';color:#fff" title="受け入れ条件 ' + c.checklist.done + '/' +
+              c.checklist.total + ' 完了">' + c.checklist.done + '/' +
+              c.checklist.total + '</span>' : '') + '</div>' +
+          '<div class="bbadges">' + judge +
+            ' <span class="bmeta">' +
+            esc(c.engineUsed || c.engineImpl || c.engine || '') + '</span>' +
+            (hw ? ' <span class="badge" style="background:#7c3aed;color:#fff">' +
+              tr('人間待ち') + '</span>' : '') + '</div>' +
+          '<div class="bops">' + assessCell + ' ' + implCell +
+            (busy ? ' <button class="mini danger" onclick="candStop(\'' +
+              esc(c.key) + '\')">' + tr('停止') + '</button>' : '') + '</div>' +
+          (hw ? '<input class="hw-in" style="width:100%;min-width:0;margin-top:4px"' +
+            ' data-key="' + esc(c.key) + '"' +
+            (hw.chatId != null ? ' data-chat="' + esc(String(hw.chatId)) + '"' : '') +
+            ' placeholder="' + tr('返答を入力（Enter で送信）') + '"' +
+            ' onkeydown="if(event.key===\'Enter\')candReply(this)">' : '') +
+          '</div>');
+        return '';
+      }
       return '<tr' + rowBg + '><td><a href="' + esc(c.url) +
         '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">' +
         (c.type === 'pr'
@@ -3112,6 +3205,11 @@ function renderCandBody() {
           : c.createdPr ? ' → ' + esc(String(c.createdPr).split(' ').pop()) : '') +
         '</td></tr>' + hwRow;
     }).join('');
+    if (boardCards) return head + '<div class="bwrap">' + BCOLS.map(([id, lb, col]) =>
+      '<div class="bcol"><div class="bcol-h" style="color:' + col + '"><span>' + tr(lb) +
+      '</span><span class="cnt">' + boardCards[id].length + '</span></div>' +
+      (boardCards[id].join('') || '<div class="repo-empty">-</div>') + '</div>'
+    ).join('') + '</div>';
     return head + '<table><colgroup>' +
       '<col style="width:92px"><col style="width:108px"><col>' +
       '<col style="width:130px"><col style="width:112px"><col style="width:148px">' +

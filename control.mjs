@@ -1173,6 +1173,8 @@ async function candidates(force) {
         chatDelegated: t?.chatDelegated ?? null,
         queued: t?.queued ?? null,
         queuedAt: t?.queuedAt ?? null,
+        // 実行開始時刻（ボード表示の経過時間用）
+        startedAt: t?.startedAt ?? null,
         // dispatcher の待機キュー滞留理由（concurrency/repo-serial/unpushed）
         waitReason: t?.waitReason ?? null,
         // 人間待ち（入力待ち・needs-review）状態と返答経路・直近の問い
