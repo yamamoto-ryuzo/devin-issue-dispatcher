@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { skillEnabled } from './engine.mjs';
 import { checklistOf } from './core-logic.mjs';
+import { knowledgeSection } from './issue-knowledge.mjs';
 
 // リポジトリ固有の対応指針を prompts/<repo名>.md から読み込む。
 // 例: yamamoto-ryuzo/kasugai_canvas → prompts/kasugai_canvas.md
@@ -250,7 +251,9 @@ export function buildTaskPrompt({ ROOT, config, task, mode, skillFile = null, im
       `AI:impl-done ラベルを既に付けていた場合は除去する。\n` +
       `未コミットの作業ツリー変更は消さない——他者の変更と判別できないため——が、残った旨をコメントに明記する）\n`
     : '';
+  // #105: assess は末尾へ「過去の同型課題」セクションを差し込む（該当無しなら出さない）
+  const knowledge = mode === 'assess' ? knowledgeSection(ROOT, task) : '';
   return body +
     (policy ? `\n## このリポジトリ固有の対応指針\n${policy}\n` : '') +
-    skills + loopLine;
+    skills + loopLine + (knowledge ? `\n${knowledge}` : '');
 }
