@@ -1,0 +1,626 @@
+{
+ "component": "agent",
+ "component_type": "node_dispatcher",
+ "version": "",
+ "driver": {
+  "type": "static",
+  "detect": "-",
+  "launch": "-",
+  "ready": "-",
+  "control": "-",
+  "detected_from": "manifest"
+ },
+ "updated": "2026-11-15T23:31:35+09:00",
+ "features": [
+  {
+   "id": "test.node_test",
+   "kind": "logic_fn",
+   "name": "node --test 全件",
+   "source": "package.json scripts",
+   "signature": "node --test",
+   "summary": "43テスト(checklist/engine/lock/metrics等)",
+   "needs_runtime": false,
+   "standalone_ok": true,
+   "depends": [],
+   "verify": {
+    "standalone": "静的検証",
+    "integrated": ""
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T22:57:22+09:00",
+   "note": "43/43 pass"
+  },
+  {
+   "id": "mod.control_mjs",
+   "kind": "logic_fn",
+   "name": "control.mjs",
+   "source": "control.mjs",
+   "signature": "-",
+   "summary": "モジュール実在",
+   "needs_runtime": false,
+   "standalone_ok": true,
+   "depends": [],
+   "verify": {
+    "standalone": "静的検証",
+    "integrated": ""
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T22:57:22+09:00",
+   "note": "実在・node --test で間接検証"
+  },
+  {
+   "id": "mod.dispatcher_mjs",
+   "kind": "logic_fn",
+   "name": "dispatcher.mjs",
+   "source": "dispatcher.mjs",
+   "signature": "-",
+   "summary": "モジュール実在",
+   "needs_runtime": false,
+   "standalone_ok": true,
+   "depends": [],
+   "verify": {
+    "standalone": "静的検証",
+    "integrated": ""
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T22:57:22+09:00",
+   "note": "実在・node --test で間接検証"
+  },
+  {
+   "id": "mod.panel_html",
+   "kind": "logic_fn",
+   "name": "panel.html",
+   "source": "panel.html",
+   "signature": "-",
+   "summary": "モジュール実在",
+   "needs_runtime": false,
+   "standalone_ok": true,
+   "depends": [],
+   "verify": {
+    "standalone": "静的検証",
+    "integrated": ""
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T22:57:22+09:00",
+   "note": "実在・node --test で間接検証"
+  },
+  {
+   "id": "mod.instance_lock",
+   "kind": "logic_fn",
+   "name": "dispatcher 単一インスタンスガード",
+   "source": "instance-lock.mjs",
+   "signature": "tryAcquireLock(path)/releaseLock(path)",
+   "summary": "pidfile を排他作成('wx')し dispatcher 多重起動を防止。stale pid は生存確認で回収。Issue #99 対応",
+   "needs_runtime": false,
+   "standalone_ok": true,
+   "depends": [],
+   "verify": {
+    "standalone": "node --test test/instance-lock.test.mjs",
+    "integrated": ""
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T23:28:17+09:00",
+   "note": "auto-added。node --test 5/5 pass(2026-11-15)。未コミットの作業中ファイル"
+  },
+  {
+   "id": "mcp.status",
+   "kind": "ai_integration",
+   "name": "MCP tool status",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "status(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "live GET /api/status 応答 running:true / auto-added"
+  },
+  {
+   "id": "mcp.candidates",
+   "kind": "ai_integration",
+   "name": "MCP tool candidates",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "candidates(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "live GET /api/candidates 応答 / auto-added"
+  },
+  {
+   "id": "mcp.log",
+   "kind": "ai_integration",
+   "name": "MCP tool log",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "log(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "live GET /api/log 応答 / auto-added"
+  },
+  {
+   "id": "mcp.task_log",
+   "kind": "ai_integration",
+   "name": "MCP tool task_log",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "task_log(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "read-only・要key。実課題ログは status.tasks 経由で取得済 / auto-added"
+  },
+  {
+   "id": "mcp.chat_sessions",
+   "kind": "ai_integration",
+   "name": "MCP tool chat_sessions",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "chat_sessions(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "live 3セッション応答 / auto-added"
+  },
+  {
+   "id": "mcp.chat_get",
+   "kind": "ai_integration",
+   "name": "MCP tool chat_get",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "chat_get(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "read-only・id指定。chat_sessions で一覧確認済 / auto-added"
+  },
+  {
+   "id": "mcp.goals_list",
+   "kind": "ai_integration",
+   "name": "MCP tool goals_list",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "goals_list(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "live 6 goals 応答 / auto-added"
+  },
+  {
+   "id": "mcp.skills_list",
+   "kind": "ai_integration",
+   "name": "MCP tool skills_list",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "skills_list(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "live skills/*.md 応答 / auto-added"
+  },
+  {
+   "id": "mcp.auth_status",
+   "kind": "ai_integration",
+   "name": "MCP tool auth_status",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "auth_status(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "live loggedIn:true 応答 / auto-added"
+  },
+  {
+   "id": "mcp.dispatch",
+   "kind": "ai_integration",
+   "name": "MCP tool dispatch",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "dispatch(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "書込(対応キュー登録)。運用中のため手動検証対象 / auto-added"
+  },
+  {
+   "id": "mcp.assess",
+   "kind": "ai_integration",
+   "name": "MCP tool assess",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "assess(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "書込(評価キュー)。運用中のため手動検証対象 / auto-added"
+  },
+  {
+   "id": "mcp.chat_task",
+   "kind": "ai_integration",
+   "name": "MCP tool chat_task",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "chat_task(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "書込(即時実行)。運用中のため手動検証対象 / auto-added"
+  },
+  {
+   "id": "mcp.chat_send",
+   "kind": "ai_integration",
+   "name": "MCP tool chat_send",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "chat_send(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "書込(チャット送信)。運用中のため手動検証対象 / auto-added"
+  },
+  {
+   "id": "mcp.steer",
+   "kind": "ai_integration",
+   "name": "MCP tool steer",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "steer(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "書込(実行中課題へ追加入力) / auto-added"
+  },
+  {
+   "id": "mcp.issue_create",
+   "kind": "ai_integration",
+   "name": "MCP tool issue_create",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "issue_create(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "pass",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "本検証セッションで qgis_live_harness#8/#9 起票実績あり / auto-added"
+  },
+  {
+   "id": "mcp.verdict",
+   "kind": "ai_integration",
+   "name": "MCP tool verdict",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "verdict(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "書込(判定上書) / auto-added"
+  },
+  {
+   "id": "mcp.task_engine",
+   "kind": "ai_integration",
+   "name": "MCP tool task_engine",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "task_engine(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "書込(エンジン指定) / auto-added"
+  },
+  {
+   "id": "mcp.config_update",
+   "kind": "ai_integration",
+   "name": "MCP tool config_update",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "config_update(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "書込(config patch)。dispatcher 稼働設定を変更するため手動検証対象 / auto-added"
+  },
+  {
+   "id": "mcp.assess_all",
+   "kind": "ai_integration",
+   "name": "MCP tool assess_all",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "assess_all(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "書込(一括評価) / auto-added"
+  },
+  {
+   "id": "mcp.impl_all",
+   "kind": "ai_integration",
+   "name": "MCP tool impl_all",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "impl_all(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "書込(一括対応) / auto-added"
+  },
+  {
+   "id": "mcp.start",
+   "kind": "ai_integration",
+   "name": "MCP tool start",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "start(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "書込(ループ起動)。running 済のため副作用あり / auto-added"
+  },
+  {
+   "id": "mcp.kill",
+   "kind": "ai_integration",
+   "name": "MCP tool kill",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "kill(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "破壊(実行中課題停止) / auto-added"
+  },
+  {
+   "id": "mcp.chat_cancel",
+   "kind": "ai_integration",
+   "name": "MCP tool chat_cancel",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "chat_cancel(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "破壊(チャット中断) / auto-added"
+  },
+  {
+   "id": "mcp.chat_close",
+   "kind": "ai_integration",
+   "name": "MCP tool chat_close",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "chat_close(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "破壊(セッション閉鎖) / auto-added"
+  },
+  {
+   "id": "mcp.issue_close",
+   "kind": "ai_integration",
+   "name": "MCP tool issue_close",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "issue_close(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "破壊(Issue close) / auto-added"
+  },
+  {
+   "id": "mcp.stop",
+   "kind": "ai_integration",
+   "name": "MCP tool stop",
+   "source": "control.mjs MCP_TOOLS",
+   "signature": "stop(args)",
+   "summary": "dispatcher 内蔵MCPサーバ経由の制御面ツール。/api/* へ内部プロキシ",
+   "needs_runtime": true,
+   "standalone_ok": false,
+   "depends": [
+    "dispatcher control :8511 稼働"
+   ],
+   "verify": {
+    "standalone": "",
+    "integrated": "MCP tools/call または POST /api/* で実応答"
+   },
+   "last_result": "skip",
+   "last_verified": "2026-11-15T23:31:35+09:00",
+   "note": "破壊(dispatcher 停止) / auto-added"
+  }
+ ]
+}

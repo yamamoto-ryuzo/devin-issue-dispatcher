@@ -204,6 +204,11 @@ node dispatcher.mjs --once      # 1サイクル実行（見つけた課題は実
 node dispatcher.mjs             # 常駐ループ（管理パネル経由と同じ。どちらか一方で使う）
 ```
 
+単一インスタンスガード: `--dry-run` 以外のモードは起動時に `logs/dispatcher.pid` を排他取得し、
+既に生存中のインスタンスがあれば `dispatcher already running` を記録して即終了する
+（二重起動によるキュー/状態書き込みの競合防止。常駐中の `--once`/`--task`/`--assess` 手動起動も拒否）。
+ロックは PID 生存確認で陳腐化するため、クラッシュ後の stale ロックで起動不能にはならない。
+
 また、管理パネルからの ISSUE 起票（`POST /api/issue`）が成功すると control が
 `logs/dispatcher.kick` を書き込み、常駐 dispatcher が fs.watch で検出して次
 ポーリングを前倒し実行する。起票から検出まで最大 `pollIntervalSec` 秒待たない

@@ -10,6 +10,9 @@
  *   node dispatcher.mjs --once     # 1サイクルだけ実行（起動も行う）
  *   node dispatcher.mjs --dry-run  # 検出のみ表示（起動・ラベル操作なし）
  *
+ * 常駐・単発（--once/--task/--assess）を問わず cycle/起動を実行するプロセスは
+ * logs/dispatcher.pid で単一インスタンス化し、多重起動は即終了する。
+ * --dry-run は検出のみ（起動・ラベル操作・ロックなし）で常駐と並行可。
  * 状態は state.json、セッション出力は logs/ に保存する。
  */
 import { spawn, execFileSync } from 'node:child_process';
@@ -65,6 +68,7 @@ const LOG_DIR = join(ROOT, 'logs');
 const STATE_PATH = join(ROOT, 'state.json');
 const CANDS_PATH = join(ROOT, 'candidates.json');
 const ISSUES_PATH = join(ROOT, 'issues.json');
+const LOCK_PATH = join(LOG_DIR, 'dispatcher.pid');
 mkdirSync(LOG_DIR, { recursive: true });
 
 // ---- kick: ISSUE 起票直後の即時サイクル起動 ----
@@ -1351,6 +1355,16 @@ async function cycle(state) {
 }
 
 async function main() {
+  // 単一インスタンスガード: cycle/起動を実行するのは全モード共通で1プロセスのみ。
+  // --dry-run は検出のみで書き込まないため対象外（常駐と並行実行可）
+  if (!DRY_RUN) {
+    const lock = tryAcquireLock(LOCK_PATH);
+    if (!lock.ok) {
+      log(`FATAL: dispatcher already running (pid ${lock.pid || 'unknown'}); exiting`);
+      process.exit(1);
+    }
+    process.on('exit', () => releaseLock(LOCK_PATH));
+  }
   log(`dispatcher start (poll ${POLL_MS / 1000}s, maxAssess ${MAX_ASSESS}, maxImpl ${MAX_IMPL}, maxPr ${MAX_PR}, mode=${config.permissionMode ?? 'dangerous'}, autoTrigger=${AUTO_TRIGGER})`);
   if (!existsSync(config.devinExe)) {
     // 既定エンジンが非 devin なら起動は継続（devin 解決の課題のみ起動失敗する）
