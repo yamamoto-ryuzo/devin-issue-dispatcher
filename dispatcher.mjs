@@ -92,6 +92,16 @@ function saveState(state) {
   const out = { ...state, tasks: { ...(disk?.tasks ?? {}) } };
   for (const [k, cur] of Object.entries(state.tasks ?? {})) {
     const dt = out.tasks[k];
+    // ディスクに無い非アクティブなタスク = /api/history/clear で除去済み。
+    // そのまま書き戻すとクリアした履歴が復活するため、メモリ側も破棄する
+    // （新規・実行中タスクは必ず inflight/chatDelegated/running/phase/
+    // queued/waitReason のいずれかを伴って登録される）
+    if (!dt && !running.has(k) && !cur.inflight && !cur.chatDelegated
+        && cur.status !== 'running' && !cur.phase && !cur.queued
+        && !cur.waitReason) {
+      delete state.tasks[k];
+      continue;
+    }
     if (!dt || running.has(k)) { out.tasks[k] = cur; continue; }
     const merged = { ...dt, ...cur };
     // control が委譲評価の完了（verdict）・タイムアウトで inflight を解除済みなら
