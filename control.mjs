@@ -17,6 +17,7 @@
  *   POST /api/stop      dispatcher 停止（desired.enabled=false）
  *   POST /api/once      dispatcher が停止中のとき 1サイクルだけ実行
  *   POST /api/reload    config.json の読み直し（dispatcher 再起動は行わない）
+ *   POST /api/history/clear  処理履歴クリア（state.json tasks の完了分のみ削除・実行中は保持）
  *
  * POST は `X-Panel: 1` ヘッダ必須（CSRF 対策。外部サイトのフォームからは送れない）。
  * 127.0.0.1 のみにバインドする。
@@ -1757,6 +1758,19 @@ const server = createServer(async (req, res) => {
         const { id } = JSON.parse((await readBody(req)) || '{}');
         chats.get(id)?.chat.clear();
         return json(200, { ok: true });
+      }
+      if (url.pathname === '/api/history/clear') {
+        // 処理履歴クリア。inflight/chatDelegated/status=running は dispatcher が
+        // 追跡中のため保持する（消すと完了検知・帰属判定が壊れる）
+        const st = loadJson(STATE_PATH, { tasks: {} });
+        let removed = 0;
+        for (const [k, t] of Object.entries(st.tasks ?? {})) {
+          if (t.inflight || t.chatDelegated || t.status === 'running') continue;
+          delete st.tasks[k];
+          removed++;
+        }
+        writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+        return json(200, { ok: true, removed });
       }
       if (url.pathname === '/api/chat/cancel') {
         const { id } = JSON.parse((await readBody(req)) || '{}');

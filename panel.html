@@ -179,6 +179,7 @@ en: {
 '添付':'Attach',
 'Ctrl+V で画像貼り付け／添付ボタンでファイル選択できます':'Paste images with Ctrl+V or pick files via the Attach button',
 '今すぐ取得':'Refresh Now','送信':'Send','クリア':'Clear','リセット':'Reset','編集':'Edit','表示':'View',
+'処理履歴をクリアしますか？（実行中のタスクは残ります）':'Clear history? (running tasks are kept)',
 '評価':'Assess','再評価':'Re-assess','対応':'Implement','再検証':'Re-verify','再実行':'Retry','詳細':'Details',
 '停止':'Stop','追加':'Add','dispatcher.log に戻す':'Back to dispatcher.log',
 '課題整理（目的 → Issue 化）':'Issue planning (goal → issue)',
@@ -736,7 +737,8 @@ function setLang(v) {
       <button class="mini" onclick="loadMetrics()" data-i18n="今すぐ取得">今すぐ取得</button>
       <span id="mx-meta" style="color:#9ca3af;font-weight:400;font-size:12px"></span></div>
     <div id="metrics" style="margin-bottom:10px"></div>
-    <div class="h3" data-i18n="処理履歴（state.json）">処理履歴（state.json）</div>
+    <div class="h3" style="display:flex;align-items:center;gap:8px"><span data-i18n="処理履歴（state.json）">処理履歴（state.json）</span>
+      <button class="mini" onclick="clearHistory()" data-i18n="クリア">クリア</button></div>
     <table>
       <thead><tr><th data-i18n="課題">課題</th><th data-i18n="内容">内容</th><th data-i18n="状態">状態</th><th data-i18n="評価">評価</th><th data-i18n="開始">開始</th><th data-i18n="終了">終了</th><th>exit</th><th data-i18n="エンジン">エンジン</th><th></th></tr></thead>
       <tbody id="tasks"></tbody>
@@ -1403,6 +1405,15 @@ function toast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.style.opacity = 1;
   setTimeout(() => t.style.opacity = 0, 2500);
+}
+
+// 処理履歴クリア: 完了済みタスクのみ削除（実行中はサーバ側で保持される）。
+// state.json 変化は SSE push で全パネルへ即時反映されるが、押下直後の
+// 体感を良くするため明示的に refresh() も呼ぶ
+async function clearHistory() {
+  if (!confirm(t('処理履歴をクリアしますか？（実行中のタスクは残ります）'))) return;
+  await fetch(API + '/api/history/clear', { method: 'POST', headers: H });
+  refresh();
 }
 
 async function act(name) {
