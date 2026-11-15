@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { gh, ghJson, keyOf, discover, toCandidate, readIssueStore } from './discover.mjs';
 import { buildTaskPrompt } from './task-prompts.mjs';
 import { checkFailures } from './failure-watch.mjs';
+import { reapOrphanedInflight } from './inflight-reap.mjs';
 import { RISK_RANK, CAT_RANK, VERDICT_STEPS, escalateVerdict, parseIssueRef,
   resolveDelegatedStatus, isDelegatedStale } from './core-logic.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -141,6 +142,7 @@ function saveState(state) {
       if (merged.inflightClearedAt && (!srcAt || merged.inflightClearedAt > srcAt)) {
         delete merged.inflight;
         delete merged.inflightAt;
+        delete merged.inflightPid;
       }
     }
     // control が委譲 impl の完了を chatResult で確定済みなら委譲マーカーを消す
@@ -361,11 +363,11 @@ async function dispatchViaChat(key, mode, eng) {
 const SHARED_PULL = ['assess', 'assessedAt', 'splitTo', 'splitAt',
   'createdPr', 'prAt', 'closedAt', 'engineReq', 'inflightClearedAt',
   'chatResult', 'engineUsed', 'engineUsedAt',
-  'inflight', 'inflightAt', 'chatDelegated', 'delegatedAt', 'chatId'];
+  'inflight', 'inflightAt', 'inflightPid', 'chatDelegated', 'delegatedAt', 'chatId'];
 // ディスク側で消えたらメモリ側も消すマーカーフィールド
 // （control 側が解除・巻き戻しした委譲を幽霊化させない）
 const SHARED_PULL_DELETE = new Set(['engineReq', 'inflight', 'inflightAt',
-  'chatDelegated', 'delegatedAt', 'chatId']);
+  'inflightPid', 'chatDelegated', 'delegatedAt', 'chatId']);
 async function syncShared(state) {
   const disk = liveJson(STATE_PATH);
   if (!disk?.tasks) return;
@@ -389,6 +391,7 @@ async function syncShared(state) {
         (!cur.inflightAt || dt.inflightClearedAt > cur.inflightAt)) {
       delete cur.inflight;
       delete cur.inflightAt;
+      delete cur.inflightPid;
     }
     if (cur.chatDelegated && dt.chatResult &&
         (!cur.delegatedAt || dt.chatResult.at > cur.delegatedAt)) {
@@ -430,6 +433,7 @@ async function syncShared(state) {
         (!cur.inflightAt || Date.now() - new Date(cur.inflightAt).getTime() > STALE_MS)) {
       delete cur.inflight;
       delete cur.inflightAt;
+      delete cur.inflightPid;
     }
     // control 側の巻き戻し（起動不能・送信失敗・委譲完了）で running が解除済み
     // ならメモリ側の滞留 status も消す。status は SHARED_PULL 対象外（dispatcher が
@@ -463,6 +467,7 @@ async function handleDelegatedKills(state) {
     } catch { continue; } // control 未起動時は次サイクルで再試行
     kr.keys = kr.keys.filter((x) => x !== key); dirty = true;
     delete t.chatId; delete t.inflight; delete t.inflightAt;
+    delete t.inflightPid;
     if (t.chatDelegated) {
       delete t.chatDelegated; delete t.delegatedAt;
       t.status = 'failed'; t.note = 'ユーザー停止（委譲チャット取消）';
@@ -1061,6 +1066,7 @@ async function sweepDelegatedStale(state) {
       inflightClearedAt: at };
     delete state.tasks[key].inflight;
     delete state.tasks[key].inflightAt;
+    delete state.tasks[key].inflightPid;
     delete state.tasks[key].chatId;
     saveState(state);
     log(`delegated sweep resolved ${key} -> ${status}`);
@@ -1163,10 +1169,19 @@ async function doAssess(task, state) {
     inflight: 'assess', inflightAt: new Date().toISOString() };
   saveState(state);
   try {
-    const code = await spawnDevin(
+    const apRun = spawnDevin(
       withTms(buildTaskPrompt({ ROOT,
         config: liveJson(configPath) ?? config, task, mode: 'assess' })),
       task, ap, key, 'assess');
+    // 孤児回収用に子プロセス PID を記録する。dispatcher 再起動・異常終了で
+    // inflight を取り残しても、次回起動・各サイクルの reapOrphanedInflight が
+    // 子プロセス死亡を検出して即座に課題を再候補化する（STALE_MS 待ち不要）
+    const cpid = running.get(key)?.proc?.pid;
+    if (cpid) {
+      state.tasks[key].inflightPid = cpid;
+      saveState(state);
+    }
+    const code = await apRun;
     const verdict = code === 0 ? parseVerdict(ap) : null;
     state.tasks[key] = {
       ...(state.tasks[key] ?? {}),
@@ -1179,6 +1194,7 @@ async function doAssess(task, state) {
     running.delete(key);
     if (state.tasks[key]) {
       delete state.tasks[key].inflight;
+      delete state.tasks[key].inflightPid;
       // 解除時刻を残して saveState の併合でディスク側の古い inflight も消す
       state.tasks[key].inflightClearedAt = new Date().toISOString();
       saveState(state);
@@ -1221,6 +1237,17 @@ async function cycle(state) {
   await sweepDelegatedStale(state);
   // 委譲チャット課題への停止要求を転送（devin 経路分は spawnDevin が消費）
   await handleDelegatedKills(state);
+  // dispatcher 再起動・プロセス断で取り残された inflight を回収する。
+  // 子 PID 死亡済みなら即時解除して課題を再候補化（STALE_MS=180分待ちの
+  // フリーズを防ぐ）。PID 未記録の旧形式・委譲マーカーは syncShared の
+  // inflightAt 期限切れ（STALE_MS）へフォールバックする
+  if (!DRY_RUN) {
+    const reaped = reapOrphanedInflight(state.tasks, { running });
+    if (reaped.length) {
+      log(`orphaned inflight reaped (child dead): ${reaped.join(', ')} -> re-candidate`);
+      saveState(state);
+    }
+  }
   // エラー入力の自動取り込み（config.autoIssueOnFailure=true のときのみ）
   if (!DRY_RUN) {
     try {
