@@ -1360,6 +1360,12 @@ async function main() {
     }
     log(`WARN: devin exe not found: ${config.devinExe}（devin 解決の課題は起動失敗します）`);
   }
+  // 自身のソース乖離を検知してログへ記録（issue #95）。実行中タスク
+  // （running/queue/inflight）保護のため自動再起動はしない——検知表示と
+  // 手動再起動導線は control/パネル側が担う
+  const { initCodeWatch } = await import('./code-watch.mjs');
+  initCodeWatch({ onDrift: (d) =>
+    log(`WARN: code drift detected: ${d.files.join(', ')} — 起動時コードのまま動作継続（再起動で反映）`) });
   const state = loadState();
   // 前回プロセスが残したキュー待ちマーカーを掃除（queued はメモリ内キューと
   // 連動する揮発状態。再起動直後はキューが空なので全て陳腐）

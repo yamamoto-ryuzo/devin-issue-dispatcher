@@ -196,6 +196,12 @@ en: {
 '全評価 手動実行':'Assess All (Manual)','全課題対応 手動実行':'Implement All (Manual)',
 '課題抽出':'Extract Issues','中断':'Cancel','保存':'Save','削除':'Delete','ISSUE登録':'Create Issue',
 '添付':'Attach',
+'ソース更新を検知':'Source update detected',
+'実行中プロセスは起動時コードのまま動いています（再起動で反映）':'Running processes still use start-up code (restart to apply)',
+'control 再起動':'Restart control','dispatcher 再起動':'Restart dispatcher',
+'control（管理サーバ）を再起動します。数秒で復帰します。続行しますか？':'Restart the control server? It returns in a few seconds. Continue?',
+'control を再起動中…':'Restarting control…',
+'実行中タスクがあります。dispatcher を再起動するとメモリ内キューが失われます。続行しますか？':'Tasks are running. Restarting dispatcher loses the in-memory queue. Continue?',
 'Ctrl+V で画像貼り付け／添付ボタンでファイル選択できます':'Paste images with Ctrl+V or pick files via the Attach button',
 '今すぐ取得':'Refresh Now','送信':'Send','クリア':'Clear','リセット':'Reset','編集':'Edit','表示':'View',
 '処理履歴をクリアしますか？（実行中のタスクは残ります）':'Clear history? (running tasks are kept)',
@@ -611,6 +617,8 @@ function setLang(v) {
 </script>
 </head>
 <body>
+<div id="codewarn" style="display:none;position:sticky;top:0;z-index:60;background:#fef3c7;
+  border-bottom:1px solid #f59e0b;color:#92400e;padding:8px 14px;font-size:13px"></div>
 <div class="row" style="align-items:flex-start;gap:24px;flex-wrap:wrap;margin-bottom:14px">
   <div>
     <div style="display:flex;align-items:center;gap:16px">
@@ -1461,6 +1469,24 @@ async function act(name) {
   ensurePolling();
 }
 
+// コード乖離バナーからの再起動。control はステートレスなので即再起動、
+// dispatcher は running/inflight タスク保護のため実行中は確認を挟む
+async function restartControl() {
+  if (!confirm(t('control（管理サーバ）を再起動します。数秒で復帰します。続行しますか？'))) return;
+  try {
+    await fetch(API + '/api/control/restart', { method: 'POST', headers: H });
+  } catch { /* 応答前に切断されても再起動は進行 */ }
+  toast(t('control を再起動中…'));
+  setTimeout(() => { refresh(); loadCandidates(false); }, 5000);
+}
+async function restartDispatcher() {
+  const busy = (status?.tasks || []).some((t) => t.status === 'running' || t.inflight || t.chatDelegated)
+    || (status?.manualRuns || []).length > 0;
+  if (busy && !confirm(t('実行中タスクがあります。dispatcher を再起動するとメモリ内キューが失われます。続行しますか？'))) return;
+  await act('stop');
+  await act('start');
+}
+
 let cfgInit = false;
 const flags = { autoDiscover: false, autoAssess: false, autoTrigger: false, autoPr: false };
 let logKey = null;
@@ -2288,6 +2314,19 @@ async function refresh() {
     ? t('ポーリング中') + ' (pid ' + status.pid + ' / ' + status.startedAt + ')'
     : t('ポーリング未起動');
   renderCandsMode();
+
+  // コード乖離警告: 起動後に *.mjs/panel.html が更新されたら恒常バナーを出す
+  const cwe = document.getElementById('codewarn');
+  if (cwe) {
+    const d = status.codeDrift;
+    cwe.style.display = d?.files?.length ? '' : 'none';
+    if (d?.files?.length) {
+      cwe.innerHTML = '⚠ ' + t('ソース更新を検知') + ': ' + esc(d.files.join(', ')) +
+        ' — ' + t('実行中プロセスは起動時コードのまま動いています（再起動で反映）') +
+        ' <button class="mini" onclick="restartControl()">' + t('control 再起動') + '</button>' +
+        ' <button class="mini" onclick="restartDispatcher()">' + t('dispatcher 再起動') + '</button>';
+    }
+  }
 
   const c = status.config;
   const he = document.getElementById('hdr-engine');

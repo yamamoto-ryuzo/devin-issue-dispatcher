@@ -209,6 +209,14 @@ node dispatcher.mjs             # 常駐ループ（管理パネル経由と同�
 ポーリングを前倒し実行する。起票から検出まで最大 `pollIntervalSec` 秒待たない
 ための軽量キックで、ディスパッチを保証するものではない（dispatcher 停止中は無視される）。
 
+コード乖離検知: 実行中プロセスは起動時に読み込んだコードのまま動くため、
+control/dispatcher は `code-watch.mjs` でリポジトリ直下の `*.mjs`・`panel.html` の
+mtime+size を fs.watch 監視し、起動後のコード更新を検知する。検知すると
+`/api/status.codeDrift` と SSE 経由でパネルに恒常バナーが出る。control は
+`POST /api/control/restart`（バナーの「control 再起動」ボタン）で自己再起動し、
+dispatcher は実行中タスク保護のため「dispatcher 再起動」ボタン（stop→start・実行中は確認）
+による手動再起動とする（dispatcher 側も乖離を dispatcher.log へ記録する）。
+
 open な Issue/PR はすべて自動的に対応候補として検出される（ラベル不要）。
 自動起動させるにはパネルの「自動処理」を ON にする。特定の課題だけ即時処理したい
 場合は候補行の「対応」ボタン（評価フェーズはスキップ）。

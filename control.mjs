@@ -15,6 +15,7 @@
  *   GET  /api/metrics?days=7  state.json tasks の期間集計（件数・判定分布・所要時間）
  *   POST /api/start     dispatcher 起動（desired.enabled=true を永続化）
  *   POST /api/stop      dispatcher 停止（desired.enabled=false）
+ *   POST /api/control/restart  control 自身を再起動（起動後のコード更新を反映）
  *   POST /api/once      dispatcher が停止中のとき 1サイクルだけ実行
  *   POST /api/reload    config.json の読み直し（dispatcher 再起動は行わない）
  *   POST /api/history/clear  処理履歴クリア（state.json tasks の完了分のみ削除・実行中は保持）
@@ -37,6 +38,7 @@ import { resolveDelegatedStatus, isDelegatedStale, checklistOf } from './core-lo
 import { sweepQueue, queueStaleMs } from './work-queue.mjs';
 import { AcpChat } from './acp-chat.mjs';
 import { computeMetrics } from './metrics.mjs';
+import { initCodeWatch, codeDrift } from './code-watch.mjs';
 import { createHash } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
 
@@ -966,6 +968,8 @@ function status() {
     startedAt: child?.startedAt ?? null,
     desired: loadDesired(),
     deployedAt: state.deployedAt,
+    // 起動後に更新されたソース（*.mjs/panel.html）。乖離なしなら null
+    codeDrift: codeDrift(),
     manualRuns: [...manualRuns.keys()],
     config: {
       pollIntervalSec: config.pollIntervalSec ?? 120,
@@ -1578,6 +1582,12 @@ function ensureStateWatcher() {
   } catch { /* 監視不可環境では無イベントのまま（パネル側は周期取得へフォールバック） */ }
 }
 
+// 起動時コードとディスク上コードの乖離を監視（issue #95）。node は import
+// 済みコードを保持し続けるため、*.mjs/panel.html の更新は再起動まで反映
+// されない。検知したら SSE でパネルへ即通知し、/api/status.codeDrift でも
+// 恒常露出する。control はステートレスなので /api/control/restart で再起動可
+initCodeWatch({ onDrift: () => sseBroadcast({ type: 'state', file: 'code' }) });
+
 // /api/issue 起票成功 → dispatcher の次ポーリングを前倒しするキックを書き込む。
 // ディスパッチ保証ではない補助経路なので、書き込み失敗は起票結果へ影響させない
 function kickDispatcher() {
@@ -1659,6 +1669,15 @@ const server = createServer(async (req, res) => {
       if (url.pathname === '/api/stop') {
         saveDesired({ enabled: false });
         return json(200, stopDispatcher());
+      }
+      if (url.pathname === '/api/control/restart') {
+        // ステートレスなので即再起動可。自分の完全終了後に新プロセスを立てる
+        // ヘルパーをデタッチ起動し、応答を返してから終了する
+        spawn(process.execPath, [join(ROOT, 'restart-control.mjs'), String(process.pid)],
+          { cwd: ROOT, detached: true, windowsHide: true, stdio: 'ignore' }).unref();
+        json(200, { ok: true });
+        setTimeout(() => process.exit(0), 300);
+        return;
       }
       if (url.pathname === '/api/assess-all') {
         // 全候補のうち判定未出力のものを評価キューへ（上限は待機キューで調整）
