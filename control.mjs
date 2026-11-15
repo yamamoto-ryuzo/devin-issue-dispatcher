@@ -505,7 +505,7 @@ async function dispatchChatTask(key, mode, skill, engine) {
       const cur = st.tasks[key] ?? {};
       const now = new Date().toISOString();
       if (mode === 'impl') {
-        st.tasks[key] = { ...cur, status: 'failed',
+        st.tasks[key] = { ...cur, status: 'failed', phase: null,
           engineError: 'engine error: ' + e.message, failedAt: now };
       } else {
         st.tasks[key] = { ...cur,
@@ -1948,7 +1948,7 @@ const server = createServer(async (req, res) => {
               (e, so, se) => e ? rej(new Error(se || e.message)) : res(so));
           });
           const st = loadJson(STATE_PATH, { tasks: {} });
-          st.tasks[key] = { ...(st.tasks[key] ?? {}), status: 'closed',
+          st.tasks[key] = { ...(st.tasks[key] ?? {}), status: 'closed', phase: null,
             closedAt: new Date().toISOString() };
           writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
           // closed 課題に処理済み/実行中ラベルが残ると、検索インデックス反映まで

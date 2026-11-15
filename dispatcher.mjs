@@ -735,7 +735,8 @@ async function runTask(task, state, { skipAssess = false } = {}) {
           ? `category=reject, feasible=${verdict.feasible}, risk=${verdict.risk} — ${verdict.reason}`
           : `評価セッション異常終了（exit ${code}）または判定出力なし`;
         log(`REJECTED ${key}: ${why}`);
-        state.tasks[key] = { ...state.tasks[key], status: 'rejected', finishedAt: new Date().toISOString() };
+        // 終端確定時は phase も解除（verdict 再利用経路で 'impl' が残るとボードで実装中に誤表示される）
+        state.tasks[key] = { ...state.tasks[key], status: 'rejected', phase: null, finishedAt: new Date().toISOString() };
         saveState(state);
         await setLabel(task.repo.github, task.number, task.type,
           [LABEL.rejected], [LABEL.running]);
@@ -752,7 +753,8 @@ async function runTask(task, state, { skipAssess = false } = {}) {
       if (!proceed) {
         const why = `category=${verdict.category}, feasible=${verdict.feasible}, risk=${verdict.risk} — ${verdict.reason}`;
         log(`NEEDS-REVIEW ${key}: ${why}`);
-        state.tasks[key] = { ...state.tasks[key], status: 'needs-review', finishedAt: new Date().toISOString() };
+        // rejected と同様に終端確定時は phase を解除（'impl' 残存で実装中に誤表示されるのを防ぐ）
+        state.tasks[key] = { ...state.tasks[key], status: 'needs-review', phase: null, finishedAt: new Date().toISOString() };
         saveState(state);
         await setLabel(task.repo.github, task.number, task.type,
           [LABEL.needsReview], [LABEL.running]);
@@ -1079,7 +1081,8 @@ async function reclaimStale(state) {
         await comment(r.github, it.number, type,
           `前回の Devin セッションが中断しました（dispatcher 停止またはタイムアウト）。再試行はパネルの「再実行」ボタンまたは \`POST /api/dispatch\` から行えます。`);
         state.tasks[key] = { ...(state.tasks[key] ?? {}),
-          status: 'failed', note: 'stale running label reclaimed', finishedAt: new Date().toISOString() };
+          status: 'failed', phase: null,
+          note: 'stale running label reclaimed', finishedAt: new Date().toISOString() };
         delete state.tasks[key].chatDelegated;
         delete state.tasks[key].delegatedAt;
         delete state.tasks[key].chatId;
