@@ -27,6 +27,7 @@ import { RISK_RANK, CAT_RANK, VERDICT_STEPS, escalateVerdict, parseIssueRef,
   resolveDelegatedStatus, isDelegatedStale } from './core-logic.mjs';
 import { recordProposals, validProposals } from './proposals.mjs';
 import { extractKnowledgeBlock, recordKnowledge, validCause } from './issue-knowledge.mjs';
+import { tryAcquireLock, releaseLock } from './instance-lock.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
