@@ -1349,6 +1349,10 @@ const MCP_TOOLS = [
     description: 'GitHub Issue をクローズ（issue 課題のみ）',
     inputSchema: { type: 'object', properties: { key: KEY_PARAM }, required: ['key'] },
     api: { method: 'POST', path: '/api/close' } },
+  { name: 'issue_delete', annotations: DE,
+    description: 'GitHub Issue を削除（誤起票など。不可逆・issue 課題のみ）',
+    inputSchema: { type: 'object', properties: { key: KEY_PARAM }, required: ['key'] },
+    api: { method: 'POST', path: '/api/delete' } },
   { name: 'stop', annotations: DE,
     description: 'dispatcher ポーリングループを停止',
     inputSchema: { type: 'object', properties: {} },
@@ -1378,7 +1382,7 @@ async function mcpToolCall(tool, args) {
 const AI_SYS = 'あなたは Devin Agent Dispatcher の管理アシスタントです。' +
   '課題一覧・状態確認・評価/対応のディスパッチ・設定参照などは提供ツールを使い、' +
   '結果を日本語で簡潔に報告してください。' +
-  'kill・issue_close・stop などの破壊的ツールはユーザーが明示した場合のみ実行してください。';
+  'kill・issue_close・issue_delete・stop などの破壊的ツールはユーザーが明示した場合のみ実行してください。';
 const oaiTools = () => MCP_TOOLS.map((t) => ({ type: 'function',
   function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
 const parseToolArgs = (s) => { try { return JSON.parse(s || '{}'); } catch { return {}; } };
@@ -1962,6 +1966,44 @@ const server = createServer(async (req, res) => {
                 execFile('gh', ['issue', 'edit', m[3], '-R', m[1],
                   '--remove-label', l], () => res());
               });
+            }
+          } catch { /* noop */ }
+          return json(200, { ok: true });
+        } catch (e) { return json(500, { ok: false, error: e.message }); }
+      }
+      if (url.pathname === '/api/delete') {
+        // issue を削除（gh issue delete。誤起票などクローズでは残したくない場合用。
+        // 不可逆のため issue のみ対象・確認はパネル側の confirm で行う）
+        const { key } = JSON.parse((await readBody(req)) || '{}');
+        const m = String(key ?? '').match(/^(\S+)\s+(issue|pr)#(\d+)$/);
+        if (!m || m[2] !== 'issue') return json(400, { ok: false, error: 'bad key: ' + key });
+        try {
+          await new Promise((res, rej) => {
+            execFile('gh', ['issue', 'delete', m[3], '-R', m[1], '--yes'],
+              (e, so, se) => e ? rej(new Error(se || e.message)) : res(so));
+          });
+          // state へ削除済みを記録（status は closed に揃え deleted で区別）
+          const st = loadJson(STATE_PATH, { tasks: {} });
+          st.tasks[key] = { ...(st.tasks[key] ?? {}), status: 'closed', phase: null,
+            closedAt: new Date().toISOString(), deleted: true };
+          writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+          // 検出ストア・候補キャッシュからも即時除去し、fs.watch→SSE で
+          // パネルへ push 反映させる（キャッシュが残ると削除済みが表示され続ける）
+          try {
+            const ist = readIssueStore(ISSUES_PATH);
+            if (ist.issues?.[key]) {
+              delete ist.issues[key];
+              const tmp = ISSUES_PATH + '.tmp';
+              writeFileSync(tmp, JSON.stringify(ist, null, 2));
+              renameSync(tmp, ISSUES_PATH);
+            }
+          } catch { /* noop */ }
+          try {
+            const cc = loadJson(CANDS_PATH, null);
+            if (cc && Array.isArray(cc.candidates) &&
+                cc.candidates.some((c) => keyOf(c.repo, c.type, c.number) === key)) {
+              writeCandsCache(cc.candidates.filter(
+                (c) => keyOf(c.repo, c.type, c.number) !== key));
             }
           } catch { /* noop */ }
           return json(200, { ok: true });

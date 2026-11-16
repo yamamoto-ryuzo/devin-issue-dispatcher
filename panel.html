@@ -3095,6 +3095,23 @@ async function closeIssue(key) {
   } catch (e) { toast('close: ' + e.message); }
 }
 
+// 課題削除（誤起票など。GitHub 上から完全削除され復元不可。要確認・失敗列のみ表示）
+async function delIssue(key) {
+  if (!confirm(key + ' を GitHub 上から削除しますか？\n' +
+    '削除はクローズと違い元に戻せません。')) return;
+  try {
+    const r = await fetch(API + '/api/delete', {
+      method: 'POST', headers: H, body: JSON.stringify({ key }),
+    });
+    const j = await r.json();
+    toast(j.ok ? '削除しました: ' + key : '失敗: ' + (j.error || ''));
+    if (j.ok) {
+      document.getElementById('modal').style.display = 'none';
+      loadCandidates(true);
+    }
+  } catch (e) { toast('delete: ' + e.message); }
+}
+
 // 切り分け: 実装済み部分を完了・残りを新規Issue化 → 新Issueを自動再評価
 async function splitIssue(key) {
   try {
@@ -3387,7 +3404,12 @@ function renderCandBody() {
               tr('人間待ち') + '</span>' : '') + '</div>' +
           '<div class="bops">' + assessCell + ' ' + implCell +
             (busy ? ' <button class="mini danger" onclick="candStop(\'' +
-              esc(c.key) + '\')">' + tr('停止') + '</button>' : '') + '</div>' +
+              esc(c.key) + '\')">' + tr('停止') + '</button>' : '') +
+            // 要確認・失敗列のみ削除ボタンを出す（誤起票はクローズでなく削除したい）
+            (colId === 'check' ? ' <button class="mini danger" title="' +
+              tr('誤起票などの削除（GitHub 上から完全削除・復元不可）') +
+              '" onclick="delIssue(\'' + esc(c.key) + '\')">' +
+              tr('削除') + '</button>' : '') + '</div>' +
           (hw ? '<input class="hw-in" style="width:100%;min-width:0;margin-top:4px"' +
             ' data-key="' + esc(c.key) + '"' +
             (hw.chatId != null ? ' data-chat="' + esc(String(hw.chatId)) + '"' : '') +
