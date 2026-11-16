@@ -1373,6 +1373,23 @@ const MCP_TOOLS = [
     description: 'control.mjs 自身を再起動（コード更新反映用）。ツール応答の返却直後に control プロセスが再起動される',
     inputSchema: { type: 'object', properties: {} },
     api: { method: 'POST', path: '/api/control/restart', body: () => ({}) } },
+  { name: 'skill_save', annotations: WR,
+    description: 'skills/<name>.md を保存（{name, content}。完了時カスタム指示・モード別スキルの作成/更新）',
+    inputSchema: { type: 'object', properties: {
+      name: { type: 'string', description: 'ファイル名（*.md のみ・パス走査防止済み）' },
+      content: { type: 'string' } }, required: ['name', 'content'] },
+    api: { method: 'POST', path: '/api/skill' } },
+  { name: 'goal_save', annotations: WR,
+    description: '課題整理タブの目的を登録（{id?, repo, text}。images は大容量のため通常は本文のみ想定）',
+    inputSchema: { type: 'object', properties: {
+      id: { type: 'string', description: '省略で新規採番' },
+      repo: { type: 'string' },
+      text: { type: 'string' } }, required: ['repo', 'text'] },
+    api: { method: 'POST', path: '/api/goals' } },
+  { name: 'goal_delete', annotations: DE,
+    description: '課題整理タブの目的を削除（{id}）',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    api: { method: 'POST', path: '/api/goal/delete' } },
 ];
 
 async function mcpToolCall(tool, args) {
