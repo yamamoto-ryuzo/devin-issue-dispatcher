@@ -93,5 +93,6 @@
       "allow_all": "off"
     }
   },
-  "apiProvider": "openai"
+  "apiProvider": "openai",
+  "autoIssueCreate": true
 }
