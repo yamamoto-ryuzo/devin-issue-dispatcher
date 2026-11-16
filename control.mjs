@@ -1357,6 +1357,22 @@ const MCP_TOOLS = [
     description: 'dispatcher ポーリングループを停止',
     inputSchema: { type: 'object', properties: {} },
     api: { method: 'POST', path: '/api/stop', body: () => ({}) } },
+  { name: 'run_once', annotations: WR,
+    description: 'dispatcher を1サイクルだけ実行（停止中の手動起動確認用）',
+    inputSchema: { type: 'object', properties: {} },
+    api: { method: 'POST', path: '/api/once', body: () => ({}) } },
+  { name: 'config_reload', annotations: WR,
+    description: 'config.json / secrets.json を再読込（ファイル手編集後の反映用）',
+    inputSchema: { type: 'object', properties: {} },
+    api: { method: 'POST', path: '/api/reload', body: () => ({}) } },
+  { name: 'history_clear', annotations: DE,
+    description: '完了済み処理履歴をクリア（実行中タスクは保持される既存挙動）',
+    inputSchema: { type: 'object', properties: {} },
+    api: { method: 'POST', path: '/api/history/clear', body: () => ({}) } },
+  { name: 'control_restart', annotations: DE,
+    description: 'control.mjs 自身を再起動（コード更新反映用）。ツール応答の返却直後に control プロセスが再起動される',
+    inputSchema: { type: 'object', properties: {} },
+    api: { method: 'POST', path: '/api/control/restart', body: () => ({}) } },
 ];
 
 async function mcpToolCall(tool, args) {
