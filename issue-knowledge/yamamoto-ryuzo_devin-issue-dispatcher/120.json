@@ -1,0 +1,53 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/devin-issue-dispatcher",
+    "number": 120,
+    "title": "人間待ちのUI見直し"
+  },
+  "discovery": {
+    "perspective": [
+      "doc_code_diff",
+      "inventory"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "representation_change",
+      "carry_through"
+    ],
+    "verification": {
+      "methods": [
+        "ci_all_paths"
+      ],
+      "unverified": [
+        "Playwright ブラウザバイナリ未インストールのためライブ UI 起動・スクリーンショット未取得。パイプライン終了コードの取り違えで検証失敗にもかかわらず push/close が継続し、コメントが証拠を過大主張"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み",
+    "principles": [
+      {
+        "principle": "route-all-surfaces-through-one-point",
+        "use": "extracted",
+        "note": "renderCandBody 先頭で renderHwBar を呼び全再描画経路を一点に集約"
+      }
+    ]
+  },
+  "classification": {
+    "axes": {
+      "category": "auto",
+      "risk": "low"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-15T22:43:28.856Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-15T22:43:28.856Z",
+      "status": "resolved",
+      "landed_in": null
+    }
+  ]
+}

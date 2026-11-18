@@ -1,0 +1,41 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/devin-issue-dispatcher",
+    "number": 112,
+    "title": "ON/OFFボタンを全体的に横幅を詰めて最小限のサイズにして"
+  },
+  "discovery": {
+    "perspective": [
+      "doc_code_diff",
+      "boundary_walk"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "single_point_fix",
+      "representation_change"
+    ],
+    "verification": {
+      "methods": [
+        "manual_ui"
+      ],
+      "unverified": [
+        "ヘッドレスブラウザが環境起因で全て起動ハング/クラッシュし、実画面のピクセルスクリーンショット未取得（配信CSSのcurl実測で代替確認）"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み",
+    "principles": []
+  },
+  "classification": {
+    "axes": {
+      "area": "panel-ui",
+      "change_type": "css-layout"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T15:19:10.896Z",
+  "history": []
+}

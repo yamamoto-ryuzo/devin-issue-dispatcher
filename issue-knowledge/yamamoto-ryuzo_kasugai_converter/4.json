@@ -1,0 +1,33 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/kasugai_converter",
+    "number": 4,
+    "title": "[検証] CDN ブラウザ WebGIS 全エンジン・全パネル・全タブの表示・機能動作確認（再検証）"
+  },
+  "discovery": {
+    "perspective": []
+  },
+  "resolution": {
+    "perspective": [],
+    "verification": {
+      "methods": [],
+      "unverified": []
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {},
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T15:24:32.335Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-16T15:24:32.335Z",
+      "status": "deferred",
+      "landed_in": null
+    }
+  ]
+}

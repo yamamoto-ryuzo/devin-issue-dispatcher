@@ -1,0 +1,43 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/devin-issue-dispatcher",
+    "number": 105,
+    "title": "[機能追加] 蓄積した課題ナレッジを assess セッションのプロンプトへ差し込む"
+  },
+  "discovery": {
+    "perspective": [
+      "reproduction",
+      "data_inspection"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "carry_through",
+      "order_and_budget"
+    ],
+    "verification": {
+      "methods": [
+        "reproduction_rerun",
+        "guardrail"
+      ],
+      "unverified": [
+        "実 assess セッションでのプロンプト到達（dispatcher 経由の実起動は未実施）"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {
+      "processing": "input_handling",
+      "structure": "responsibility",
+      "connection": "information",
+      "governance": "assignment"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T21:30:58.835Z",
+  "history": []
+}

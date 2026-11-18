@@ -1,0 +1,49 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/ReEarth_GeoSuite",
+    "number": 46,
+    "title": "[不具合] aiChatSend が APIキー未設定時に無応答（bridge timeout）になる"
+  },
+  "discovery": {
+    "perspective": [
+      "reproduction",
+      "trace_walk",
+      "boundary_walk"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "single_point_fix",
+      "fail_closed"
+    ],
+    "verification": {
+      "methods": [
+        "reproduction_rerun",
+        "guardrail"
+      ],
+      "unverified": [
+        "workbench+bridge 実機 E2E（静的経路追跡で代替）"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {
+      "kind": "ai_integration",
+      "area": "ai-chat/bridge",
+      "risk": "low"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T10:02:44.311Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-16T10:02:44.311Z",
+      "status": "resolved",
+      "landed_in": null
+    }
+  ]
+}

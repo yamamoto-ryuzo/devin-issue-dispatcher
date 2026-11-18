@@ -1,0 +1,42 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/kasugai_canvas",
+    "number": 135,
+    "title": "[不具合] cjio による CityJSON → OBJ/glTF/b3dm export が同梱 Python の triangle モジュール不足で失敗する"
+  },
+  "discovery": {
+    "perspective": [
+      "doc_code_diff",
+      "reproduction",
+      "external_constraint"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "required_argument",
+      "explicit_contract"
+    ],
+    "verification": {
+      "methods": [
+        "reproduction_rerun",
+        "manual_ui"
+      ],
+      "unverified": [
+        "glTF/b3dm フォーマット自体の実エクスポート（OBJ のみ実機確認。同じ triangle 依存のため同等と判断）"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {
+      "component": "server/install-script",
+      "fix_size": "1-line"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T15:16:13.980Z",
+  "history": []
+}

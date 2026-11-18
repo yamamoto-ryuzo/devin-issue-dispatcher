@@ -1,0 +1,47 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/kasugai_canvas",
+    "number": 139,
+    "title": "[機能追加] AI 管理ツールへ編集系を追加（skill 保存・goals 登録/削除）"
+  },
+  "discovery": {
+    "perspective": [
+      "doc_code_diff",
+      "reproduction"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "explicit_contract",
+      "carry_through"
+    ],
+    "verification": {
+      "methods": [
+        "manual_ui",
+        "reproduction_rerun"
+      ],
+      "unverified": [
+        "AI チャット経由の実ツール呼出（endpoint E2E と dispatch 経路の静的確認で代替）"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {
+      "repo": "devin-issue-dispatcher",
+      "area": "ai-tools"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T15:38:17.087Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-16T15:38:17.087Z",
+      "status": "deferred",
+      "landed_in": null
+    }
+  ]
+}

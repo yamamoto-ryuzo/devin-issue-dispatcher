@@ -1,0 +1,43 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/kasugai_qgis",
+    "number": 4,
+    "title": "[機能追加] 起動履歴・起動時プロジェクト指定・起動中プロセス一覧"
+  },
+  "discovery": {
+    "perspective": [
+      "data_inspection",
+      "reproduction",
+      "invariant_audit"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "first_class_state",
+      "explicit_contract",
+      "guardrail_fix"
+    ],
+    "verification": {
+      "methods": [
+        "manual_ui",
+        "reproduction_rerun"
+      ],
+      "unverified": [
+        "実際の QGIS 起動による .qgz オープンは実装セッション側の確認に依存（kill は安全性拒否のみ再検証、実プロセス kill は未実施）"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {
+      "category": "feature",
+      "risk": "medium"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T14:26:35.604Z",
+  "history": []
+}

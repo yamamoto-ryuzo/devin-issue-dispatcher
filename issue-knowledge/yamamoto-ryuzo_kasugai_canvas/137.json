@@ -1,0 +1,27 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/kasugai_canvas",
+    "number": 137,
+    "title": "[機能追加] AI 管理ツールへ運用コマンド系を追加（once・reload・control再起動・履歴クリア）"
+  },
+  "discovery": {
+    "perspective": []
+  },
+  "resolution": {
+    "perspective": [],
+    "verification": {
+      "methods": [],
+      "unverified": []
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {},
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T14:39:22.141Z",
+  "history": []
+}

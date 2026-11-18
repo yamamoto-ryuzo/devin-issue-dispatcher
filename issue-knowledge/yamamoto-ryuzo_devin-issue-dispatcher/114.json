@@ -1,0 +1,50 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/devin-issue-dispatcher",
+    "number": 114,
+    "title": "[不具合] /api/convert/bimcim の ifcconvert が PowerShell 起動スクリプトの exe 名解決で常に失敗する"
+  },
+  "discovery": {
+    "perspective": [
+      "reproduction",
+      "trace_walk"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "single_point_fix",
+      "representation_change"
+    ],
+    "verification": {
+      "methods": [
+        "reproduction_rerun",
+        "manual_ui"
+      ],
+      "unverified": [
+        "IfcConvert の GLB 等 OBJ 以外の出力形式は未検証",
+        "release ビルドでの実動作（検証は debug バイナリで実施）"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み",
+    "principles": []
+  },
+  "classification": {
+    "axes": {
+      "component": "server/api/convert",
+      "language": "rust",
+      "root_cause": "process_spawn"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-15T22:48:47.047Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-15T22:48:47.047Z",
+      "status": "resolved",
+      "landed_in": null
+    }
+  ]
+}

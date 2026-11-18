@@ -1,0 +1,46 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/ReEarth_GeoSuite",
+    "number": 47,
+    "title": "[不具合] workbench/bridge.js serve モードが起動直後にクラッシュする (Node 24/Windows)"
+  },
+  "discovery": {
+    "perspective": [
+      "reproduction",
+      "external_constraint"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "single_point_fix"
+    ],
+    "verification": {
+      "methods": [
+        "reproduction_rerun"
+      ],
+      "unverified": [
+        "実コンソール stdin 上での JSONL 入力往復（SendKeys 注入失敗。クラッシュは入力非依存のため生存確認＋パイプ往復で代替）"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {
+      "area": "workbench-tooling",
+      "env": "windows-node24",
+      "kind": "crash-fix"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T10:18:45.902Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-16T10:18:45.902Z",
+      "status": "resolved",
+      "landed_in": null
+    }
+  ]
+}

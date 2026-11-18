@@ -1,0 +1,45 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/ReEarth_GeoSuite",
+    "number": 48,
+    "title": "属性・値一覧エクスポート: 1ソースのURL取得失敗で全エクスポートが \"Failed to fetch\" になる（computed.features へのフォールバックなし）"
+  },
+  "discovery": {
+    "perspective": [
+      "reproduction",
+      "trace_walk"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "canonical_source",
+      "explicit_contract"
+    ],
+    "verification": {
+      "methods": [
+        "reproduction_rerun",
+        "guardrail"
+      ],
+      "unverified": []
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {
+      "category": "bugfix",
+      "risk": "low"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T11:20:39.393Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-16T11:20:39.393Z",
+      "status": "resolved",
+      "landed_in": null
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/devin-issue-dispatcher",
+    "number": 113,
+    "title": "ISSUE登録自動の動作確認"
+  },
+  "discovery": {
+    "perspective": [
+      "symptom_report",
+      "doc_code_diff",
+      "reproduction"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "explicit_contract",
+      "first_class_state",
+      "guardrail_fix"
+    ],
+    "verification": {
+      "methods": [
+        "manual_ui",
+        "reproduction_rerun"
+      ],
+      "unverified": []
+    },
+    "landed_in": "既定ブランチへ push 済み",
+    "principles": []
+  },
+  "classification": {
+    "axes": {
+      "cause_layer": "code_drift",
+      "component": "control.mjs+panel.html",
+      "verify_mode": "live_api_e2e"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T15:56:57.000Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-16T15:56:57.000Z",
+      "status": "deferred",
+      "landed_in": null
+    }
+  ]
+}

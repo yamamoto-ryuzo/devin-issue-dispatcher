@@ -1,0 +1,33 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/ReEarth_GeoSuite",
+    "number": 41,
+    "title": "[機能追加] 方位角計測モード（2点 → 方位角・逆方位角・距離）"
+  },
+  "discovery": {
+    "perspective": []
+  },
+  "resolution": {
+    "perspective": [],
+    "verification": {
+      "methods": [],
+      "unverified": []
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {},
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T14:32:31.636Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-16T14:32:31.636Z",
+      "status": "deferred",
+      "landed_in": null
+    }
+  ]
+}

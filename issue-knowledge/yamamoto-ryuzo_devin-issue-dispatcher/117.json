@@ -1,0 +1,48 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/devin-issue-dispatcher",
+    "number": 117,
+    "title": "issue は誤起票対策"
+  },
+  "discovery": {
+    "perspective": [
+      "doc_code_diff",
+      "data_inspection"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "explicit_contract",
+      "fail_closed"
+    ],
+    "verification": {
+      "methods": [
+        "manual_ui",
+        "reproduction_rerun"
+      ],
+      "unverified": [
+        "Playwright 非搭載のため UI 目視スクリーンショット未取得（ボタン描画条件はコード確認のみ）",
+        "稼働中 control プロセスは旧版のため本番経路での delete は未実行（再起動後に有効化）"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {
+      "type": "feature",
+      "area": "panel-api"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T09:15:54.918Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-16T09:15:54.918Z",
+      "status": "resolved",
+      "landed_in": null
+    }
+  ]
+}

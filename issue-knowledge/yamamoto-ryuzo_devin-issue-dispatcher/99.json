@@ -1,0 +1,27 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/devin-issue-dispatcher",
+    "number": 99,
+    "title": "[不具合] dispatcher の多重起動ガードがない"
+  },
+  "discovery": {
+    "perspective": []
+  },
+  "resolution": {
+    "perspective": [],
+    "verification": {
+      "methods": [],
+      "unverified": []
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {},
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T15:29:46.942Z",
+  "history": []
+}

@@ -1,0 +1,53 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/devin-issue-dispatcher",
+    "number": 116,
+    "title": "[改善] 変換ジョブのログが非UTF-8出力で消失し失敗原因を診断できない"
+  },
+  "discovery": {
+    "perspective": [
+      "symptom_report",
+      "doc_code_diff"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "representation_change",
+      "fail_closed"
+    ],
+    "verification": {
+      "methods": [
+        "reproduction_rerun",
+        "guardrail"
+      ],
+      "unverified": []
+    },
+    "landed_in": "既定ブランチへ push 済み",
+    "principles": [
+      {
+        "principle": "verify-then-publish-or-revert",
+        "use": "consulted",
+        "note": "_pr フローに従い検証後に push"
+      }
+    ]
+  },
+  "classification": {
+    "axes": {
+      "layer": "backend",
+      "component": "process-output-decoding",
+      "risk": "low"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-15T22:46:16.073Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-15T22:46:16.073Z",
+      "status": "resolved",
+      "landed_in": null
+    }
+  ]
+}

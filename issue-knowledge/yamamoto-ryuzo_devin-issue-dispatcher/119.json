@@ -1,0 +1,48 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/devin-issue-dispatcher",
+    "number": 119,
+    "title": "人間待ちUIの見直し"
+  },
+  "discovery": {
+    "perspective": [
+      "doc_code_diff",
+      "boundary_walk"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "guardrail_fix",
+      "first_class_state"
+    ],
+    "verification": {
+      "methods": [
+        "manual_ui",
+        "ci_all_paths",
+        "reproduction_rerun"
+      ],
+      "unverified": [
+        "ブラウザ実機でのチャット欄→/api/steer 送信 E2E（本セッションはコード追跡＋論理再現で確認）"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {
+      "area": "panel-ui",
+      "kind": "feature"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T15:38:21.995Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-16T15:38:21.995Z",
+      "status": "deferred",
+      "landed_in": null
+    }
+  ]
+}

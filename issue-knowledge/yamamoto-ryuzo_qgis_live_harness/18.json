@@ -1,0 +1,49 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/qgis_live_harness",
+    "number": 18,
+    "title": "[機能追加][geo_import] カタログ一覧の死活表示と検索前の軽量疎通チェック"
+  },
+  "discovery": {
+    "perspective": [
+      "inventory",
+      "doc_code_diff"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "first_class_state",
+      "carry_through",
+      "explicit_contract"
+    ],
+    "verification": {
+      "methods": [
+        "guardrail",
+        "reproduction_rerun"
+      ],
+      "unverified": [
+        "実QGIS上での一覧UI描画・スクリーンショット（ライブQGIS未起動のため静的検証で代替）"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み",
+    "principles": []
+  },
+  "classification": {
+    "axes": {
+      "component": "geo_import",
+      "change_type": "feature"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-16T15:14:34.232Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-16T15:14:34.232Z",
+      "status": "deferred",
+      "landed_in": null
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/qgis_live_harness",
+    "number": 22,
+    "title": "geo_webview: pluginInfo の cms* 5メソッドが verify/features.json（および capability.json）未収録"
+  },
+  "discovery": {
+    "perspective": []
+  },
+  "resolution": {
+    "perspective": [],
+    "verification": {
+      "methods": [],
+      "unverified": []
+    },
+    "landed_in": "既定ブランチへ push 済み"
+  },
+  "classification": {
+    "axes": {},
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-17T17:20:44.181Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-17T17:20:44.181Z",
+      "status": "resolved",
+      "landed_in": null
+    }
+  ]
+}

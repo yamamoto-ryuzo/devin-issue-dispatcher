@@ -1,0 +1,38 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/devin-issue-dispatcher",
+    "number": 115,
+    "title": "[不具合] cjio による CityJSON → OBJ/glTF/b3dm export が同梱 Python の triangle モジュール不足で失敗する"
+  },
+  "discovery": {
+    "perspective": [
+      "symptom_report",
+      "reproduction"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "single_point_fix"
+    ],
+    "verification": {
+      "methods": [
+        "reproduction_rerun"
+      ],
+      "unverified": [
+        "POST /api/convert/bimcim 経由の E2E は未実施（同梱 cjio CLI で obj/glb/b3dm を直接確認）"
+      ]
+    }
+  },
+  "classification": {
+    "axes": {
+      "component": "installer",
+      "size": "one_line"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "deferred",
+  "recorded_at": "2026-11-16T15:47:44.317Z",
+  "history": []
+}

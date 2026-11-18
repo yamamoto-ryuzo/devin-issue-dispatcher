@@ -1,0 +1,55 @@
+{
+  "issue": {
+    "repo": "yamamoto-ryuzo/devin-issue-dispatcher",
+    "number": 118,
+    "title": "動作エラー"
+  },
+  "discovery": {
+    "perspective": [
+      "symptom_report",
+      "trace_walk",
+      "invariant_audit"
+    ]
+  },
+  "resolution": {
+    "perspective": [
+      "state_transition",
+      "guardrail_fix"
+    ],
+    "verification": {
+      "methods": [
+        "ci_all_paths",
+        "guardrail"
+      ],
+      "unverified": [
+        "実ボードでの再発シナリオ（verdict再利用→reject終端）の実稼働再現は未実施。コード経路の網羅監査で代替"
+      ]
+    },
+    "landed_in": "既定ブランチへ push 済み",
+    "principles": [
+      {
+        "principle": "route-all-surfaces-through-one-point",
+        "use": "consulted",
+        "note": "全終端パスで phase 解除を一点の不変条件として網羅"
+      }
+    ]
+  },
+  "classification": {
+    "axes": {
+      "layer": "dispatcher-state",
+      "symptom": "stale phase -> wrong board column"
+    },
+    "review": "candidate",
+    "reviewed_by": null,
+    "reviewed_at": null
+  },
+  "status": "resolved",
+  "recorded_at": "2026-11-15T22:24:11.482Z",
+  "history": [
+    {
+      "replaced_at": "2026-11-15T22:24:11.482Z",
+      "status": "resolved",
+      "landed_in": null
+    }
+  ]
+}
